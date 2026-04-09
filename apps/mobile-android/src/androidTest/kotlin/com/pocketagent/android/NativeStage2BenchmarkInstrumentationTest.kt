@@ -746,12 +746,9 @@ class NativeStage2BenchmarkInstrumentationTest {
     private fun argumentKeyForModel(modelId: String): String {
         return when (modelId) {
             ModelCatalog.QWEN_3_5_0_8B_Q4 -> ARG_MODEL_PATH_0_8B
-            ModelCatalog.QWEN_3_5_2B_Q4 -> ARG_MODEL_PATH_2B
-            ModelCatalog.SMOLLM3_3B_Q4_K_M -> ARG_MODEL_PATH_SMOLLM3_Q4
-            ModelCatalog.BONSAI_1_7B_Q1_0_G128,
-            ModelCatalog.BONSAI_4B_Q1_0_G128,
-            ModelCatalog.BONSAI_8B_Q1_0_G128
-            -> ARG_MODEL_PATH_BONSAI
+            ModelCatalog.QWEN3_1_7B_Q4_K_M -> ARG_MODEL_PATH_1_7B
+            ModelCatalog.QWEN3_0_6B_Q4_K_M -> ARG_MODEL_PATH_0_8B
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M -> ARG_MODEL_PATH_1_7B
             else -> ARG_MODEL_PATH_0_8B
         }
     }
@@ -822,7 +819,7 @@ class NativeStage2BenchmarkInstrumentationTest {
         private const val ARG_DISABLE_TOOLS = "stage2_disable_tools"
         private const val ARG_SHOW_THINKING = "stage2_show_thinking"
         private const val ARG_MODEL_PATH_0_8B = "stage2_model_0_8b_path"
-        private const val ARG_MODEL_PATH_2B = "stage2_model_2b_path"
+        private const val ARG_MODEL_PATH_1_7B = "stage2_model_1_7b_path"
         private const val ARG_MODEL_PATH_SMOLLM3_Q4 = "stage2_model_smol_360m_path"
         private const val ARG_MODEL_PATH_BONSAI = "stage2_model_bonsai_path"
         private const val ARG_MODEL_PATH_SMOLLM3_DRAFT = "stage2_model_smol_135m_path"

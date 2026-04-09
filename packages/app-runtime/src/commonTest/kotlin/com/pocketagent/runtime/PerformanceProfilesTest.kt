@@ -109,14 +109,14 @@ class PerformanceProfilesTest {
     }
 
     @Test
-    fun `fast profile uses smollm3 iq2_xxs as speculative draft model`() {
+    fun `fast profile uses qwen3 0_6b as speculative draft model`() {
         val fast = PerformanceRuntimeConfig.forProfile(
             profile = RuntimePerformanceProfile.FAST,
             availableCpuThreads = 8,
             gpuEnabled = true,
         )
 
-        assertEquals(ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS, fast.speculativeDraftModelId)
+        assertEquals(ModelCatalog.QWEN3_0_6B_Q4_K_M, fast.speculativeDraftModelId)
         assertEquals(true, fast.speculativeEnabled)
     }
 

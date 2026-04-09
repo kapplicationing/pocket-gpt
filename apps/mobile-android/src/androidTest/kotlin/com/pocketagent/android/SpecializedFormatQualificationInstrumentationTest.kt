@@ -33,8 +33,8 @@ class SpecializedFormatQualificationInstrumentationTest {
         )
 
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        val modelId = (args.getString(ARG_MODEL_ID) ?: ModelCatalog.BONSAI_8B_Q1_0_G128).trim()
-        val modelVersion = (args.getString(ARG_MODEL_VERSION) ?: "q1_0_g128").trim()
+        val modelId = (args.getString(ARG_MODEL_ID) ?: ModelCatalog.LLAMA_3_2_1B_Q4_K_M).trim()
+        val modelVersion = (args.getString(ARG_MODEL_VERSION) ?: "q4_k_m").trim()
         val expectIncompatible = parseBooleanArg(args, ARG_EXPECT_INCOMPATIBLE, defaultValue = false)
         val modelPath = args.getString(ARG_MODEL_PATH)
             ?.trim()

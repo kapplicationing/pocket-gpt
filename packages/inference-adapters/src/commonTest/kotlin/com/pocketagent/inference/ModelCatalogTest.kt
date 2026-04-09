@@ -12,11 +12,11 @@ class ModelCatalogTest {
     @Test
     fun `default get ready model follows runtime profile`() {
         assertEquals(
-            ModelCatalog.QWEN_3_5_0_8B_Q4,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M,
             ModelCatalog.defaultGetReadyModelId(ModelRuntimeProfile.PROD),
         )
         assertEquals(
-            ModelCatalog.QWEN_3_5_0_8B_Q4,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M,
             ModelCatalog.defaultGetReadyModelId(ModelRuntimeProfile.DEV_FAST),
         )
     }
@@ -34,25 +34,25 @@ class ModelCatalogTest {
 
     @Test
     fun `bridge load validation enforces model and gguf path rules`() {
-        val supportedModels = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4)
+        val supportedModels = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M)
 
         val unsupported = ModelCatalog.validateBridgeLoad(
-            modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+            modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
             modelPath = "/tmp/model.gguf",
             supportedModels = supportedModels,
         )
         val missingPath = ModelCatalog.validateBridgeLoad(
-            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             modelPath = "",
             supportedModels = supportedModels,
         )
         val invalidPath = ModelCatalog.validateBridgeLoad(
-            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             modelPath = "/tmp/model.bin",
             supportedModels = supportedModels,
         )
         val valid = ModelCatalog.validateBridgeLoad(
-            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             modelPath = "/tmp/model.gguf",
             supportedModels = supportedModels,
         )
@@ -97,26 +97,21 @@ class ModelCatalogTest {
     }
 
     @Test
-    fun `draft model is not a startup candidate or auto-routing candidate`() {
-        val descriptor = ModelCatalog.descriptorFor(ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS)!!
+    fun `explicit alternative model stays out of startup and auto routing`() {
+        val descriptor = ModelCatalog.descriptorFor(ModelCatalog.LLAMA_3_2_1B_Q4_K_M)!!
         assertEquals(false, descriptor.startupCandidate)
         assertEquals(false, descriptor.autoRoutingEnabled)
-        assertEquals(ModelTier.DEBUG, descriptor.tier)
+        assertEquals(ModelTier.BASELINE, descriptor.tier)
     }
 
     @Test
-    fun `bonsai expansion tiers stay bridge-supported but opt in only`() {
-        listOf(
-            ModelCatalog.BONSAI_1_7B_Q1_0_G128 to 4,
-            ModelCatalog.BONSAI_4B_Q1_0_G128 to 6,
-        ).forEach { (modelId, minRamGb) ->
-            val descriptor = ModelCatalog.descriptorFor(modelId)!!
-            assertTrue(descriptor.bridgeSupported, "$modelId should stay runtime-enabled")
-            assertEquals(false, descriptor.autoRoutingEnabled, "$modelId should stay out of auto-routing")
-            assertEquals(false, descriptor.startupCandidate, "$modelId should stay opt-in")
-            assertEquals(minRamGb, descriptor.minRamGb, "$modelId should keep the expected RAM floor")
-            assertTrue(ModelCatalog.routingModesForModel(modelId).isEmpty(), "$modelId should not require a routing enum")
-        }
+    fun `vision lane remains auto routable and explicit text alternative keeps routing enum`() {
+        val vision = ModelCatalog.descriptorFor(ModelCatalog.QWEN_3_5_0_8B_Q4)!!
+        val llama = ModelCatalog.descriptorFor(ModelCatalog.LLAMA_3_2_1B_Q4_K_M)!!
+        assertTrue(vision.autoRoutingEnabled)
+        assertTrue(ModelCatalog.routingModesForModel(vision.modelId).contains(RoutingMode.QWEN_0_8B))
+        assertEquals(false, llama.autoRoutingEnabled)
+        assertTrue(ModelCatalog.routingModesForModel(llama.modelId).contains(RoutingMode.LLAMA_3_2_1B))
     }
 
     @Test
@@ -134,37 +129,37 @@ class ModelCatalogTest {
     fun `speculative draft compatibility is descriptor family driven`() {
         assertTrue(
             ModelCatalog.isSpeculativeDraftCompatible(
-                targetModelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
-                draftModelId = ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS,
+                targetModelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
+                draftModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             ),
         )
         assertTrue(
             ModelCatalog.isSpeculativeDraftCompatible(
-                targetModelId = ModelCatalog.QWEN_3_5_2B_Q4,
-                draftModelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+                targetModelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+                draftModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             ),
         )
         assertFalse(
             ModelCatalog.isSpeculativeDraftCompatible(
-                targetModelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-                draftModelId = ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS,
+                targetModelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
+                draftModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             ),
         )
         assertFalse(
             ModelCatalog.isSpeculativeDraftCompatible(
                 targetModelId = "missing-target",
-                draftModelId = ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS,
+                draftModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             ),
         )
     }
 
     @Test
     fun `normalized specs expose prompt profile and artifact bundle metadata`() {
-        val gemma = ModelCatalog.normalizedSpecFor(ModelCatalog.GEMMA_4_E2B_Q4_K_M)
+        val llama = ModelCatalog.normalizedSpecFor(ModelCatalog.LLAMA_3_2_1B_Q4_K_M)
         val qwenVision = ModelCatalog.normalizedSpecFor(ModelCatalog.QWEN_3_5_0_8B_Q4)
 
-        assertEquals("gemma4-e2b", gemma?.promptProfile?.profileId)
-        assertEquals("model", gemma?.promptProfile?.assistantRoleName)
+        assertEquals("llama3-default", llama?.promptProfile?.profileId)
+        assertEquals("assistant", llama?.promptProfile?.assistantRoleName)
         assertTrue(
             qwenVision?.variants?.firstOrNull()
                 ?.artifactBundle

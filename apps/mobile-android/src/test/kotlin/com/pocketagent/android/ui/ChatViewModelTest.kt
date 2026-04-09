@@ -1002,7 +1002,7 @@ class ChatViewModelTest {
     @Test
     fun `optional model warning maps to ready state with warning and no startup error`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(
-            startupChecks = listOf("Optional runtime model unavailable: qwen3.5-2b-q4."),
+            startupChecks = listOf("Optional runtime model unavailable: qwen3-1.7b-q4_k_m."),
         )
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
@@ -1022,7 +1022,7 @@ class ChatViewModelTest {
     @Test
     fun `send path stays enabled when startup checks only report optional model warning`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(
-            startupChecks = listOf("Optional runtime model unavailable: qwen3.5-2b-q4."),
+            startupChecks = listOf("Optional runtime model unavailable: qwen3-1.7b-q4_k_m."),
         )
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
@@ -1095,11 +1095,11 @@ class ChatViewModelTest {
         )
         advanceUntilIdle()
 
-        viewModel.setRoutingMode(RoutingMode.QWEN_2B)
+        viewModel.setRoutingMode(RoutingMode.QWEN3_1_7B)
         viewModel.exportDiagnostics()
         advanceUntilIdle()
 
-        assertEquals(RoutingMode.QWEN_2B, viewModel.uiState.value.runtime.routingMode)
+        assertEquals(RoutingMode.QWEN3_1_7B, viewModel.uiState.value.runtime.routingMode)
         assertTrue(viewModel.uiState.value.activeSession!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("diag=ok") })
     }
 

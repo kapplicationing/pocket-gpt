@@ -42,7 +42,7 @@ class StartupReadinessCoordinatorTest {
     @Test
     fun `optional model warnings resolve ready state with warnings`() {
         val decision = coordinator.decide(
-            startupChecks = listOf("Optional runtime model unavailable: qwen3.5-2b-q4."),
+            startupChecks = listOf("Optional runtime model unavailable: qwen3-1.7b-q4_k_m."),
             runtimeBackend = null,
             statusDetailOverride = null,
         )
@@ -59,9 +59,9 @@ class StartupReadinessCoordinatorTest {
         val decision = coordinator.decide(
             startupChecks = listOf(
                 "Optional runtime model unavailable: qwen3.5-0.8b-q4. Artifact verification failed for qwen3.5-0.8b-q4: MODEL_ARTIFACT_VERIFICATION_ERROR:MISSING_PAYLOAD:model=qwen3.5-0.8b-q4;version=1;expected_sha=abc;actual_sha=none",
-                "Optional runtime model unavailable: qwen3.5-2b-q4. Artifact verification failed for qwen3.5-2b-q4: MODEL_ARTIFACT_VERIFICATION_ERROR:MISSING_PAYLOAD:model=qwen3.5-2b-q4;version=1;expected_sha=def;actual_sha=none",
-                "Optional runtime model unavailable: smollm3-3b-q4_k_m. MODEL_ARTIFACT_CONFIG_MISSING:model=smollm3-3b-q4_k_m;field=payload_or_path,sha256",
-                "Optional runtime model unavailable: phi-4-mini-instruct-q4_k_m. MODEL_ARTIFACT_CONFIG_MISSING:model=phi-4-mini-instruct-q4_k_m;field=payload_or_path,sha256",
+                "Optional runtime model unavailable: qwen3-1.7b-q4_k_m. Artifact verification failed for qwen3-1.7b-q4_k_m: MODEL_ARTIFACT_VERIFICATION_ERROR:MISSING_PAYLOAD:model=qwen3-1.7b-q4_k_m;version=1;expected_sha=def;actual_sha=none",
+                "Optional runtime model unavailable: qwen3-0.6b-q4_k_m. MODEL_ARTIFACT_CONFIG_MISSING:model=qwen3-0.6b-q4_k_m;field=payload_or_path,sha256",
+                "Optional runtime model unavailable: llama-3.2-1b-instruct-q4_k_m. MODEL_ARTIFACT_CONFIG_MISSING:model=llama-3.2-1b-instruct-q4_k_m;field=payload_or_path,sha256",
             ),
             runtimeBackend = null,
             statusDetailOverride = null,

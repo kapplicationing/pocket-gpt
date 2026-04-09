@@ -43,7 +43,7 @@ class RuntimeBackendTruthInstrumentationTest {
         val specializedModelId = args.getString(ARG_SPECIALIZED_MODEL_ID)
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?: ModelCatalog.BONSAI_1_7B_Q1_0_G128
+            ?: ModelCatalog.LLAMA_3_2_1B_Q4_K_M
         val standardModelPath = args.getString(ARG_STANDARD_MODEL_PATH)
             ?.let(::resolveModelPath)
         val specializedModelPath = args.getString(ARG_SPECIALIZED_MODEL_PATH)

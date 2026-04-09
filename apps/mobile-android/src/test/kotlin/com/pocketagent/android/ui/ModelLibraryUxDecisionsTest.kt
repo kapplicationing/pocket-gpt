@@ -31,9 +31,9 @@ class ModelLibraryUxDecisionsTest {
     @Test
     fun `active non default version shows active badge instead of default`() {
         val model = provisionedModel(
-            modelId = "phi-4-mini-instruct-q4_k_m",
+            modelId = "qwen3-1.7b-q4_k_m",
             activeVersion = "q4_k_m",
-            installedVersions = listOf(versionDescriptor(modelId = "phi-4-mini-instruct-q4_k_m", version = "q4_k_m", isActive = true)),
+            installedVersions = listOf(versionDescriptor(modelId = "qwen3-1.7b-q4_k_m", version = "q4_k_m", isActive = true)),
         )
 
         val badge = resolveDownloadedModelBadge(
@@ -225,7 +225,7 @@ class ModelLibraryUxDecisionsTest {
         )
         val version = model.installedVersions.first()
         val activeModel = RuntimeLoadedModel(modelId = "qwen3.5-0.8b-q4", modelVersion = "q4_0")
-        val loadedModel = RuntimeLoadedModel(modelId = "phi-4-mini-instruct-q4_k_m", modelVersion = "q4_k_m")
+        val loadedModel = RuntimeLoadedModel(modelId = "qwen3-1.7b-q4_k_m", modelVersion = "q4_k_m")
 
         val badge = resolveDownloadedModelBadge(
             model = model,
@@ -255,14 +255,14 @@ class ModelLibraryUxDecisionsTest {
         val loadedBadge = resolveDownloadedModelBadge(
             model = model,
             version = q4km,
-            defaultGetReadyModelId = "phi-4-mini-instruct-q4_k_m",
+            defaultGetReadyModelId = "qwen3-1.7b-q4_k_m",
             activeModel = null,
             loadedModel = loadedModel,
         )
         val activeBadge = resolveDownloadedModelBadge(
             model = model,
             version = q40,
-            defaultGetReadyModelId = "phi-4-mini-instruct-q4_k_m",
+            defaultGetReadyModelId = "qwen3-1.7b-q4_k_m",
             activeModel = null,
             loadedModel = loadedModel,
         )

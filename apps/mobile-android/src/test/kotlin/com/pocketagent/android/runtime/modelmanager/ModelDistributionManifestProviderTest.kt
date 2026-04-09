@@ -41,9 +41,9 @@ class ModelDistributionManifestProviderTest {
 
         assertEquals(ManifestSource.BUNDLED_AND_REMOTE, manifest.source)
         val model0 = manifest.models.first { it.modelId == "qwen3.5-0.8b-q4" }
-        val model2 = manifest.models.first { it.modelId == "qwen3.5-2b-q4" }
+        val model2 = manifest.models.first { it.modelId == "qwen3-1.7b-q4_k_m" }
         assertTrue(model0.versions.any { it.version == "q4_1" })
-        assertTrue(model2.versions.any { it.version == "q4_0" })
+        assertTrue(model2.versions.any { it.version == "q4_k_m" })
         assertEquals(null, manifest.lastError)
     }
 
@@ -284,7 +284,7 @@ private fun bundledManifestJson(): String {
               "displayName": "Qwen 3.5 0.8B (Q4)",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "downloadUrl": "https://example.test/qwen-0.8b-q4_0.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "provenanceIssuer": "internal",
@@ -295,12 +295,12 @@ private fun bundledManifestJson(): String {
               ]
             },
             {
-              "modelId": "qwen3.5-2b-q4",
-              "displayName": "Qwen 3.5 2B (Q4)",
+              "modelId": "qwen3-1.7b-q4_k_m",
+              "displayName": "Qwen3 1.7B Instruct (Q4_K_M)",
               "versions": [
                 {
-                  "version": "q4_0",
-                  "downloadUrl": "https://example.test/qwen-2b-q4_0.gguf",
+                  "version": "q4_k_m",
+                  "downloadUrl": "https://example.test/qwen3-1.7b-q4_k_m.gguf",
                   "expectedSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                   "provenanceIssuer": "internal",
                   "provenanceSignature": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -370,8 +370,8 @@ private fun manifestWithInvalidEntriesJson(): String {
               ]
             },
             {
-              "modelId": "qwen3.5-2b-q4",
-              "displayName": "Qwen 3.5 2B (Q4)",
+              "modelId": "qwen3-1.7b-q4_k_m",
+              "displayName": "Qwen3 1.7B Instruct (Q4_K_M)",
               "versions": [
                 {
                   "version": "q4_missing_size",
@@ -395,7 +395,7 @@ private fun manifestWithoutProvenanceJson(): String {
               "displayName": "Qwen 3.5 0.8B (Q4)",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "downloadUrl": "https://example.test/qwen-0.8b-q4_0.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "runtimeCompatibility": "android-arm64-v8a",
@@ -417,7 +417,7 @@ private fun manifestWithDuplicateEntriesJson(): String {
               "displayName": "Qwen 3.5 0.8B (Q4)",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "downloadUrl": "https://example.test/dup-a.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "runtimeCompatibility": "android-arm64-v8a",
@@ -430,7 +430,7 @@ private fun manifestWithDuplicateEntriesJson(): String {
               "displayName": "Qwen 3.5 0.8B Duplicate Name",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "downloadUrl": "https://example.test/dup-b.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "runtimeCompatibility": "android-arm64-v8a",
@@ -452,7 +452,7 @@ private fun manifestWithStrictVerificationPolicyJson(): String {
               "displayName": "Qwen 3.5 0.8B (Q4)",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "downloadUrl": "https://example.test/strict.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "provenanceIssuer": "internal",
@@ -477,7 +477,7 @@ private fun manifestWithInvalidVerificationPolicyJson(): String {
               "displayName": "Qwen 3.5 0.8B (Q4)",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "downloadUrl": "https://example.test/invalid-policy.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "provenanceIssuer": "internal",
@@ -582,7 +582,7 @@ private fun manifestWithArtifactBundleJson(): String {
               "displayName": "Qwen 3.5 0.8B (Q4)",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "sourceKind": "HUGGING_FACE",
                   "promptProfileId": "hf-chatml",
                   "artifacts": [
@@ -623,7 +623,7 @@ private fun manifestWithInvalidOptionalArtifactJson(): String {
               "displayName": "Bundle Optional Test",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "sourceKind": "HUGGING_FACE",
                   "downloadUrl": "https://example.test/bundle-no-primary-fallback.gguf",
                   "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -667,7 +667,7 @@ private fun manifestWithoutPrimaryArtifactJson(): String {
               "displayName": "Bundle No Primary Test",
               "versions": [
                 {
-                  "version": "q4_0",
+                  "version": "q4_k_m",
                   "sourceKind": "HUGGING_FACE",
                   "artifacts": [
                     {

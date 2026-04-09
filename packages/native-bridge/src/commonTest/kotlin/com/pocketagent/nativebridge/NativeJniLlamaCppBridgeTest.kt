@@ -185,7 +185,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertFalse(
             bridge.loadModel(
-                ModelCatalog.BONSAI_8B_Q1_0_G128,
+                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
                 "/tmp/bonsai-8b-q1_0_g128.gguf",
                 options = ModelLoadOptions(modelVersion = "q1_0_g128"),
             ),
@@ -224,7 +224,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(
             bridge.loadModel(
-                ModelCatalog.BONSAI_8B_Q1_0_G128,
+                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
                 "/tmp/bonsai-8b-q1_0_g128.gguf",
                 options = ModelLoadOptions(modelVersion = "q1_0_g128"),
             ),
@@ -261,7 +261,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertFalse(
             bridge.loadModel(
-                ModelCatalog.BONSAI_8B_Q1_0_G128,
+                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
                 "/tmp/bonsai-8b-q1_0_g128.gguf",
                 options = ModelLoadOptions(modelVersion = "q1_0_g128"),
             ),
@@ -673,7 +673,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(
             bridge.loadModel(
-                modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 modelPath = "/tmp/model.gguf",
             ),
         )
@@ -713,7 +713,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(
             bridge.loadModel(
-                modelId = ModelCatalog.BONSAI_8B_Q1_0_G128,
+                modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
                 modelPath = "/tmp/Bonsai-8B.gguf",
                 options = ModelLoadOptions(modelVersion = "q1_0_g128"),
             ),
@@ -748,7 +748,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertFalse(
             bridge.loadModel(
-                modelId = ModelCatalog.BONSAI_8B_Q1_0_G128,
+                modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
                 modelPath = "/tmp/Bonsai-8B.gguf",
                 options = ModelLoadOptions(modelVersion = "q1_0_g128"),
             ),
@@ -898,7 +898,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(
             bridge.loadModel(
-                modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 modelPath = "/tmp/model.gguf",
                 options = ModelLoadOptions(modelVersion = "q4_0"),
             ),
@@ -974,7 +974,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(
             bridge.loadModel(
-                modelId = ModelCatalog.BONSAI_8B_Q1_0_G128,
+                modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
                 modelPath = "/tmp/bonsai-8b.gguf",
                 options = ModelLoadOptions(modelVersion = "q1_0_g128"),
             ),
@@ -1010,7 +1010,7 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(
             bridge.loadModel(
-                modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 modelPath = "/tmp/model.gguf",
             ),
         )
@@ -1475,7 +1475,7 @@ private class FakeFallbackBridge(
 
     override fun listAvailableModels(): List<String> = listOf(
         ModelCatalog.QWEN_3_5_0_8B_Q4,
-        ModelCatalog.QWEN_3_5_2B_Q4,
+        ModelCatalog.QWEN3_1_7B_Q4_K_M,
     )
 
     override fun loadModel(modelId: String, modelPath: String?): Boolean {

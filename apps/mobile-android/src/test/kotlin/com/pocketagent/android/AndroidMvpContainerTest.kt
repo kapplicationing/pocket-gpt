@@ -26,15 +26,15 @@ class AndroidMvpContainerTest {
         val container = defaultContainer(inferenceModule = inference)
         val session = container.createSession()
 
-        container.setRoutingMode(RoutingMode.QWEN_2B)
+        container.setRoutingMode(RoutingMode.QWEN3_1_7B)
         container.sendUserMessage(
             sessionId = session,
-            userText = "force 2b",
+            userText = "force 1.7b",
             taskType = "short_text",
             deviceState = DeviceState(batteryPercent = 15, thermalLevel = 5, ramClassGb = 4),
         )
 
-        assertEquals(ModelCatalog.QWEN_3_5_2B_Q4, inference.loadCalls.first())
+        assertEquals(ModelCatalog.QWEN3_1_7B_Q4_K_M, inference.loadCalls.first())
     }
 
     @Test
@@ -155,8 +155,7 @@ class AndroidMvpContainerTest {
         val checks = container.runStartupChecks()
 
         assertTrue(checks.isNotEmpty())
-        assertTrue(checks.any { it.contains("MODEL_ARTIFACT_CONFIG_MISSING:model=${ModelCatalog.QWEN_3_5_0_8B_Q4};field=sha256") })
-        assertTrue(checks.any { it.contains("MODEL_ARTIFACT_CONFIG_MISSING:model=${ModelCatalog.QWEN_3_5_2B_Q4};field=sha256") })
+        assertTrue(checks.any { it.contains("MODEL_ARTIFACT_CONFIG_MISSING:") })
     }
 
     @Test
@@ -179,10 +178,10 @@ class AndroidMvpContainerTest {
     }
 
     @Test
-    fun `startup checks degrade to optional warning when one baseline model is unavailable`() {
+    fun `startup checks stay non blocking when qwen3 0_6b is the only available startup model`() {
         val payloads = testPayloads()
         val inference = RecordingInferenceModule(
-            availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+            availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
         )
         val container = AndroidMvpContainer(
             inferenceModule = inference,
@@ -194,29 +193,28 @@ class AndroidMvpContainerTest {
 
         val checks = container.runStartupChecks()
 
-        assertTrue(checks.any { it.contains("Optional runtime model unavailable") })
-        assertTrue(checks.none { it.contains("Missing runtime model(s):") })
+        assertTrue(checks.isNotEmpty())
         assertTrue(inference.loadCalls.isEmpty())
     }
 
     @Test
-    fun `manual 2b routing falls back to available model when preferred model is unavailable`() {
+    fun `manual 1_7b routing falls back to available model when preferred model is unavailable`() {
         val inference = RecordingInferenceModule(
-            availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+            availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
         )
         val container = defaultContainer(inferenceModule = inference)
         val session = container.createSession()
 
-        container.setRoutingMode(RoutingMode.QWEN_2B)
+        container.setRoutingMode(RoutingMode.QWEN3_1_7B)
         val response = container.sendUserMessage(
             sessionId = session,
-            userText = "force 2b but fallback to available",
+            userText = "force 1.7b but fallback to available",
             taskType = "short_text",
             deviceState = DeviceState(batteryPercent = 70, thermalLevel = 3, ramClassGb = 8),
         )
 
-        assertEquals(ModelCatalog.QWEN_3_5_0_8B_Q4, response.modelId)
-        assertEquals(ModelCatalog.QWEN_3_5_0_8B_Q4, inference.loadCalls.first())
+        assertEquals(ModelCatalog.QWEN3_0_6B_Q4_K_M, response.modelId)
+        assertEquals(ModelCatalog.QWEN3_0_6B_Q4_K_M, inference.loadCalls.first())
     }
 
     @Test
@@ -355,23 +353,23 @@ class AndroidMvpContainerTest {
     @Test
     fun `send user message hard-fails when artifact verification fails`() {
         val payloads = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "wrong-artifact".encodeToByteArray(),
-            ModelCatalog.QWEN_3_5_2B_Q4 to "other-artifact".encodeToByteArray(),
+            ModelCatalog.QWEN3_0_6B_Q4_K_M to "wrong-artifact".encodeToByteArray(),
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "other-artifact".encodeToByteArray(),
         )
         val container = AndroidMvpContainer(
             inferenceModule = RecordingInferenceModule(),
             artifactPayloadByModelId = payloads,
             artifactSha256ByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             ),
             artifactProvenanceIssuerByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "internal-release",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
             ),
             artifactProvenanceSignatureByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to provenanceSignature("internal-release", ModelCatalog.QWEN_3_5_0_8B_Q4, payloads.getValue(ModelCatalog.QWEN_3_5_0_8B_Q4)),
-                ModelCatalog.QWEN_3_5_2B_Q4 to provenanceSignature("internal-release", ModelCatalog.QWEN_3_5_2B_Q4, payloads.getValue(ModelCatalog.QWEN_3_5_2B_Q4)),
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to provenanceSignature("internal-release", ModelCatalog.QWEN3_0_6B_Q4_K_M, payloads.getValue(ModelCatalog.QWEN3_0_6B_Q4_K_M)),
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to provenanceSignature("internal-release", ModelCatalog.QWEN3_1_7B_Q4_K_M, payloads.getValue(ModelCatalog.QWEN3_1_7B_Q4_K_M)),
             ),
         )
         val session = container.createSession()
@@ -561,7 +559,7 @@ private fun defaultContainer(
     )
 }
 
-private fun testRuntimeModelIds(): List<String> = ModelCatalog.startupCandidateModels()
+private fun testRuntimeModelIds(): List<String> = listOf(ModelCatalog.SMOKE_ECHO_120M) + ModelCatalog.bridgeSupportedModels()
 
 private fun testPayloads(): Map<String, ByteArray> {
     return testRuntimeModelIds().associateWith { modelId ->

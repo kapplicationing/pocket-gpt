@@ -27,20 +27,16 @@ class ModelInteractionRegistryTest {
     fun `registry resolves expected interaction capabilities per model family`() {
         val registry = ModelInteractionRegistry()
 
-        val qwenProfile = registry.interactionProfileForModel(ModelCatalog.QWEN_3_5_0_8B_Q4)
+        val qwenProfile = registry.interactionProfileForModel(ModelCatalog.QWEN3_1_7B_Q4_K_M)
         assertEquals(ThinkingSupport.THINK_TAGS, qwenProfile.thinkingSupport)
         assertTrue(qwenProfile.toolCallSupport is ToolCallSupport.XmlTagFormat)
         assertEquals(SystemPromptStrategy.NATIVE, qwenProfile.systemPromptStrategy)
 
-        val phiProfile = registry.interactionProfileForModel(ModelCatalog.PHI_4_MINI_Q4_K_M)
-        assertEquals(ThinkingSupport.THINK_TAGS, phiProfile.thinkingSupport)
-        assertEquals(ToolCallSupport.NONE, phiProfile.toolCallSupport)
-
-        val gemmaProfile = registry.interactionProfileForModel(ModelCatalog.GEMMA_4_E2B_Q4_K_M)
-        assertEquals(ThinkingSupport.NONE, gemmaProfile.thinkingSupport)
-        assertEquals(ToolCallSupport.NONE, gemmaProfile.toolCallSupport)
-        assertEquals(SystemPromptStrategy.NATIVE, gemmaProfile.systemPromptStrategy)
-        assertEquals("model", gemmaProfile.roleNameOverrides[InteractionRole.ASSISTANT])
+        val llamaProfile = registry.interactionProfileForModel(ModelCatalog.LLAMA_3_2_1B_Q4_K_M)
+        assertEquals(ThinkingSupport.NONE, llamaProfile.thinkingSupport)
+        assertEquals(ToolCallSupport.NONE, llamaProfile.toolCallSupport)
+        assertEquals(SystemPromptStrategy.NATIVE, llamaProfile.systemPromptStrategy)
+        assertEquals(null, llamaProfile.roleNameOverrides[InteractionRole.ASSISTANT])
     }
 
     @Test

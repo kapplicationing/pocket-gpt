@@ -59,7 +59,7 @@ class GatewayAdaptersTest {
             },
         )
         val sessionId = gateway.createSession()
-        gateway.setRoutingMode(RoutingMode.QWEN_2B)
+        gateway.setRoutingMode(RoutingMode.QWEN3_1_7B)
 
         val streamEvents = gateway.streamPreparedChat(
             preparedRequest(
@@ -82,7 +82,7 @@ class GatewayAdaptersTest {
         val diagnostics = gateway.exportDiagnostics()
         val runtimeSnapshot = gateway.runtimeDiagnosticsSnapshot()
 
-        assertEquals(RoutingMode.QWEN_2B, gateway.getRoutingMode())
+        assertEquals(RoutingMode.QWEN3_1_7B, gateway.getRoutingMode())
         assertEquals("session-1", sessionId.value)
         assertEquals(3, streamEvents.size)
         assertTrue(tool is ToolExecutionResult.Success)
@@ -178,9 +178,9 @@ class GatewayAdaptersTest {
             ),
         )
         val version = ModelDistributionVersion(
-            modelId = "bonsai-8b-q1_0_g128",
-            version = "q1_0_g128",
-            downloadUrl = "https://example.com/bonsai.gguf",
+            modelId = "qwen3-1.7b-q4_k_m",
+            version = "q4_k_m",
+            downloadUrl = "https://example.com/qwen3-1.7b.gguf",
             expectedSha256 = "c".repeat(64),
             provenanceIssuer = "issuer",
             provenanceSignature = "sig",

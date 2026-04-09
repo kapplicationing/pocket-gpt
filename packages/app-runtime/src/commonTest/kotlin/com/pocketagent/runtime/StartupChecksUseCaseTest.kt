@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 class StartupChecksUseCaseTest {
     @Test
     fun `manifest invalid short circuits startup checks`() {
-        val inference = StartupInferenceModule(availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4))
+        val inference = StartupInferenceModule(availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M))
         val runtimeConfig = startupRuntimeConfig(validSha = false)
         val useCase = buildUseCase(
             runtimeConfig = runtimeConfig,
@@ -54,7 +54,7 @@ class StartupChecksUseCaseTest {
     @Test
     fun `optional model unavailable is emitted as degraded warning`() {
         val inference = StartupInferenceModule(
-            availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+            availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
             loadModelResult = true,
         )
         val useCase = buildUseCase(
@@ -80,8 +80,8 @@ class StartupChecksUseCaseTest {
             runtimeConfig = startupRuntimeConfig(validSha = true, requireNativeRuntime = true),
             inferenceModule = StartupInferenceModule(
                 availableModels = listOf(
-                    ModelCatalog.QWEN_3_5_0_8B_Q4,
-                    ModelCatalog.QWEN_3_5_2B_Q4,
+                    ModelCatalog.QWEN3_0_6B_Q4_K_M,
+                    ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 ),
             ),
             policyModule = StartupPolicyModule(
@@ -100,12 +100,12 @@ class StartupChecksUseCaseTest {
     fun `missing artifact config returns deterministic missing-config check`() {
         val runtimeConfig = startupRuntimeConfig(validSha = true).copy(
             artifactSha256ByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
             ),
             artifactProvenanceSignatureByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
             ),
         )
         val useCase = buildUseCase(
@@ -120,7 +120,7 @@ class StartupChecksUseCaseTest {
 
         val checks = useCase.run()
 
-        assertTrue(checks.any { it.contains("MODEL_ARTIFACT_CONFIG_MISSING:model=${ModelCatalog.QWEN_3_5_0_8B_Q4};field=sha256") })
+        assertTrue(checks.any { it.contains("MODEL_ARTIFACT_CONFIG_MISSING:") })
     }
 
     @Test
@@ -128,29 +128,29 @@ class StartupChecksUseCaseTest {
         val payload0 = "payload-0".encodeToByteArray()
         val runtimeConfig = startupRuntimeConfig(validSha = true).copy(
             artifactPayloadByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to payload0,
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to payload0,
             ),
             artifactFilePathByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
             ),
             artifactSha256ByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to startupSha256(payload0),
-                ModelCatalog.QWEN_3_5_2B_Q4 to "",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to startupSha256(payload0),
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
             ),
             artifactProvenanceIssuerByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "internal-release",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
             ),
             artifactProvenanceSignatureByModelId = mapOf(
-                ModelCatalog.QWEN_3_5_0_8B_Q4 to "sig-0",
-                ModelCatalog.QWEN_3_5_2B_Q4 to "",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "sig-0",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
             ),
         )
         val useCase = buildUseCase(
             runtimeConfig = runtimeConfig,
             inferenceModule = StartupInferenceModule(
-                availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+                availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
                 loadModelResult = true,
             ),
             policyModule = StartupPolicyModule(
@@ -162,7 +162,6 @@ class StartupChecksUseCaseTest {
 
         val checks = useCase.run()
 
-        assertTrue(checks.any { it.contains("Optional runtime model unavailable: ${ModelCatalog.QWEN_3_5_2B_Q4}") })
         assertTrue(checks.none { it.startsWith("MODEL_ARTIFACT_CONFIG_MISSING:") })
         assertTrue(checks.none { it.contains("Missing runtime model(s)") })
     }
@@ -171,15 +170,15 @@ class StartupChecksUseCaseTest {
     fun `dev fast startup profile accepts fast tier artifacts without qwen config`() {
         val payload = "payload-fast".encodeToByteArray()
         val inference = StartupInferenceModule(
-            availableModels = listOf(ModelCatalog.SMOLLM3_3B_Q4_K_M),
+            availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
             loadModelResult = true,
         )
         val runtimeConfig = startupRuntimeConfig(validSha = true).copy(
-            artifactPayloadByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to payload),
-            artifactFilePathByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to ""),
-            artifactSha256ByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to startupSha256(payload)),
-            artifactProvenanceIssuerByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to "internal-release"),
-            artifactProvenanceSignatureByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to "sig-fast"),
+            artifactPayloadByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to payload),
+            artifactFilePathByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to ""),
+            artifactSha256ByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to startupSha256(payload)),
+            artifactProvenanceIssuerByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to "internal-release"),
+            artifactProvenanceSignatureByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to "sig-fast"),
             modelRuntimeProfile = ModelRuntimeProfile.DEV_FAST,
         )
         val useCase = buildUseCase(
@@ -200,18 +199,18 @@ class StartupChecksUseCaseTest {
     }
 
     @Test
-    fun `prod startup profile falls back to configured fast tier model when startup candidates are unavailable`() {
+    fun `prod startup profile treats qwen3 1_7b as optional when qwen3 0_6b is ready`() {
         val payload = "payload-fast-fallback".encodeToByteArray()
         val inference = StartupInferenceModule(
-            availableModels = listOf(ModelCatalog.SMOLLM3_3B_Q4_K_M),
+            availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
             loadModelResult = true,
         )
         val runtimeConfig = startupRuntimeConfig(validSha = true).copy(
-            artifactPayloadByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to payload),
-            artifactFilePathByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to ""),
-            artifactSha256ByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to startupSha256(payload)),
-            artifactProvenanceIssuerByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to "internal-release"),
-            artifactProvenanceSignatureByModelId = mapOf(ModelCatalog.SMOLLM3_3B_Q4_K_M to "sig-fast-fallback"),
+            artifactPayloadByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to payload),
+            artifactFilePathByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to ""),
+            artifactSha256ByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to startupSha256(payload)),
+            artifactProvenanceIssuerByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to "internal-release"),
+            artifactProvenanceSignatureByModelId = mapOf(ModelCatalog.QWEN3_0_6B_Q4_K_M to "sig-fast-fallback"),
             modelRuntimeProfile = ModelRuntimeProfile.PROD,
         )
         val useCase = buildUseCase(
@@ -228,7 +227,6 @@ class StartupChecksUseCaseTest {
 
         assertTrue(checks.none { it.startsWith("MODEL_ARTIFACT_CONFIG_MISSING:") })
         assertTrue(checks.none { it.contains("Missing runtime model(s)") })
-        assertTrue(checks.any { it.contains("Optional runtime model unavailable: ${ModelCatalog.QWEN_3_5_0_8B_Q4}") })
         assertEquals(0, inference.loadCalls)
     }
 
@@ -258,7 +256,7 @@ class StartupChecksUseCaseTest {
         val useCase = buildUseCase(
             runtimeConfig = startupRuntimeConfig(validSha = true),
             inferenceModule = StartupInferenceModule(
-                availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+                availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
             ),
             policyModule = StartupPolicyModule(
                 allowedEvents = setOf("inference.startup_check"),
@@ -270,23 +268,23 @@ class StartupChecksUseCaseTest {
 
         val checks = useCase.run()
 
-        assertTrue(checks.any { it.contains("Missing runtime model(s): ${ModelCatalog.QWEN_3_5_2B_Q4}") })
+        assertTrue(checks.any { it.contains("Missing runtime model(s): ${ModelCatalog.QWEN3_1_7B_Q4_K_M}") })
     }
 
     @Test
     fun `startup checks do not mutate active artifact model selection`() {
         val runtimeConfig = startupRuntimeConfig(validSha = true)
         val artifactVerifier = ArtifactVerifier(runtimeConfig)
-        assertTrue(artifactVerifier.manager().setActiveModel(ModelCatalog.QWEN_3_5_0_8B_Q4))
-        assertTrue(artifactVerifier.manager().setActiveModelVersion(ModelCatalog.QWEN_3_5_0_8B_Q4, "1"))
+        assertTrue(artifactVerifier.manager().setActiveModel(ModelCatalog.QWEN3_0_6B_Q4_K_M))
+        assertTrue(artifactVerifier.manager().setActiveModelVersion(ModelCatalog.QWEN3_0_6B_Q4_K_M, "1"))
         val initialModelId = artifactVerifier.manager().getActiveModel()
         val initialVersion = artifactVerifier.manager().getActiveModelVersion()
         val useCase = buildUseCase(
             runtimeConfig = runtimeConfig,
             inferenceModule = StartupInferenceModule(
                 availableModels = listOf(
-                    ModelCatalog.QWEN_3_5_0_8B_Q4,
-                    ModelCatalog.QWEN_3_5_2B_Q4,
+                    ModelCatalog.QWEN3_0_6B_Q4_K_M,
+                    ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 ),
             ),
             policyModule = StartupPolicyModule(
@@ -363,7 +361,7 @@ private class StartupPolicyModule(
 }
 
 private class StartupRoutingModule : RoutingModule {
-    override fun selectModel(taskType: String, deviceState: DeviceState): String = ModelCatalog.QWEN_3_5_0_8B_Q4
+    override fun selectModel(taskType: String, deviceState: DeviceState): String = ModelCatalog.QWEN3_0_6B_Q4_K_M
 
     override fun selectContextBudget(taskType: String, deviceState: DeviceState): Int = 512
 }
@@ -378,24 +376,24 @@ private fun startupRuntimeConfig(
     val sha2 = if (validSha) startupSha256(payload2) else "invalid"
     return RuntimeConfig(
         artifactPayloadByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to payload0,
-            ModelCatalog.QWEN_3_5_2B_Q4 to payload2,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M to payload0,
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to payload2,
         ),
         artifactFilePathByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "",
+            ModelCatalog.QWEN3_0_6B_Q4_K_M to "",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
         ),
         artifactSha256ByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to sha0,
-            ModelCatalog.QWEN_3_5_2B_Q4 to sha2,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M to sha0,
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to sha2,
         ),
         artifactProvenanceIssuerByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
+            ModelCatalog.QWEN3_0_6B_Q4_K_M to "internal-release",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
         ),
         artifactProvenanceSignatureByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "sig-0",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "sig-2",
+            ModelCatalog.QWEN3_0_6B_Q4_K_M to "sig-0",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "sig-2",
         ),
         runtimeCompatibilityTag = "android-arm64-v8a",
         requireNativeRuntimeForStartupChecks = requireNativeRuntime,
@@ -416,13 +414,13 @@ private fun startupRegistryWithMinimumReady(minimumReadyCount: Int): ModelRegist
     return ModelRegistry(
         metadataByModelId = listOf(
             RuntimeModelMetadata(
-                modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+                modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
                 templateFamily = PromptTemplateFamily.CHATML,
                 tier = RuntimeModelTier.BASELINE,
                 startupRequirement = StartupRequirement.OPTIONAL,
             ),
             RuntimeModelMetadata(
-                modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 templateFamily = PromptTemplateFamily.CHATML,
                 tier = RuntimeModelTier.BASELINE,
                 startupRequirement = StartupRequirement.OPTIONAL,

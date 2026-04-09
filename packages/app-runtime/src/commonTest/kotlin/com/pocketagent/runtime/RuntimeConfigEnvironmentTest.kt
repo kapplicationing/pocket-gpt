@@ -17,30 +17,30 @@ class RuntimeConfigEnvironmentTest {
             RuntimeConfig.sideLoadPathEnvName(ModelCatalog.QWEN_3_5_0_8B_Q4),
         )
         assertEquals(
-            "POCKETGPT_MODEL_SMOLLM3_3B_Q4_K_M_SHA256",
-            RuntimeConfig.sha256EnvName(ModelCatalog.SMOLLM3_3B_Q4_K_M),
+            "POCKETGPT_MODEL_QWEN3_0_6B_Q4_K_M_SHA256",
+            RuntimeConfig.sha256EnvName(ModelCatalog.QWEN3_0_6B_Q4_K_M),
         )
     }
 
     @Test
-    fun `fromEnvironment parses model-agnostic env keys for smollm3 model`() {
-        val modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M
+    fun `fromEnvironment parses model-agnostic env keys for qwen3 0_6b model`() {
+        val modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M
         val payloadSha = "a".repeat(64)
         val environment = mapOf(
             RuntimeConfig.MODEL_RUNTIME_PROFILE_ENV to "dev_fast",
             RuntimeConfig.MODEL_PROVENANCE_ISSUER_ENV to "global-issuer",
-            RuntimeConfig.sideLoadPathEnvName(modelId) to "/tmp/smollm3-3b.gguf",
+            RuntimeConfig.sideLoadPathEnvName(modelId) to "/tmp/qwen3-0.6b.gguf",
             RuntimeConfig.sha256EnvName(modelId) to payloadSha,
-            RuntimeConfig.provenanceSignatureEnvName(modelId) to "sig-smollm3-3b",
+            RuntimeConfig.provenanceSignatureEnvName(modelId) to "sig-qwen3-0.6b",
         )
 
         val config = RuntimeConfig.fromEnvironment(environment = environment)
 
         assertEquals(ModelRuntimeProfile.DEV_FAST, config.modelRuntimeProfile)
-        assertEquals("/tmp/smollm3-3b.gguf", config.artifactFilePathByModelId.getValue(modelId))
+        assertEquals("/tmp/qwen3-0.6b.gguf", config.artifactFilePathByModelId.getValue(modelId))
         assertEquals(payloadSha, config.artifactSha256ByModelId.getValue(modelId))
         assertEquals("global-issuer", config.artifactProvenanceIssuerByModelId.getValue(modelId))
-        assertEquals("sig-smollm3-3b", config.artifactProvenanceSignatureByModelId.getValue(modelId))
+        assertEquals("sig-qwen3-0.6b", config.artifactProvenanceSignatureByModelId.getValue(modelId))
     }
 
     @Test

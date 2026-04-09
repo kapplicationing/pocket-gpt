@@ -9,12 +9,11 @@ class ChatAppModelCapabilitiesTest {
     @Test
     fun `vision capable models can attach images`() {
         assertTrue(canAttachImagesForModel(ModelCatalog.QWEN_3_5_0_8B_Q4))
-        assertTrue(canAttachImagesForModel(ModelCatalog.QWEN_3_5_2B_Q4))
     }
 
     @Test
-    fun `bonsai and null models cannot attach images`() {
-        assertFalse(canAttachImagesForModel(ModelCatalog.BONSAI_8B_Q1_0_G128))
+    fun `text only and null models cannot attach images`() {
+        assertFalse(canAttachImagesForModel(ModelCatalog.LLAMA_3_2_1B_Q4_K_M))
         assertFalse(canAttachImagesForModel(null))
     }
 }

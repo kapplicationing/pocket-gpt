@@ -201,7 +201,7 @@ class MainActivityUiSmokeTest {
         composeRule.onNodeWithText("Model library").assertIsDisplayed()
         composeRule.onNodeWithText("Downloaded models").assertIsDisplayed()
         composeRule.onNodeWithText("Qwen 3.5 0.8B (Q4)").assertIsDisplayed()
-        composeRule.onNodeWithText("Qwen 3.5 2B (Q4)").assertIsDisplayed()
+        composeRule.onNodeWithText("Qwen3 1.7B Instruct (Q4_K_M)").assertIsDisplayed()
         assertFalse(
             composeRule.onAllNodesWithText("Downloads are disabled in this build. Use local import for now.")
                 .fetchSemanticsNodes()
@@ -658,12 +658,9 @@ private class FakeRuntimeFacade : MvpRuntimeFacade {
                     modelId = when (mode) {
                         RoutingMode.AUTO -> "auto"
                         RoutingMode.QWEN3_0_6B -> "qwen3-0.6b"
+                        RoutingMode.QWEN3_1_7B -> "qwen3-1.7b"
                         RoutingMode.QWEN_0_8B -> "qwen-0.8b"
-                        RoutingMode.QWEN_2B -> "qwen-2b"
-                        RoutingMode.SMOLLM3_3B -> "smollm3-3b"
-                        RoutingMode.PHI_4_MINI -> "phi-4-mini"
-                        RoutingMode.GEMMA_4_E2B -> "gemma-4-e2b"
-                        RoutingMode.BONSAI_8B -> "bonsai-8b"
+                        RoutingMode.LLAMA_3_2_1B -> "llama-3.2-1b"
                     },
                     text = "runtime response for $latestUserText",
                     firstTokenLatencyMs = 42,

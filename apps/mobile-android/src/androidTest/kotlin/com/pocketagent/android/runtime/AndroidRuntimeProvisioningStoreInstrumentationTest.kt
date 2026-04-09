@@ -94,24 +94,24 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
         )
 
         store.seedModelFromAbsolutePath(
-            modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
             absolutePath = oldSource.absolutePath,
             version = "seed-old",
         )
         store.seedModelFromAbsolutePath(
-            modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
             absolutePath = newSource.absolutePath,
             version = "seed-new",
         )
 
-        val versionsBefore = store.listInstalledVersions(ModelCatalog.QWEN_3_5_2B_Q4)
+        val versionsBefore = store.listInstalledVersions(ModelCatalog.QWEN3_1_7B_Q4_K_M)
         val inactive = versionsBefore.first { !it.isActive }
         assertTrue(
             "Expected inactive seeded source path to be removed from metadata.",
-            store.removeVersion(ModelCatalog.QWEN_3_5_2B_Q4, inactive.version),
+            store.removeVersion(ModelCatalog.QWEN3_1_7B_Q4_K_M, inactive.version),
         )
 
-        val versionsAfter = store.listInstalledVersions(ModelCatalog.QWEN_3_5_2B_Q4)
+        val versionsAfter = store.listInstalledVersions(ModelCatalog.QWEN3_1_7B_Q4_K_M)
         assertEquals(1, versionsAfter.size)
         assertTrue(
             "Seeded source paths should not be deleted by removeVersion.",
@@ -270,7 +270,7 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
             content = "persisted-dynamic-model-content",
         )
         val sourceUri = android.net.Uri.fromFile(source)
-        val modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M
+        val modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M
 
         val imported = store.importModel(
             modelId = modelId,
@@ -413,7 +413,7 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
         val sourceUri = android.net.Uri.fromFile(source)
 
         store.importModel(
-            modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
             sourceUri = sourceUri,
             version = "storage-v1",
         )
@@ -424,8 +424,8 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
             beforeRemove.usedByModelsBytes > 0L,
         )
 
-        assertTrue(store.clearActiveVersion(ModelCatalog.QWEN_3_5_2B_Q4))
-        assertTrue(store.removeVersion(ModelCatalog.QWEN_3_5_2B_Q4, "storage-v1"))
+        assertTrue(store.clearActiveVersion(ModelCatalog.QWEN3_1_7B_Q4_K_M))
+        assertTrue(store.removeVersion(ModelCatalog.QWEN3_1_7B_Q4_K_M, "storage-v1"))
 
         val afterRemove = store.storageSummary()
         assertEquals(
@@ -445,21 +445,21 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
         val sourceUri = android.net.Uri.fromFile(source)
 
         store.importModel(
-            modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
             sourceUri = sourceUri,
             version = "only-v1",
         )
 
         val snapshotBefore = store.snapshot()
-        val modelBefore = snapshotBefore.models.first { it.modelId == ModelCatalog.QWEN_3_5_2B_Q4 }
+        val modelBefore = snapshotBefore.models.first { it.modelId == ModelCatalog.QWEN3_1_7B_Q4_K_M }
         assertEquals("only-v1", modelBefore.activeVersion)
         assertEquals(1, modelBefore.installedVersions.size)
 
-        store.clearActiveVersion(ModelCatalog.QWEN_3_5_2B_Q4)
-        assertTrue(store.removeVersion(ModelCatalog.QWEN_3_5_2B_Q4, "only-v1"))
+        store.clearActiveVersion(ModelCatalog.QWEN3_1_7B_Q4_K_M)
+        assertTrue(store.removeVersion(ModelCatalog.QWEN3_1_7B_Q4_K_M, "only-v1"))
 
         val snapshotAfter = store.snapshot()
-        val modelAfter = snapshotAfter.models.first { it.modelId == ModelCatalog.QWEN_3_5_2B_Q4 }
+        val modelAfter = snapshotAfter.models.first { it.modelId == ModelCatalog.QWEN3_1_7B_Q4_K_M }
         assertTrue(modelAfter.installedVersions.isEmpty())
         assertEquals(null, modelAfter.activeVersion)
     }

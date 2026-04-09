@@ -17,8 +17,10 @@ class SmokeInferenceModule : InferenceModule {
         val loaded = activeModelId ?: error("Model must be loaded before generation.")
         val prefix = when (loaded) {
             ModelCatalog.SMOKE_ECHO_120M -> "SMOKE"
+            ModelCatalog.QWEN3_0_6B_Q4_K_M -> "QWEN0.6B"
+            ModelCatalog.QWEN3_1_7B_Q4_K_M -> "QWEN1.7B"
             ModelCatalog.QWEN_3_5_0_8B_Q4 -> "QWEN0.8B"
-            ModelCatalog.QWEN_3_5_2B_Q4 -> "QWEN2B"
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M -> "LLAMA1B"
             else -> "UNKNOWN"
         }
 

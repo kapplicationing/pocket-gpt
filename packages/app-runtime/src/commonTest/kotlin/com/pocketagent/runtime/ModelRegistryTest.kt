@@ -23,11 +23,11 @@ class ModelRegistryTest {
             "registry must include all bridge-supported and startup-candidate models",
         )
         assertEquals(
-            ModelCatalog.QWEN_3_5_0_8B_Q4,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M,
             registry.defaultGetReadyModelId(profile = ModelRuntimeProfile.PROD),
         )
         assertEquals(
-            ModelCatalog.QWEN_3_5_0_8B_Q4,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M,
             registry.defaultGetReadyModelId(profile = ModelRuntimeProfile.DEV_FAST),
         )
     }
@@ -55,7 +55,7 @@ class ModelRegistryTest {
                     startupRequirement = StartupRequirement.REQUIRED,
                 ),
                 RuntimeModelMetadata(
-                    modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                    modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                     templateFamily = PromptTemplateFamily.CHATML,
                     tier = RuntimeModelTier.BASELINE,
                     startupRequirement = StartupRequirement.OPTIONAL,

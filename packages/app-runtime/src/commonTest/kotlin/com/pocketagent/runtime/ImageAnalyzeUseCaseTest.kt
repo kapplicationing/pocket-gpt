@@ -116,7 +116,7 @@ class ImageAnalyzeUseCaseTest {
             inference = inference,
             policy = ALL_EVENTS_POLICY,
             imageInput = StaticImageInputModule(ImageInputResult.Success("ok")),
-            residentModelIdProvider = { ModelCatalog.QWEN_3_5_2B_Q4 },
+            residentModelIdProvider = { ModelCatalog.QWEN3_1_7B_Q4_K_M },
         )
 
         val result = useCase.execute("/tmp/img.jpg", "describe", DEVICE_STATE)
@@ -192,7 +192,7 @@ private class ImageRecordingInferenceModule : InferenceModule {
     var unloadCalls: Int = 0
 
     override fun listAvailableModels(): List<String> {
-        return listOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN_3_5_2B_Q4)
+        return listOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN3_1_7B_Q4_K_M)
     }
 
     override fun loadModel(modelId: String): Boolean {
@@ -246,23 +246,23 @@ private fun imageRuntimeConfig(): RuntimeConfig {
     return RuntimeConfig(
         artifactPayloadByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to payload0,
-            ModelCatalog.QWEN_3_5_2B_Q4 to payload2,
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to payload2,
         ),
         artifactFilePathByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
         ),
         artifactSha256ByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to imageSha256(payload0),
-            ModelCatalog.QWEN_3_5_2B_Q4 to imageSha256(payload2),
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to imageSha256(payload2),
         ),
         artifactProvenanceIssuerByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
         ),
         artifactProvenanceSignatureByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "sig-0",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "sig-2",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "sig-2",
         ),
         runtimeCompatibilityTag = "android-arm64-v8a",
         requireNativeRuntimeForStartupChecks = false,

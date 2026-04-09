@@ -268,7 +268,7 @@ private class FakeBridge(
 
     override fun listAvailableModels(): List<String> = listOf(
         ModelCatalog.QWEN_3_5_0_8B_Q4,
-        ModelCatalog.QWEN_3_5_2B_Q4,
+        ModelCatalog.QWEN3_1_7B_Q4_K_M,
     )
 
     override fun loadModel(modelId: String, modelPath: String?): Boolean {

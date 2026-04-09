@@ -34,7 +34,7 @@ class RealRuntimeJourneyInstrumentationTest {
             parseBooleanArg(args, ARG_ENABLE_JOURNEY_TEST, defaultValue = false),
         )
         val modelPath0_8bRaw = args.getString(ARG_MODEL_PATH_0_8B)?.trim().orEmpty()
-        val modelPath2bRaw = args.getString(ARG_MODEL_PATH_2B)?.trim().orEmpty()
+        val modelPath2bRaw = args.getString(ARG_MODEL_PATH_1_7B)?.trim().orEmpty()
         assumeTrue(
             "Skipping real-runtime journey lane. Provide both model paths via instrumentation arguments.",
             modelPath0_8bRaw.isNotEmpty() && modelPath2bRaw.isNotEmpty(),
@@ -62,10 +62,10 @@ class RealRuntimeJourneyInstrumentationTest {
 
             val seeded2 = AppRuntimeDependencies.seedModelFromAbsolutePath(
                 context = appContext,
-                modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 absolutePath = modelPath2b,
             )
-            trace("provision", "seeded ${ModelCatalog.QWEN_3_5_2B_Q4}")
+            trace("provision", "seeded ${ModelCatalog.QWEN3_1_7B_Q4_K_M}")
 
             assertTrue(
                 "Failed to activate seeded 0.8B version ${seeded0.version}.",
@@ -76,16 +76,16 @@ class RealRuntimeJourneyInstrumentationTest {
                 ),
             )
             assertTrue(
-                "Failed to activate seeded 2B version ${seeded2.version}.",
+                "Failed to activate seeded 1.7B version ${seeded2.version}.",
                 AppRuntimeDependencies.setActiveVersion(
                     context = appContext,
-                    modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                    modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                     version = seeded2.version,
                 ),
             )
             val snapshot = AppRuntimeDependencies.currentProvisioningSnapshot(appContext)
             val state0 = snapshot.models.first { it.modelId == ModelCatalog.QWEN_3_5_0_8B_Q4 }
-            val state2 = snapshot.models.first { it.modelId == ModelCatalog.QWEN_3_5_2B_Q4 }
+            val state2 = snapshot.models.first { it.modelId == ModelCatalog.QWEN3_1_7B_Q4_K_M }
             assertEquals(seeded0.version, state0.activeVersion)
             assertEquals(seeded2.version, state2.activeVersion)
             assertEquals(normalizePath(modelPath0_8b), normalizePath(state0.absolutePath.orEmpty()))
@@ -101,7 +101,7 @@ class RealRuntimeJourneyInstrumentationTest {
                 startupChecks = startupChecks,
                 healthyModelIds = setOf(
                     ModelCatalog.QWEN_3_5_0_8B_Q4,
-                    ModelCatalog.QWEN_3_5_2B_Q4,
+                    ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 ),
                 failurePrefix = "Real-runtime startup checks failed",
             )
@@ -111,9 +111,9 @@ class RealRuntimeJourneyInstrumentationTest {
             trace("session", "created ${sessionId.value}")
             assertTrue(sessionId.value.isNotBlank())
 
-            facade.setRoutingMode(RoutingMode.QWEN_2B)
-            trace("routing", "set ${RoutingMode.QWEN_2B}")
-            assertEquals(RoutingMode.QWEN_2B, facade.getRoutingMode())
+            facade.setRoutingMode(RoutingMode.QWEN3_1_7B)
+            trace("routing", "set ${RoutingMode.QWEN3_1_7B}")
+            assertEquals(RoutingMode.QWEN3_1_7B, facade.getRoutingMode())
 
             val toolResult = facade.runTool(
                 toolName = "calculator",
@@ -178,8 +178,8 @@ class RealRuntimeJourneyInstrumentationTest {
                 assertNotNull("Completion did not arrive within ${replyTimeoutMs}ms.", completionLatencyMs)
                 assertTrue("Completion text is blank.", completionText.isNotBlank())
                 assertEquals(
-                    "Journey probe should execute with the explicitly selected 2B model.",
-                    ModelCatalog.QWEN_3_5_2B_Q4,
+                    "Journey probe should execute with the explicitly selected 1.7B model.",
+                    ModelCatalog.QWEN3_1_7B_Q4_K_M,
                     completionModelId,
                 )
             } else {
@@ -263,7 +263,7 @@ class RealRuntimeJourneyInstrumentationTest {
     companion object {
         private const val ARG_ENABLE_JOURNEY_TEST = "stage2_enable_journey_test"
         private const val ARG_MODEL_PATH_0_8B = "stage2_model_0_8b_path"
-        private const val ARG_MODEL_PATH_2B = "stage2_model_2b_path"
+        private const val ARG_MODEL_PATH_1_7B = "stage2_model_1_7b_path"
         private const val ARG_JOURNEY_ARTIFACT_DIR = "journey_artifact_dir"
         private const val ARG_REPLY_TIMEOUT_SECONDS = "journey_reply_timeout_seconds"
         private const val ARG_ENABLE_STREAMING_PROBE = "journey_enable_streaming_probe"

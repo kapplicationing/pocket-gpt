@@ -20,21 +20,21 @@ class ModelPolicyTest {
     @Test
     fun `default get ready model id follows build profile`() {
         assertEquals(
-            ModelCatalog.QWEN_3_5_0_8B_Q4,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M,
             resolveDefaultGetReadyModelId(isDebugBuild = true),
         )
         assertEquals(
-            ModelCatalog.QWEN_3_5_0_8B_Q4,
+            ModelCatalog.QWEN3_0_6B_Q4_K_M,
             resolveDefaultGetReadyModelId(isDebugBuild = false),
         )
     }
 
     @Test
     fun `default get ready version resolves from manifest`() {
-        val defaultModelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val defaultModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M
         val expected = ModelDistributionVersion(
             modelId = defaultModelId,
-            version = "q4_0",
+            version = "q4_k_m",
             downloadUrl = "https://example.test/qwen.gguf",
             expectedSha256 = "a".repeat(64),
             provenanceIssuer = "issuer",
@@ -60,21 +60,11 @@ class ModelPolicyTest {
     }
 
     @Test
-    fun `default get ready version prioritizes stable q4 over iq variants`() {
-        val defaultModelId = ModelCatalog.QWEN_3_5_0_8B_Q4
-        val iq2 = ModelDistributionVersion(
-            modelId = defaultModelId,
-            version = "ud_iq2_xxs",
-            downloadUrl = "https://example.test/qwen-iq2.gguf",
-            expectedSha256 = "b".repeat(64),
-            provenanceIssuer = "issuer",
-            provenanceSignature = "sig",
-            runtimeCompatibility = "android-arm64-v8a",
-            fileSizeBytes = 90L,
-        )
+    fun `default get ready version resolves q4_k_m entry for qwen3 0_6b`() {
+        val defaultModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M
         val q4 = ModelDistributionVersion(
             modelId = defaultModelId,
-            version = "q4_0",
+            version = "q4_k_m",
             downloadUrl = "https://example.test/qwen-q4.gguf",
             expectedSha256 = "a".repeat(64),
             provenanceIssuer = "issuer",
@@ -87,7 +77,7 @@ class ModelPolicyTest {
                 ModelDistributionModel(
                     modelId = defaultModelId,
                     displayName = "Qwen",
-                    versions = listOf(iq2, q4),
+                    versions = listOf(q4),
                 ),
             ),
         )
@@ -99,7 +89,7 @@ class ModelPolicyTest {
     }
 
     @Test
-    fun `supported routing modes include bonsai when bridge supported`() {
-        assertTrue(supportedRoutingModes().contains(com.pocketagent.core.RoutingMode.BONSAI_8B))
+    fun `supported routing modes include qwen3 1_7b when bridge supported`() {
+        assertTrue(supportedRoutingModes().contains(com.pocketagent.core.RoutingMode.QWEN3_1_7B))
     }
 }

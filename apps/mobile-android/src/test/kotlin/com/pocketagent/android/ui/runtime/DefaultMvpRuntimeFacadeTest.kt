@@ -56,8 +56,8 @@ class DefaultMvpRuntimeFacadeTest {
         assertEquals("tool:calculator", facade.runTool("calculator", """{"expression":"1+2"}"""))
         assertEquals("image:/tmp/a.jpg", facade.analyzeImage("/tmp/a.jpg", "describe"))
         assertEquals("diag=ok", facade.exportDiagnostics())
-        facade.setRoutingMode(RoutingMode.QWEN_2B)
-        assertEquals(RoutingMode.QWEN_2B, facade.getRoutingMode())
+        facade.setRoutingMode(RoutingMode.QWEN3_1_7B)
+        assertEquals(RoutingMode.QWEN3_1_7B, facade.getRoutingMode())
         assertEquals(listOf("check"), facade.runStartupChecks())
 
         val turns = listOf(Turn(role = "user", content = "hello", timestampEpochMs = 1))

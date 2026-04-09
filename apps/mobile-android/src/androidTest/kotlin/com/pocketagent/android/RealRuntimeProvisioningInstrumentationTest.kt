@@ -22,7 +22,7 @@ class RealRuntimeProvisioningInstrumentationTest {
             parseBooleanArg(args, ARG_ENABLE_PROVISIONING_TEST, defaultValue = false),
         )
         val modelPath0_8bRaw = args.getString(ARG_MODEL_PATH_0_8B)?.trim().orEmpty()
-        val modelPath2bRaw = args.getString(ARG_MODEL_PATH_2B)?.trim().orEmpty()
+        val modelPath2bRaw = args.getString(ARG_MODEL_PATH_1_7B)?.trim().orEmpty()
         assumeTrue(
             "Skipping real-runtime provisioning sanity lane. Provide both model paths via instrumentation arguments.",
             modelPath0_8bRaw.isNotEmpty() && modelPath2bRaw.isNotEmpty(),
@@ -40,7 +40,7 @@ class RealRuntimeProvisioningInstrumentationTest {
             )
             val seeded2b = AppRuntimeDependencies.seedModelFromAbsolutePath(
                 context = appContext,
-                modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 absolutePath = modelPath2b,
             )
             seeded0 to seeded2b
@@ -55,19 +55,19 @@ class RealRuntimeProvisioningInstrumentationTest {
             ),
         )
         assertTrue(
-            "Failed to activate seeded 2B version ${seeded2b.version}.",
+            "Failed to activate seeded 1.7B version ${seeded2b.version}.",
             AppRuntimeDependencies.setActiveVersion(
                 context = appContext,
-                modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 version = seeded2b.version,
             ),
         )
 
         val snapshot = AppRuntimeDependencies.currentProvisioningSnapshot(appContext)
         val state0 = snapshot.models.firstOrNull { it.modelId == ModelCatalog.QWEN_3_5_0_8B_Q4 }
-        val state2 = snapshot.models.firstOrNull { it.modelId == ModelCatalog.QWEN_3_5_2B_Q4 }
+        val state2 = snapshot.models.firstOrNull { it.modelId == ModelCatalog.QWEN3_1_7B_Q4_K_M }
         assertNotNull("Missing 0.8B model state after provisioning.", state0)
-        assertNotNull("Missing 2B model state after provisioning.", state2)
+        assertNotNull("Missing 1.7B model state after provisioning.", state2)
 
         requireNotNull(state0)
         requireNotNull(state2)
@@ -81,7 +81,7 @@ class RealRuntimeProvisioningInstrumentationTest {
             state0.installedVersions.count { normalizePath(it.absolutePath) == normalizePath(modelPath0_8b) },
         )
         assertEquals(
-            "Expected one canonical entry for seeded 2B path.",
+            "Expected one canonical entry for seeded 1.7B path.",
             1,
             state2.installedVersions.count { normalizePath(it.absolutePath) == normalizePath(modelPath2b) },
         )
@@ -93,7 +93,7 @@ class RealRuntimeProvisioningInstrumentationTest {
             startupChecks = startupChecks,
             healthyModelIds = setOf(
                 ModelCatalog.QWEN_3_5_0_8B_Q4,
-                ModelCatalog.QWEN_3_5_2B_Q4,
+                ModelCatalog.QWEN3_1_7B_Q4_K_M,
             ),
             failurePrefix = "Startup checks failed after provisioning",
         )
@@ -156,6 +156,6 @@ class RealRuntimeProvisioningInstrumentationTest {
     companion object {
         private const val ARG_ENABLE_PROVISIONING_TEST = "stage2_enable_provisioning_test"
         private const val ARG_MODEL_PATH_0_8B = "stage2_model_0_8b_path"
-        private const val ARG_MODEL_PATH_2B = "stage2_model_2b_path"
+        private const val ARG_MODEL_PATH_1_7B = "stage2_model_1_7b_path"
     }
 }

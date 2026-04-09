@@ -11,11 +11,11 @@ class RuntimeProvisioningSnapshotTest {
     fun `readiness is blocked when no required active model is provisioned`() {
         val snapshot = RuntimeProvisioningSnapshot(
             models = listOf(
-                state(modelId = ModelCatalog.QWEN_3_5_0_8B_Q4, activeVersion = null, absolutePath = null, sha = null),
-                state(modelId = ModelCatalog.QWEN_3_5_2B_Q4, activeVersion = null, absolutePath = null, sha = null),
+                state(modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M, activeVersion = null, absolutePath = null, sha = null),
+                state(modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M, activeVersion = null, absolutePath = null, sha = null),
             ),
             storageSummary = emptyStorage(),
-            requiredModelIds = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN_3_5_2B_Q4),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M, ModelCatalog.QWEN3_1_7B_Q4_K_M),
         )
 
         assertEquals(ProvisioningReadiness.BLOCKED, snapshot.readiness)
@@ -26,27 +26,27 @@ class RuntimeProvisioningSnapshotTest {
     fun `readiness is degraded when at least one required active model is provisioned`() {
         val snapshot = RuntimeProvisioningSnapshot(
             models = listOf(
-                state(modelId = ModelCatalog.QWEN_3_5_0_8B_Q4, activeVersion = "q4_0"),
-                state(modelId = ModelCatalog.QWEN_3_5_2B_Q4, activeVersion = null, absolutePath = null, sha = null),
+                state(modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M, activeVersion = "q4_k_m"),
+                state(modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M, activeVersion = null, absolutePath = null, sha = null),
             ),
             storageSummary = emptyStorage(),
-            requiredModelIds = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN_3_5_2B_Q4),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M, ModelCatalog.QWEN3_1_7B_Q4_K_M),
         )
 
         assertEquals(ProvisioningReadiness.DEGRADED, snapshot.readiness)
         assertEquals(1, snapshot.verifiedActiveModelCount)
-        assertEquals(setOf(ModelCatalog.QWEN_3_5_2B_Q4), snapshot.missingRequiredModelIds)
+        assertEquals(setOf(ModelCatalog.QWEN3_1_7B_Q4_K_M), snapshot.missingRequiredModelIds)
     }
 
     @Test
     fun `readiness is ready when all required active models are provisioned`() {
         val snapshot = RuntimeProvisioningSnapshot(
             models = listOf(
-                state(modelId = ModelCatalog.QWEN_3_5_0_8B_Q4, activeVersion = "q4_0"),
-                state(modelId = ModelCatalog.QWEN_3_5_2B_Q4, activeVersion = "q4_0"),
+                state(modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M, activeVersion = "q4_k_m"),
+                state(modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M, activeVersion = "q4_k_m"),
             ),
             storageSummary = emptyStorage(),
-            requiredModelIds = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN_3_5_2B_Q4),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M, ModelCatalog.QWEN3_1_7B_Q4_K_M),
         )
 
         assertEquals(ProvisioningReadiness.READY, snapshot.readiness)
@@ -58,23 +58,23 @@ class RuntimeProvisioningSnapshotTest {
     fun `missing local file is treated as not provisioned`() {
         val snapshot = RuntimeProvisioningSnapshot(
             models = listOf(
-                state(modelId = ModelCatalog.QWEN_3_5_0_8B_Q4, activeVersion = "q4_0", localFileMissing = true),
-                state(modelId = ModelCatalog.QWEN_3_5_2B_Q4, activeVersion = "q4_0"),
+                state(modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M, activeVersion = "q4_k_m", localFileMissing = true),
+                state(modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M, activeVersion = "q4_k_m"),
             ),
             storageSummary = emptyStorage(),
-            requiredModelIds = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN_3_5_2B_Q4),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M, ModelCatalog.QWEN3_1_7B_Q4_K_M),
         )
 
         assertEquals(ProvisioningReadiness.DEGRADED, snapshot.readiness)
-        assertEquals(setOf(ModelCatalog.QWEN_3_5_0_8B_Q4), snapshot.missingRequiredModelIds)
+        assertEquals(setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M), snapshot.missingRequiredModelIds)
     }
 
     @Test
     fun `recoverable corruption flag is true when snapshot has diagnostics`() {
         val snapshot = RuntimeProvisioningSnapshot(
-            models = listOf(state(modelId = ModelCatalog.QWEN_3_5_0_8B_Q4, activeVersion = null, absolutePath = null, sha = null)),
+            models = listOf(state(modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M, activeVersion = null, absolutePath = null, sha = null)),
             storageSummary = emptyStorage(),
-            requiredModelIds = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
             recoverableCorruptions = listOf(
                 ProvisioningRecoverySignal(
                     code = "PROVISIONING_VERSIONS_JSON_CORRUPT",
@@ -92,14 +92,14 @@ class RuntimeProvisioningSnapshotTest {
         val snapshot = RuntimeProvisioningSnapshot(
             models = listOf(
                 state(
-                    modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-                    activeVersion = "q4_0",
+                    modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
+                    activeVersion = "q4_k_m",
                     pathOrigin = ModelPathOrigin.IMPORTED_EXTERNAL,
                     storageRootLabel = "App internal storage (/data/user/0/app/files)",
                 ),
             ),
             storageSummary = emptyStorage(),
-            requiredModelIds = setOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M),
             storageRootLabel = "App internal storage (/data/user/0/app/files)",
         )
 
@@ -110,7 +110,7 @@ class RuntimeProvisioningSnapshotTest {
     @Test
     fun `pathOriginForVersion prefers version specific mapping`() {
         val model = state(
-            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
             activeVersion = "managed-v1",
             pathOrigin = ModelPathOrigin.MANAGED,
             versionPathOrigins = mapOf(

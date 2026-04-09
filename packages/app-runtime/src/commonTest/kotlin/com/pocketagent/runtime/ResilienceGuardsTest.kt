@@ -64,7 +64,7 @@ class ResilienceGuardsTest {
 
         val assessment = assessor.assessStartupChecks(
             listOf(
-                "Optional runtime model unavailable: qwen3.5-2b-q4.",
+                "Optional runtime model unavailable: qwen3-1.7b-q4_k_m.",
                 "Failed to load startup runtime model: qwen3.5-0.8b-q4.",
             ),
         )

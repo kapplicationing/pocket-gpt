@@ -15,11 +15,11 @@ class ModelLifecycleCoordinatorTest {
     @Test
     fun `select runnable model returns preferred model when available`() {
         val inference = LifecycleInferenceModule(
-            availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN_3_5_2B_Q4),
+            availableModels = listOf(ModelCatalog.QWEN3_0_6B_Q4_K_M, ModelCatalog.QWEN3_1_7B_Q4_K_M),
         )
         val coordinator = ModelLifecycleCoordinator(
             inferenceModule = inference,
-            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN_3_5_2B_Q4),
+            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN3_1_7B_Q4_K_M),
             runtimeConfig = lifecycleRuntimeConfig(),
         )
 
@@ -29,17 +29,17 @@ class ModelLifecycleCoordinatorTest {
             deviceState = DEVICE_STATE,
         )
 
-        assertEquals(ModelCatalog.QWEN_3_5_2B_Q4, selected)
+        assertEquals(ModelCatalog.QWEN3_1_7B_Q4_K_M, selected)
     }
 
     @Test
     fun `select runnable model falls back to available preferred order`() {
         val inference = LifecycleInferenceModule(
-            availableModels = listOf(ModelCatalog.QWEN_3_5_2B_Q4),
+            availableModels = listOf(ModelCatalog.QWEN3_1_7B_Q4_K_M),
         )
         val coordinator = ModelLifecycleCoordinator(
             inferenceModule = inference,
-            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN_3_5_0_8B_Q4),
+            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN3_0_6B_Q4_K_M),
             runtimeConfig = lifecycleRuntimeConfig(),
         )
 
@@ -49,7 +49,7 @@ class ModelLifecycleCoordinatorTest {
             deviceState = DEVICE_STATE,
         )
 
-        assertEquals(ModelCatalog.QWEN_3_5_2B_Q4, selected)
+        assertEquals(ModelCatalog.QWEN3_1_7B_Q4_K_M, selected)
     }
 
     @Test
@@ -79,37 +79,37 @@ class ModelLifecycleCoordinatorTest {
     }
 
     @Test
-    fun `select runnable model honors explicit smollm3 routing mode`() {
+    fun `select runnable model honors explicit qwen3 1_7b routing mode`() {
         val inference = LifecycleInferenceModule(
             availableModels = listOf(
-                ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                ModelCatalog.QWEN3_1_7B_Q4_K_M,
             ),
         )
         val coordinator = ModelLifecycleCoordinator(
             inferenceModule = inference,
-            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN_3_5_0_8B_Q4),
+            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN3_0_6B_Q4_K_M),
             runtimeConfig = lifecycleRuntimeConfig(),
         )
 
         val selected = coordinator.selectRunnableModelId(
-            routingMode = RoutingMode.SMOLLM3_3B,
+            routingMode = RoutingMode.QWEN3_1_7B,
             taskType = "short_text",
             deviceState = DEVICE_STATE,
         )
 
-        assertEquals(ModelCatalog.SMOLLM3_3B_Q4_K_M, selected)
+        assertEquals(ModelCatalog.QWEN3_1_7B_Q4_K_M, selected)
     }
 
     @Test
-    fun `preferred model order falls back to smollm3 when qwen unavailable`() {
+    fun `preferred model order falls back to llama when qwen unavailable`() {
         val inference = LifecycleInferenceModule(
             availableModels = listOf(
-                ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
             ),
         )
         val coordinator = ModelLifecycleCoordinator(
             inferenceModule = inference,
-            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN_3_5_2B_Q4),
+            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN3_1_7B_Q4_K_M),
             runtimeConfig = lifecycleRuntimeConfig(),
         )
 
@@ -119,7 +119,7 @@ class ModelLifecycleCoordinatorTest {
             deviceState = DEVICE_STATE,
         )
 
-        assertEquals(ModelCatalog.SMOLLM3_3B_Q4_K_M, selected)
+        assertEquals(ModelCatalog.LLAMA_3_2_1B_Q4_K_M, selected)
     }
 
     @Test
@@ -180,24 +180,24 @@ private fun lifecycleRuntimeConfig(
     val sha2 = "b".repeat(64)
     return RuntimeConfig(
         artifactPayloadByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "payload-0".encodeToByteArray(),
-            ModelCatalog.QWEN_3_5_2B_Q4 to "payload-2".encodeToByteArray(),
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "payload-0".encodeToByteArray(),
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "payload-1".encodeToByteArray(),
         ),
         artifactFilePathByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
         ),
         artifactSha256ByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to sha0,
-            ModelCatalog.QWEN_3_5_2B_Q4 to sha2,
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to sha0,
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to sha2,
         ),
         artifactProvenanceIssuerByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "internal-release",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
         ),
         artifactProvenanceSignatureByModelId = mapOf(
-            ModelCatalog.QWEN_3_5_0_8B_Q4 to "sig-0",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "sig-2",
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to "sig-0",
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to "sig-2",
         ),
         runtimeCompatibilityTag = "android-arm64-v8a",
         requireNativeRuntimeForStartupChecks = false,

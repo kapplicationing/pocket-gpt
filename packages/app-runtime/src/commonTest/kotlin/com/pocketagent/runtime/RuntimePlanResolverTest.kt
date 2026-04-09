@@ -169,7 +169,7 @@ class RuntimePlanResolverTest {
             availableCpuThreads = 8,
             gpuEnabled = true,
         )
-            .copy(speculativeEnabled = true, speculativeDraftModelId = ModelCatalog.SMOLLM3_3B_Q4_K_M)
+            .copy(speculativeEnabled = true, speculativeDraftModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M)
 
         val plan = resolver.resolve(
             sessionId = "session-1",
@@ -194,7 +194,7 @@ class RuntimePlanResolverTest {
 
         val plan = resolver.resolve(
             sessionId = "session-1",
-            modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
             taskType = "short_text",
             stopSequences = emptyList(),
             requestConfig = PerformanceRuntimeConfig.forProfile(
@@ -208,7 +208,7 @@ class RuntimePlanResolverTest {
         )
 
         assertTrue(plan.effectiveConfig.speculativeEnabled)
-        assertEquals(ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS, plan.effectiveConfig.speculativeDraftModelId)
+        assertEquals(ModelCatalog.QWEN3_0_6B_Q4_K_M, plan.effectiveConfig.speculativeDraftModelId)
     }
 
     @Test
@@ -225,7 +225,7 @@ class RuntimePlanResolverTest {
                 profile = RuntimePerformanceProfile.BALANCED,
                 availableCpuThreads = 8,
                 gpuEnabled = true,
-            ),
+            ).copy(speculativeDraftModelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M),
             residencyPolicy = ModelResidencyPolicy(idleUnloadTtlMs = 600_000L),
             deviceState = DeviceState(batteryPercent = 80, thermalLevel = 3, ramClassGb = 12),
             runtimeInferencePorts = runtimeInferencePorts,
@@ -433,8 +433,8 @@ private class ResolverModelRegistryPort : RuntimeModelRegistryPort {
     )
     private val pathByModelId = mapOf(
         ModelCatalog.QWEN_3_5_0_8B_Q4 to "/tmp/qwen-0.8b.gguf",
-        ModelCatalog.SMOLLM3_3B_Q4_K_M to "/tmp/smollm3-3b.gguf",
-        ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS to "/tmp/smollm3-3b-iq2xxs.gguf",
+        ModelCatalog.QWEN3_1_7B_Q4_K_M to "/tmp/qwen3-1.7b.gguf",
+        ModelCatalog.QWEN3_0_6B_Q4_K_M to "/tmp/qwen3-0.6b.gguf",
     )
 
     override fun registerModelPath(modelId: String, absolutePath: String) = Unit

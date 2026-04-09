@@ -80,7 +80,7 @@ class SendMessageUseCaseTest {
             runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
             policyModule = permissivePolicy(),
             inferenceModule = SendRecordingInferenceModule(),
-            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.BONSAI_8B_Q1_0_G128),
+            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M),
         )
 
         val error = assertFailsWith<RuntimeImageAttachmentUnsupportedException> {
@@ -324,7 +324,7 @@ class SendMessageUseCaseTest {
     }
 
     @Test
-    fun `gemma profile skips thinking and tool-call processing`() {
+    fun `llama profile skips thinking and tool-call processing`() {
         val streamedTokens = mutableListOf<String>()
         val fixture = createFixture(
             runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
@@ -336,7 +336,7 @@ class SendMessageUseCaseTest {
                     "<tool_call>{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"}}</tool_call>",
                 ),
             ),
-            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.GEMMA_4_E2B_Q4_K_M),
+            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M),
         )
 
         val response = fixture.useCase.execute(
@@ -685,8 +685,8 @@ private class SendRecordingInferenceModule(
     override fun listAvailableModels(): List<String> {
         return listOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4,
-            ModelCatalog.QWEN_3_5_2B_Q4,
-            ModelCatalog.GEMMA_4_E2B_Q4_K_M,
+            ModelCatalog.QWEN3_1_7B_Q4_K_M,
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
         )
     }
 
@@ -900,39 +900,33 @@ private fun sendRuntimeConfig(
     streamContractV2Enabled: Boolean,
 ): RuntimeConfig {
     val payload0 = "payload-0".encodeToByteArray()
-    val payload2 = "payload-2".encodeToByteArray()
-    val payloadGemma = "payload-gemma".encodeToByteArray()
-    val payloadBonsai = "payload-bonsai".encodeToByteArray()
+    val payload1 = "payload-1".encodeToByteArray()
+    val payloadLlama = "payload-llama".encodeToByteArray()
     return RuntimeConfig(
         artifactPayloadByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to payload0,
-            ModelCatalog.QWEN_3_5_2B_Q4 to payload2,
-            ModelCatalog.GEMMA_4_E2B_Q4_K_M to payloadGemma,
-            ModelCatalog.BONSAI_8B_Q1_0_G128 to payloadBonsai,
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to payload1,
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M to payloadLlama,
         ),
         artifactFilePathByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "",
-            ModelCatalog.GEMMA_4_E2B_Q4_K_M to "",
-            ModelCatalog.BONSAI_8B_Q1_0_G128 to "",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "",
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M to "",
         ),
         artifactSha256ByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to sendSha256(payload0),
-            ModelCatalog.QWEN_3_5_2B_Q4 to sendSha256(payload2),
-            ModelCatalog.GEMMA_4_E2B_Q4_K_M to sendSha256(payloadGemma),
-            ModelCatalog.BONSAI_8B_Q1_0_G128 to sendSha256(payloadBonsai),
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to sendSha256(payload1),
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M to sendSha256(payloadLlama),
         ),
         artifactProvenanceIssuerByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
-            ModelCatalog.GEMMA_4_E2B_Q4_K_M to "internal-release",
-            ModelCatalog.BONSAI_8B_Q1_0_G128 to "internal-release",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M to "internal-release",
         ),
         artifactProvenanceSignatureByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "sig-0",
-            ModelCatalog.QWEN_3_5_2B_Q4 to "sig-2",
-            ModelCatalog.GEMMA_4_E2B_Q4_K_M to "sig-gemma",
-            ModelCatalog.BONSAI_8B_Q1_0_G128 to "sig-bonsai",
+            ModelCatalog.QWEN3_1_7B_Q4_K_M to "sig-1",
+            ModelCatalog.LLAMA_3_2_1B_Q4_K_M to "sig-llama",
         ),
         runtimeCompatibilityTag = "android-arm64-v8a",
         requireNativeRuntimeForStartupChecks = false,

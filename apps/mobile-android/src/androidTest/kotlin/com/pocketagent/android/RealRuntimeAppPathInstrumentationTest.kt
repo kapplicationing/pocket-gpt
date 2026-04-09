@@ -31,7 +31,7 @@ class RealRuntimeAppPathInstrumentationTest {
             parseBooleanArg(args, ARG_ENABLE_APP_PATH_TEST, defaultValue = false),
         )
         val modelPath0_8bRaw = args.getString(ARG_MODEL_PATH_0_8B)?.trim().orEmpty()
-        val modelPath2bRaw = args.getString(ARG_MODEL_PATH_2B)?.trim().orEmpty()
+        val modelPath2bRaw = args.getString(ARG_MODEL_PATH_1_7B)?.trim().orEmpty()
         assumeTrue(
             "Skipping real-runtime app-path lane. Provide both model paths via instrumentation arguments.",
             modelPath0_8bRaw.isNotEmpty() && modelPath2bRaw.isNotEmpty(),
@@ -48,7 +48,7 @@ class RealRuntimeAppPathInstrumentationTest {
         )
         val seeded2 = AppRuntimeDependencies.seedModelFromAbsolutePath(
             context = appContext,
-            modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
             absolutePath = modelPath2b,
         )
         assertTrue(
@@ -60,16 +60,16 @@ class RealRuntimeAppPathInstrumentationTest {
             ),
         )
         assertTrue(
-            "Failed to activate seeded 2B version ${seeded2.version}.",
+            "Failed to activate seeded 1.7B version ${seeded2.version}.",
             AppRuntimeDependencies.setActiveVersion(
                 context = appContext,
-                modelId = ModelCatalog.QWEN_3_5_2B_Q4,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 version = seeded2.version,
             ),
         )
         val snapshot = AppRuntimeDependencies.currentProvisioningSnapshot(appContext)
         val state0 = snapshot.models.first { it.modelId == ModelCatalog.QWEN_3_5_0_8B_Q4 }
-        val state2 = snapshot.models.first { it.modelId == ModelCatalog.QWEN_3_5_2B_Q4 }
+        val state2 = snapshot.models.first { it.modelId == ModelCatalog.QWEN3_1_7B_Q4_K_M }
         assertEquals(seeded0.version, state0.activeVersion)
         assertEquals(seeded2.version, state2.activeVersion)
         assertEquals(normalizePath(modelPath0_8b), normalizePath(state0.absolutePath.orEmpty()))
@@ -82,7 +82,7 @@ class RealRuntimeAppPathInstrumentationTest {
             startupChecks = startupChecks,
             healthyModelIds = setOf(
                 ModelCatalog.QWEN_3_5_0_8B_Q4,
-                ModelCatalog.QWEN_3_5_2B_Q4,
+                ModelCatalog.QWEN3_1_7B_Q4_K_M,
             ),
             failurePrefix = "App-path startup checks failed",
         )
@@ -129,14 +129,14 @@ class RealRuntimeAppPathInstrumentationTest {
         )
         val smolTarget = when {
             smol3Q4Raw.isNotEmpty() -> SmolTarget(
-                modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 modelPath = requireFile(smol3Q4Raw),
-                routingMode = RoutingMode.SMOLLM3_3B,
+                routingMode = RoutingMode.QWEN3_1_7B,
             )
             else -> SmolTarget(
-                modelId = ModelCatalog.SMOLLM3_3B_Q4_K_M,
+                modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                 modelPath = requireFile(smol3DraftRaw),
-                routingMode = RoutingMode.SMOLLM3_3B,
+                routingMode = RoutingMode.QWEN3_1_7B,
             )
         }
         val modelPath0_8b = requireFile(modelPath0_8bRaw)
@@ -211,7 +211,7 @@ class RealRuntimeAppPathInstrumentationTest {
         val bonsaiModelId = args.getString(ARG_BONSAI_MODEL_ID)
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?: ModelCatalog.BONSAI_8B_Q1_0_G128
+            ?: ModelCatalog.LLAMA_3_2_1B_Q4_K_M
         val modelPath0_8bRaw = args.getString(ARG_MODEL_PATH_0_8B)?.trim().orEmpty()
         val modelPathBonsaiRaw = args.getString(ARG_MODEL_PATH_BONSAI)?.trim().orEmpty()
         assumeTrue(
@@ -352,7 +352,7 @@ class RealRuntimeAppPathInstrumentationTest {
     companion object {
         private const val ARG_ENABLE_APP_PATH_TEST = "stage2_enable_app_path_test"
         private const val ARG_MODEL_PATH_0_8B = "stage2_model_0_8b_path"
-        private const val ARG_MODEL_PATH_2B = "stage2_model_2b_path"
+        private const val ARG_MODEL_PATH_1_7B = "stage2_model_1_7b_path"
         private const val ARG_MODEL_PATH_BONSAI = "stage2_model_bonsai_path"
         private const val ARG_BONSAI_MODEL_ID = "stage2_model_bonsai_id"
         private const val ARG_MODEL_PATH_SMOLLM3_Q4 = "stage2_model_smol_360m_path"

@@ -218,7 +218,7 @@ def _append_native_build_flag(
 def _instrumentation_args_from_model_paths(model_paths_by_id: Mapping[str, str]) -> dict[str, str]:
     arg_map = {
         "qwen3.5-0.8b-q4": "stage2_model_0_8b_path",
-        "qwen3.5-2b-q4": "stage2_model_2b_path",
+        "qwen3-1.7b-q4_k_m": "stage2_model_1_7b_path",
         "bonsai-8b-q1_0_g128": "stage2_model_bonsai_path",
     }
     runner_args: dict[str, str] = {}
@@ -4189,7 +4189,7 @@ def _parse_stage2_args(raw_args: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--device", required=True)
     parser.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
     parser.add_argument("--profile", choices={"quick", "closure"}, default="closure")
-    parser.add_argument("--models", choices={"0.8b", "2b", "both"})
+    parser.add_argument("--models", choices={"0.8b", "1.7b", "both"})
     parser.add_argument("--scenarios", choices={"a", "b", "both"}, default="both")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--install-mode", choices={"auto", "force", "skip"}, default="auto")
@@ -4222,7 +4222,7 @@ def _lane_stage2_impl(raw_args: Sequence[str], context: RuntimeContext) -> None:
     scenario_a_path = run_dir / "scenario-a.csv"
     scenario_b_path = run_dir / "scenario-b.csv"
     threshold_input_path = run_dir / "stage-2-threshold-input.csv"
-    model_2b_metrics_path = run_dir / "model-2b-metrics.csv"
+    model_1_7b_metrics_path = run_dir / "model-1.7b-metrics.csv"
     threshold_report_path = run_dir / "threshold-report.txt"
     runtime_validation_report_path = run_dir / "runtime-evidence-validation.txt"
     logcat_path = run_dir / "logcat.txt"
@@ -4325,7 +4325,7 @@ def _lane_stage2_impl(raw_args: Sequence[str], context: RuntimeContext) -> None:
         "scenario_a_csv": str(scenario_a_path.relative_to(REPO_ROOT)),
         "scenario_b_csv": str(scenario_b_path.relative_to(REPO_ROOT)),
         "threshold_input_csv": str(threshold_input_path.relative_to(REPO_ROOT)),
-        "model_2b_metrics_csv": str(model_2b_metrics_path.relative_to(REPO_ROOT)),
+        "model_1_7b_metrics_csv": str(model_1_7b_metrics_path.relative_to(REPO_ROOT)),
         "threshold_report": str(threshold_report_path.relative_to(REPO_ROOT)),
         "runtime_evidence_validation_report": str(runtime_validation_report_path.relative_to(REPO_ROOT)),
         "runtime_log_signals_json": str(runtime_log_signals_json_path.relative_to(REPO_ROOT)),

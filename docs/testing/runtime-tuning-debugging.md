@@ -48,7 +48,7 @@ Important files to inspect first:
 
 1. `summary.json`: top-level scenario/model metrics and run summary.
 2. `scenario-a.csv` / `scenario-b.csv`: per-run timing rows.
-3. `model-2b-metrics.csv`: 2B-specific metrics when collected.
+3. `model-1.7b-metrics.csv`: 1.7B-specific metrics when collected.
 4. `meminfo-*.txt`: Android memory snapshots for the benchmark run.
 5. `logcat.txt`: runtime warnings, crashes, GPU probe behavior, and provisioning/runtime failures.
 6. `threshold-report.txt`: threshold pass/fail output.

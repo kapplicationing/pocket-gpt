@@ -52,7 +52,7 @@ def build_draft(run_dir: Path) -> str:
     runtime_report = run_dir / "runtime-evidence-validation.txt"
     scenario_a = run_dir / "scenario-a.csv"
     scenario_b = run_dir / "scenario-b.csv"
-    model_2b = run_dir / "model-2b-metrics.csv"
+    model_2b = run_dir / "model-1.7b-metrics.csv"
     logcat = run_dir / "logcat.txt"
     notes = run_dir / "notes.md"
 
@@ -92,7 +92,7 @@ def build_draft(run_dir: Path) -> str:
         f"- Run dir: {run_dir}",
         f"- Scenario A CSV: {_rel(scenario_a, run_dir)}",
         f"- Scenario B CSV: {_rel(scenario_b, run_dir)}",
-        f"- 2B metrics CSV: {_rel(model_2b, run_dir)}",
+        f"- 1.7B metrics CSV: {_rel(model_2b, run_dir)}",
         f"- Threshold report: {_rel(threshold_report, run_dir)}",
         f"- Runtime validator report: {_rel(runtime_report, run_dir)}",
         f"- Logcat: {_rel(logcat, run_dir)}",
@@ -101,7 +101,7 @@ def build_draft(run_dir: Path) -> str:
         "## Metrics Snapshot",
         f"- Scenario A rows: {a_count} | median first-token ms: {a_ft} | median decode tok/s: {a_tps}",
         f"- Scenario B rows: {b_count} | median first-token ms: {b_ft} | median decode tok/s: {b_tps}",
-        f"- 2B rows: {m2_count} | median first-token ms: {m2_ft} | median decode tok/s: {m2_tps}",
+        f"- 1.7B rows: {m2_count} | median first-token ms: {m2_ft} | median decode tok/s: {m2_tps}",
         "",
         "## Meminfo Artifacts",
     ]

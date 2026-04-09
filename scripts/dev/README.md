@@ -88,24 +88,24 @@ For runtime tuning analysis after repeated device runs, use `docs/testing/runtim
 ## Stage-2 Benchmark Wrapper
 
 ```bash
-bash scripts/dev/bench.sh stage2 --device your-device-id [--date YYYY-MM-DD] [--profile quick|closure] [--models 0.8b|2b|both] [--scenarios a|b|both] [--resume] [--install-mode auto|force|skip] [--logcat filtered|full] [--evidence-note-path <abs-path>]
+bash scripts/dev/bench.sh stage2 --device your-device-id [--date YYYY-MM-DD] [--profile quick|closure] [--models 0.8b|1.7b|both] [--scenarios a|b|both] [--resume] [--install-mode auto|force|skip] [--logcat filtered|full] [--evidence-note-path <abs-path>]
 ```
 
 Required environment (device file paths for side-loaded models):
 
 ```bash
 export POCKETGPT_QWEN_3_5_0_8B_Q4_SIDELOAD_PATH=/absolute/device/path/qwen3.5-0.8b-q4.gguf
-export POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH=/absolute/device/path/qwen3.5-2b-q4.gguf
+export POCKETGPT_QWEN3_1_7B_Q4_K_M_SIDELOAD_PATH=/absolute/device/path/qwen3-1.7b-q4_k_m.gguf
 ```
 
-Only the paths for the selected `--models` are required now. A `0.8b` quick run does not require the 2B path.
+Only the paths for the selected `--models` are required now. A `0.8b` quick run does not require the 1.7B path.
 
 Contract outputs under `scripts/benchmarks/runs/YYYY-MM-DD/your-device-id/`:
 
 1. `scenario-a.csv`
 2. `scenario-b.csv`
 3. `stage-2-threshold-input.csv`
-4. `model-2b-metrics.csv` (required for WP-12/ENG-13 closure evidence)
+4. `model-1.7b-metrics.csv` (required for WP-12/ENG-13 closure evidence)
 5. `meminfo-*.txt` (PSS snapshots per scenario/model)
 6. `threshold-report.txt`
 7. `runtime-evidence-validation.txt`

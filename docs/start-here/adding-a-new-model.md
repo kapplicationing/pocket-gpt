@@ -20,7 +20,7 @@ Before touching code, research the model online:
 
 **File:** `packages/core-domain/src/commonMain/kotlin/com/pocketagent/core/RoutingMode.kt`
 
-Add a new enum value for explicit model routing (e.g., `PHI_4_MINI`).
+Add a new enum value for explicit model routing (e.g., `LLAMA_3_2_1B`).
 
 ### 2. Add ModelDescriptor to the catalog
 
@@ -35,7 +35,7 @@ Add:
 Key descriptor fields:
 | Field | Description |
 |---|---|
-| `modelId` | Unique string ID (e.g., `phi-4-mini-instruct-q4_k_m`) |
+| `modelId` | Unique string ID (e.g., `llama-3.2-1b-instruct-q4_k_m`) |
 | `tier` | `BASELINE` for production models, `DEBUG` for test/draft models |
 | `bridgeSupported` | `true` only after a real JNI/device-path test proves the vendored native runtime can load its format |
 | `autoRoutingEnabled` | `true` to include in adaptive routing policy |

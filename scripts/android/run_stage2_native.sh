@@ -5,9 +5,9 @@ usage() {
   cat <<'USAGE' >&2
 Usage:
   bash scripts/android/run_stage2_native.sh --device <serial> [--date YYYY-MM-DD] [--run-dir <path>] \
-    [--profile quick|closure] [--models 0.8b|2b|both] [--scenarios a|b|both] [--resume] \
+    [--profile quick|closure] [--models 0.8b|1.7b|both] [--scenarios a|b|both] [--resume] \
     [--install-mode auto|force|skip] [--logcat filtered|full] [--runs <n>] \
-    [--max-tokens-a <n>] [--max-tokens-b <n>] [--model-0-8b-path <device-abs-path>] [--model-2b-path <device-abs-path>] \
+    [--max-tokens-a <n>] [--max-tokens-b <n>] [--model-0-8b-path <device-abs-path>] [--model-1-7b-path <device-abs-path>] \
     [--runtime-profile battery|balanced|fast] [--gpu-enabled 0|1] [--n-ctx <n>] [--n-batch <n>] [--n-ubatch <n>] \
     [--n-threads <n>] [--n-threads-batch <n>] [--flash-attn auto|on|off] [--disable-tools 0|1] \
     [--require-prefix-cache-hit 0|1] \
@@ -34,7 +34,7 @@ MAX_TOKENS_B="${POCKETGPT_STAGE2_MAX_TOKENS_B:-}"
 MIN_TOKENS="${POCKETGPT_STAGE2_MIN_TOKENS:-}"
 WARMUP_MAX_TOKENS="${POCKETGPT_STAGE2_WARMUP_MAX_TOKENS:-}"
 MODEL_0_8B_PATH="${POCKETGPT_QWEN_3_5_0_8B_Q4_SIDELOAD_PATH:-}"
-MODEL_2B_PATH="${POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH:-}"
+MODEL_1_7B_PATH="${POCKETGPT_QWEN3_1_7B_Q4_K_M_SIDELOAD_PATH:-}"
 MODEL_PROVISION_SKIPPED="${POCKETGPT_STAGE2_MODEL_PROVISION_SKIPPED:-unknown}"
 PREFIX_CACHE_ENABLED="${POCKETGPT_PREFIX_CACHE_ENABLED:-1}"
 PREFIX_CACHE_STRICT="${POCKETGPT_PREFIX_CACHE_STRICT:-0}"
@@ -110,8 +110,8 @@ while [[ $# -gt 0 ]]; do
       MODEL_0_8B_PATH="${2:-}"
       shift 2
       ;;
-    --model-2b-path)
-      MODEL_2B_PATH="${2:-}"
+    --model-1-7b-path)
+      MODEL_1_7B_PATH="${2:-}"
       shift 2
       ;;
     --runtime-profile)
@@ -190,8 +190,8 @@ if [[ -z "${MODELS}" ]]; then
   fi
 fi
 MODELS="$(echo "${MODELS}" | tr '[:upper:]' '[:lower:]')"
-if [[ "${MODELS}" != "0.8b" && "${MODELS}" != "2b" && "${MODELS}" != "both" ]]; then
-  echo "--models must be 0.8b, 2b, or both" >&2
+if [[ "${MODELS}" != "0.8b" && "${MODELS}" != "1.7b" && "${MODELS}" != "both" ]]; then
+  echo "--models must be 0.8b, 1.7b, or both" >&2
   exit 1
 fi
 
@@ -314,7 +314,7 @@ if [[ "${PROFILE}" == "closure" ]]; then
 fi
 
 MODEL_0_8B_ID="qwen3.5-0.8b-q4"
-MODEL_2B_ID="qwen3.5-2b-q4"
+MODEL_1_7B_ID="qwen3-1.7b-q4_k_m"
 PACKAGE_NAME="com.pocketagent.android"
 TEST_RUNNER="com.pocketagent.android.test/androidx.test.runner.AndroidJUnitRunner"
 TEST_CLASS_SWEEP="com.pocketagent.android.NativeStage2BenchmarkInstrumentationTest#runConfiguredModelSweep"
@@ -322,7 +322,7 @@ CSV_HEADER="date,platform,device_class,device_name,backend,runtime,model,scenari
 
 SCENARIO_A_CSV="${RUN_DIR}/scenario-a.csv"
 SCENARIO_B_CSV="${RUN_DIR}/scenario-b.csv"
-MODEL_2B_CSV="${RUN_DIR}/model-2b-metrics.csv"
+MODEL_1_7B_CSV="${RUN_DIR}/model-1.7b-metrics.csv"
 THRESHOLD_INPUT_CSV="${RUN_DIR}/stage-2-threshold-input.csv"
 NOTES_PATH="${RUN_DIR}/notes.md"
 LOGCAT_PATH="${RUN_DIR}/logcat.txt"
@@ -338,8 +338,8 @@ require_model_path_if_selected() {
     0.8b)
       echo "Set POCKETGPT_QWEN_3_5_0_8B_Q4_SIDELOAD_PATH or pass --model-0-8b-path." >&2
       ;;
-    2b)
-      echo "Set POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH or pass --model-2b-path." >&2
+    1.7b)
+      echo "Set POCKETGPT_QWEN3_1_7B_Q4_K_M_SIDELOAD_PATH or pass --model-1-7b-path." >&2
       ;;
   esac
   exit 1
@@ -348,8 +348,8 @@ require_model_path_if_selected() {
 if [[ "${MODELS}" == "0.8b" || "${MODELS}" == "both" ]]; then
   require_model_path_if_selected "0.8b" "${MODEL_0_8B_PATH}"
 fi
-if [[ "${MODELS}" == "2b" || "${MODELS}" == "both" ]]; then
-  require_model_path_if_selected "2b" "${MODEL_2B_PATH}"
+if [[ "${MODELS}" == "1.7b" || "${MODELS}" == "both" ]]; then
+  require_model_path_if_selected "1.7b" "${MODEL_1_7B_PATH}"
 fi
 
 metric_value() {
@@ -521,12 +521,12 @@ reset_csv_with_header() {
   printf '%s\n' "${CSV_HEADER}" > "${csv_path}"
 }
 
-filter_model_2b_rows() {
+filter_model_1_7b_rows() {
   local scenarios_to_replace="$1"
-  ensure_csv_header "${MODEL_2B_CSV}"
+  ensure_csv_header "${MODEL_1_7B_CSV}"
   local temp_file
   temp_file="$(mktemp)"
-  python3 - "${MODEL_2B_CSV}" "${temp_file}" "${scenarios_to_replace}" <<'PY'
+  python3 - "${MODEL_1_7B_CSV}" "${temp_file}" "${scenarios_to_replace}" <<'PY'
 import csv
 import sys
 
@@ -551,7 +551,7 @@ with open(target, 'w', newline='', encoding='utf-8') as handle:
           continue
       writer.writerow(row)
 PY
-  mv "${temp_file}" "${MODEL_2B_CSV}"
+  mv "${temp_file}" "${MODEL_1_7B_CSV}"
 }
 
 prepare_outputs_for_run() {
@@ -560,7 +560,7 @@ prepare_outputs_for_run() {
 
   ensure_csv_header "${SCENARIO_A_CSV}"
   ensure_csv_header "${SCENARIO_B_CSV}"
-  ensure_csv_header "${MODEL_2B_CSV}"
+  ensure_csv_header "${MODEL_1_7B_CSV}"
 
   if [[ "${model_id}" == "${MODEL_0_8B_ID}" ]]; then
     if csv_contains_scenario "${scenarios_csv}" "A"; then
@@ -575,15 +575,15 @@ prepare_outputs_for_run() {
   fi
 
   if [[ "${scenarios_csv}" == "A,B" ]]; then
-    reset_csv_with_header "${MODEL_2B_CSV}"
+    reset_csv_with_header "${MODEL_1_7B_CSV}"
   else
-    filter_model_2b_rows "${scenarios_csv}"
+    filter_model_1_7b_rows "${scenarios_csv}"
   fi
   if csv_contains_scenario "${scenarios_csv}" "A"; then
-    rm -f "${RUN_DIR}/meminfo-2b-scenario-a.txt"
+    rm -f "${RUN_DIR}/meminfo-1.7b-scenario-a.txt"
   fi
   if csv_contains_scenario "${scenarios_csv}" "B"; then
-    rm -f "${RUN_DIR}/meminfo-2b-scenario-b.txt"
+    rm -f "${RUN_DIR}/meminfo-1.7b-scenario-b.txt"
   fi
 }
 
@@ -754,7 +754,7 @@ run_model_sweep() {
     -e stage2_require_prefix_cache_hit "${REQUIRE_PREFIX_CACHE_HIT}" \
     -e stage2_session_mode "${SESSION_MODE}" \
     ${MODEL_0_8B_PATH:+-e stage2_model_0_8b_path "${MODEL_0_8B_PATH}"} \
-    ${MODEL_2B_PATH:+-e stage2_model_2b_path "${MODEL_2B_PATH}"} \
+    ${MODEL_1_7B_PATH:+-e stage2_model_1_7b_path "${MODEL_1_7B_PATH}"} \
     ${RUNTIME_PROFILE:+-e stage2_profile "${RUNTIME_PROFILE}"} \
     ${GPU_ENABLED:+-e stage2_gpu_enabled "${GPU_ENABLED}"} \
     ${N_CTX_OVERRIDE:+-e stage2_n_ctx "${N_CTX_OVERRIDE}"} \
@@ -829,7 +829,7 @@ run_model_sweep() {
         append_metric_row "${SCENARIO_B_CSV}" "${scenario}" "${model_id}" "${metric_line}" "${meminfo_case}" "${logcat_case}"
       fi
     else
-      append_metric_row "${MODEL_2B_CSV}" "${scenario}" "${model_id}" "${metric_line}" "${meminfo_case}" "${logcat_case}"
+      append_metric_row "${MODEL_1_7B_CSV}" "${scenario}" "${model_id}" "${metric_line}" "${meminfo_case}" "${logcat_case}"
     fi
   done
 
@@ -851,10 +851,10 @@ run_model_sweep() {
     fi
   else
     if csv_contains_scenario "${scenarios_csv}" "A"; then
-      cp "${meminfo_case}" "${RUN_DIR}/meminfo-2b-scenario-a.txt"
+      cp "${meminfo_case}" "${RUN_DIR}/meminfo-1.7b-scenario-a.txt"
     fi
     if csv_contains_scenario "${scenarios_csv}" "B"; then
-      cp "${meminfo_case}" "${RUN_DIR}/meminfo-2b-scenario-b.txt"
+      cp "${meminfo_case}" "${RUN_DIR}/meminfo-1.7b-scenario-b.txt"
     fi
   fi
 }
@@ -927,8 +927,8 @@ STATE
 if [[ "${MODELS}" == "0.8b" || "${MODELS}" == "both" ]]; then
   verify_model_path_on_device "${MODEL_0_8B_PATH}"
 fi
-if [[ "${MODELS}" == "2b" || "${MODELS}" == "both" ]]; then
-  verify_model_path_on_device "${MODEL_2B_PATH}"
+if [[ "${MODELS}" == "1.7b" || "${MODELS}" == "both" ]]; then
+  verify_model_path_on_device "${MODEL_1_7B_PATH}"
 fi
 
 adb_retry get-state >/dev/null
@@ -946,7 +946,7 @@ fi
 if [[ "${RESUME}" -eq 0 && "${MODELS}" == "both" && "${SCENARIOS}" == "both" ]]; then
   find "${RUN_DIR}" -maxdepth 1 -type f \
     \( -name 'instrument-*.txt' -o -name 'logcat-*.txt' -o -name 'meminfo-*.txt' \
-       -o -name 'scenario-a.csv' -o -name 'scenario-b.csv' -o -name 'model-2b-metrics.csv' \
+       -o -name 'scenario-a.csv' -o -name 'scenario-b.csv' -o -name 'model-1.7b-metrics.csv' \
        -o -name 'stage-2-threshold-input.csv' -o -name 'threshold-report.txt' \
        -o -name 'runtime-evidence-validation.txt' -o -name 'summary.json' \
        -o -name 'notes.md' -o -name 'logcat.txt' -o -name 'stage2-run-meta.env' \
@@ -956,7 +956,7 @@ fi
 
 ensure_csv_header "${SCENARIO_A_CSV}"
 ensure_csv_header "${SCENARIO_B_CSV}"
-ensure_csv_header "${MODEL_2B_CSV}"
+ensure_csv_header "${MODEL_1_7B_CSV}"
 : > "${LOGCAT_PATH}"
 
 APK_INSTALL_SKIPPED="$(install_app_if_needed)"
@@ -989,8 +989,8 @@ run_for_model_if_needed() {
 if [[ "${MODELS}" == "0.8b" || "${MODELS}" == "both" ]]; then
   run_for_model_if_needed "${MODEL_0_8B_ID}" "0-8b-sweep"
 fi
-if [[ "${MODELS}" == "2b" || "${MODELS}" == "both" ]]; then
-  run_for_model_if_needed "${MODEL_2B_ID}" "2b-sweep"
+if [[ "${MODELS}" == "1.7b" || "${MODELS}" == "both" ]]; then
+  run_for_model_if_needed "${MODEL_1_7B_ID}" "1.7b-sweep"
 fi
 
 {
@@ -1025,8 +1025,8 @@ GIT_SHA="$(git rev-parse --short HEAD)"
   if [[ "${MODELS}" == "0.8b" || "${MODELS}" == "both" ]]; then
     echo "- 0.8B model path: ${MODEL_0_8B_PATH}"
   fi
-  if [[ "${MODELS}" == "2b" || "${MODELS}" == "both" ]]; then
-    echo "- 2B model path: ${MODEL_2B_PATH}"
+  if [[ "${MODELS}" == "1.7b" || "${MODELS}" == "both" ]]; then
+    echo "- 1.7B model path: ${MODEL_1_7B_PATH}"
   fi
   echo "- Runs per scenario: ${RUNS}"
   echo "- Max tokens A/B: ${MAX_TOKENS_A}/${MAX_TOKENS_B}"
@@ -1034,7 +1034,7 @@ GIT_SHA="$(git rev-parse --short HEAD)"
   echo "- Warmup max tokens: ${WARMUP_MAX_TOKENS}"
   echo "- Scenario A rows: $(($(wc -l < "${SCENARIO_A_CSV}") - 1))"
   echo "- Scenario B rows: $(($(wc -l < "${SCENARIO_B_CSV}") - 1))"
-  echo "- 2B metrics rows: $(($(wc -l < "${MODEL_2B_CSV}") - 1))"
+  echo "- 1.7B metrics rows: $(($(wc -l < "${MODEL_1_7B_CSV}") - 1))"
   echo "- Meminfo snapshots:"
   ls -1 "${RUN_DIR}"/meminfo-*.txt 2>/dev/null | sed 's|^|- |' || echo "- (none)"
 } > "${NOTES_PATH}"

@@ -1257,11 +1257,11 @@ class LanesTest(unittest.TestCase):
                 serial=device_serial,
                 model_device_paths_by_id={
                     "qwen3.5-0.8b-q4": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
-                    "qwen3.5-2b-q4": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
                 },
                 model_host_paths_by_id={
                     "qwen3.5-0.8b-q4": "/tmp/qwen3.5-0.8b-q4.gguf",
-                    "qwen3.5-2b-q4": "/tmp/qwen3.5-2b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/tmp/qwen3-1.7b-q4_k_m.gguf",
                 },
             )
 
@@ -1312,11 +1312,11 @@ class LanesTest(unittest.TestCase):
                 serial=device_serial,
                 model_device_paths_by_id={
                     "qwen3.5-0.8b-q4": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
-                    "qwen3.5-2b-q4": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
                 },
                 model_host_paths_by_id={
                     "qwen3.5-0.8b-q4": "/tmp/qwen3.5-0.8b-q4.gguf",
-                    "qwen3.5-2b-q4": "/tmp/qwen3.5-2b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/tmp/qwen3-1.7b-q4_k_m.gguf",
                 },
             )
 
@@ -1426,13 +1426,13 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
 
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
                 lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
                     args=[],
@@ -1465,7 +1465,7 @@ class LanesTest(unittest.TestCase):
                     if script is not None:
                         if "qwen3.5-0.8b-q4.gguf" in script:
                             return Result(stdout="3\n")
-                        if "qwen3.5-2b-q4.gguf" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script:
                             return Result(stdout="5\n")
                         return Result(stdout="")
                     return Result()
@@ -1496,7 +1496,7 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
 
@@ -1512,10 +1512,10 @@ class LanesTest(unittest.TestCase):
                                 "host_size": 3,
                                 "device_path": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
                             },
-                            "qwen3.5-2b-q4": {
+                            "qwen3-1.7b-q4_k_m": {
                                 "host_sha256": model_2_sha,
                                 "host_size": 5,
-                                "device_path": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf",
+                                "device_path": "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
                             },
                         },
                     }
@@ -1523,7 +1523,7 @@ class LanesTest(unittest.TestCase):
 
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
                 lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
                     args=[],
@@ -1558,12 +1558,12 @@ class LanesTest(unittest.TestCase):
                             return Result(stdout=manifest_payload)
                         if "qwen3.5-0.8b-q4.gguf" in script and "wc -c" in script:
                             return Result(stdout="3\n")
-                        if "qwen3.5-2b-q4.gguf" in script and "wc -c" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "wc -c" in script:
                             return Result(stdout="5\n")
                         if "qwen3.5-0.8b-q4.gguf" in script and "sha256sum" in script:
                             return Result(stdout=f"{model_0_sha}  /sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf\n")
-                        if "qwen3.5-2b-q4.gguf" in script and "sha256sum" in script:
-                            return Result(stdout=f"{model_2_sha}  /sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf\n")
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "sha256sum" in script:
+                            return Result(stdout=f"{model_2_sha}  /sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf\n")
                         return Result(stdout="")
                     return Result()
 
@@ -1597,13 +1597,13 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
 
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
                 lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
                     args=[],
@@ -1636,7 +1636,7 @@ class LanesTest(unittest.TestCase):
                     if script is not None:
                         if "qwen3.5-0.8b-q4.gguf" in script:
                             return Result(stdout="3\n")
-                        if "qwen3.5-2b-q4.gguf" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script:
                             return Result(stdout="5\n")
                         return Result(stdout="")
                     return Result()
@@ -1668,12 +1668,12 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
                 lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
                     args=[],
@@ -1709,7 +1709,7 @@ class LanesTest(unittest.TestCase):
                             return Result(stdout="{corrupt-json")
                         if "qwen3.5-0.8b-q4.gguf" in script:
                             return Result(stdout="3\n")
-                        if "qwen3.5-2b-q4.gguf" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script:
                             return Result(stdout="5\n")
                         return Result(stdout="")
                     return Result()
@@ -1742,7 +1742,7 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
 
@@ -1758,10 +1758,10 @@ class LanesTest(unittest.TestCase):
                                 "host_size": 3,
                                 "device_path": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
                             },
-                            "qwen3.5-2b-q4": {
+                            "qwen3-1.7b-q4_k_m": {
                                 "host_sha256": model_2_sha,
                                 "host_size": 5,
-                                "device_path": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf",
+                                "device_path": "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
                             },
                         },
                     }
@@ -1769,7 +1769,7 @@ class LanesTest(unittest.TestCase):
 
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
                 lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
                     args=[],
@@ -1812,9 +1812,9 @@ class LanesTest(unittest.TestCase):
                                 0,
                             )
                             return Result(stdout=f"{size}\n")
-                        if "qwen3.5-2b-q4.gguf" in script and "wc -c" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "wc -c" in script:
                             size = remote_sizes.get(
-                                "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf",
+                                "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
                                 0,
                             )
                             return Result(stdout=f"{size}\n")
@@ -1843,7 +1843,7 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
 
@@ -1851,7 +1851,7 @@ class LanesTest(unittest.TestCase):
                 model_2_sha = hashlib.sha256(b"12345").hexdigest()
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
                 lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
                     args=[],
@@ -1871,9 +1871,9 @@ class LanesTest(unittest.TestCase):
                         self.stderr = stderr
 
                 primary_0 = "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf"
-                primary_2 = "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf"
+                primary_2 = "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf"
                 fallback_0 = "/sdcard/Download/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf"
-                fallback_2 = "/sdcard/Download/com.pocketagent.android/models/qwen3.5-2b-q4.gguf"
+                fallback_2 = "/sdcard/Download/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf"
                 remote_sizes[fallback_0] = 3
                 remote_sizes[fallback_2] = 5
 
@@ -1900,7 +1900,7 @@ class LanesTest(unittest.TestCase):
                             return Result(stdout="")
                         if (
                             "cp " in script and
-                            "qwen3.5-2b-q4.gguf" in script and
+                            "qwen3-1.7b-q4_k_m.gguf" in script and
                             "/sdcard/Download/com.pocketagent.android/models" in script and
                             "/sdcard/Android/media/com.pocketagent.android/models" in script
                         ):
@@ -1911,14 +1911,14 @@ class LanesTest(unittest.TestCase):
                                 primary_0 if "/sdcard/Android/media/com.pocketagent.android/models" in script else fallback_0
                             )
                             return Result(stdout=f"{size}\n" if size is not None else "")
-                        if "qwen3.5-2b-q4.gguf" in script and "wc -c" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "wc -c" in script:
                             size = remote_sizes.get(
                                 primary_2 if "/sdcard/Android/media/com.pocketagent.android/models" in script else fallback_2
                             )
                             return Result(stdout=f"{size}\n" if size is not None else "")
                         if "qwen3.5-0.8b-q4.gguf" in script and "sha256sum" in script:
                             return Result(stdout=f"{model_0_sha}  {fallback_0}\n")
-                        if "qwen3.5-2b-q4.gguf" in script and "sha256sum" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "sha256sum" in script:
                             return Result(stdout=f"{model_2_sha}  {fallback_2}\n")
                         return Result(stdout="")
                     return Result()
@@ -1927,7 +1927,7 @@ class LanesTest(unittest.TestCase):
                 prepared = lanes.prepare_real_runtime_env(context, "SER123")
 
                 self.assertEqual(primary_0, prepared.model_device_paths_by_id["qwen3.5-0.8b-q4"])
-                self.assertEqual(primary_2, prepared.model_device_paths_by_id["qwen3.5-2b-q4"])
+                self.assertEqual(primary_2, prepared.model_device_paths_by_id["qwen3-1.7b-q4_k_m"])
                 model_push_calls = [
                     cmd
                     for cmd in issued_commands
@@ -1947,13 +1947,13 @@ class LanesTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
-                model_2b = tmp_path / "Qwen3.5-2B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
                 model_0_8b.write_bytes(b"abc")
                 model_2b.write_bytes(b"12345")
 
                 lanes._resolve_real_runtime_model_paths = lambda _context: {
                     "qwen3.5-0.8b-q4": str(model_0_8b),
-                    "qwen3.5-2b-q4": str(model_2b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
                 }
 
                 probe_calls = 0
@@ -2002,9 +2002,9 @@ class LanesTest(unittest.TestCase):
                                 0,
                             )
                             return Result(stdout=f"{size}\n")
-                        if "qwen3.5-2b-q4.gguf" in script and "wc -c" in script:
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "wc -c" in script:
                             size = remote_sizes.get(
-                                "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-2b-q4.gguf",
+                                "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
                                 0,
                             )
                             return Result(stdout=f"{size}\n")

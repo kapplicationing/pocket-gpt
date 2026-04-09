@@ -210,15 +210,15 @@ lanes:
           - "**/Qwen3.5-0.8B-UD-IQ2_XXS.gguf"
           - "**/qwen3.5-0.8b-q4.gguf"
         device_file_name: qwen3.5-0.8b-q4.gguf
-      - model_id: qwen3.5-2b-q4
+      - model_id: qwen3-1.7b-q4_k_m
         cache_patterns:
-          - Qwen3.5-2B-Q4_0.gguf
-          - Qwen3.5-2B-UD-IQ2_XXS.gguf
-          - qwen3.5-2b-q4.gguf
-          - "**/Qwen3.5-2B-Q4_0.gguf"
-          - "**/Qwen3.5-2B-UD-IQ2_XXS.gguf"
-          - "**/qwen3.5-2b-q4.gguf"
-        device_file_name: qwen3.5-2b-q4.gguf
+          - Qwen3-1.7B-Q4_K_M.gguf
+          - Qwen3-1.7B-IQ4_XS.gguf
+          - qwen3-1.7b-q4_k_m.gguf
+          - "**/Qwen3-1.7B-Q4_K_M.gguf"
+          - "**/Qwen3-1.7B-IQ4_XS.gguf"
+          - "**/qwen3-1.7b-q4_k_m.gguf"
+        device_file_name: qwen3-1.7b-q4_k_m.gguf
     app_package: com.pocketagent.android
     instrumentation_runner: com.pocketagent.android.test/androidx.test.runner.AndroidJUnitRunner
     provisioning_test_class: com.pocketagent.android.RealRuntimeProvisioningInstrumentationTest#seedModelsAndVerifyStartupChecks

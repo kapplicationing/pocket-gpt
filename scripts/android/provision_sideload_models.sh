@@ -7,21 +7,21 @@ Usage:
   bash scripts/android/provision_sideload_models.sh \
     --device <serial> \
     --model-0-8b-local <host-path-to-gguf> \
-    --model-2b-local <host-path-to-gguf> \
+    --model-1-7b-local <host-path-to-gguf> \
     [--device-dir <device-directory>]
 
 Example:
   bash scripts/android/provision_sideload_models.sh \
     --device DEVICE_SERIAL_REDACTED \
     --model-0-8b-local /models/qwen3.5-0.8b-q4.gguf \
-    --model-2b-local /models/qwen3.5-2b-q4.gguf \
+    --model-1-7b-local /models/qwen3-1.7b-q4_k_m.gguf \
     --device-dir /sdcard/Download/pocketgpt-models
 USAGE
 }
 
 DEVICE=""
 MODEL_0_8B_LOCAL=""
-MODEL_2B_LOCAL=""
+MODEL_1_7B_LOCAL=""
 DEVICE_DIR="/sdcard/Download/pocketgpt-models"
 
 while [[ $# -gt 0 ]]; do
@@ -34,8 +34,8 @@ while [[ $# -gt 0 ]]; do
       MODEL_0_8B_LOCAL="${2:-}"
       shift 2
       ;;
-    --model-2b-local)
-      MODEL_2B_LOCAL="${2:-}"
+    --model-1-7b-local)
+      MODEL_1_7B_LOCAL="${2:-}"
       shift 2
       ;;
     --device-dir)
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${DEVICE}" || -z "${MODEL_0_8B_LOCAL}" || -z "${MODEL_2B_LOCAL}" ]]; then
+if [[ -z "${DEVICE}" || -z "${MODEL_0_8B_LOCAL}" || -z "${MODEL_1_7B_LOCAL}" ]]; then
   echo "Missing required arguments." >&2
   usage
   exit 1
@@ -64,13 +64,13 @@ if [[ ! -f "${MODEL_0_8B_LOCAL}" ]]; then
   echo "Missing local model file: ${MODEL_0_8B_LOCAL}" >&2
   exit 1
 fi
-if [[ ! -f "${MODEL_2B_LOCAL}" ]]; then
-  echo "Missing local model file: ${MODEL_2B_LOCAL}" >&2
+if [[ ! -f "${MODEL_1_7B_LOCAL}" ]]; then
+  echo "Missing local model file: ${MODEL_1_7B_LOCAL}" >&2
   exit 1
 fi
 
 MODEL_0_8B_DEVICE_PATH="${DEVICE_DIR}/qwen3.5-0.8b-q4.gguf"
-MODEL_2B_DEVICE_PATH="${DEVICE_DIR}/qwen3.5-2b-q4.gguf"
+MODEL_1_7B_DEVICE_PATH="${DEVICE_DIR}/qwen3-1.7b-q4_k_m.gguf"
 
 CACHE_DIR="scripts/benchmarks/cache/${DEVICE}"
 ENV_DIR="scripts/benchmarks/device-env"
@@ -130,9 +130,9 @@ push_if_changed() {
     MODEL_0_8B_DEVICE_SHA="${device_sha}"
     MODEL_0_8B_SKIPPED="${skipped}"
   else
-    MODEL_2B_HOST_SHA="${host_sha}"
-    MODEL_2B_DEVICE_SHA="${device_sha}"
-    MODEL_2B_SKIPPED="${skipped}"
+    MODEL_1_7B_HOST_SHA="${host_sha}"
+    MODEL_1_7B_DEVICE_SHA="${device_sha}"
+    MODEL_1_7B_SKIPPED="${skipped}"
   fi
 }
 
@@ -140,33 +140,33 @@ echo "Ensuring destination directory exists on device..."
 adb -s "${DEVICE}" shell "mkdir -p '${DEVICE_DIR}'" >/dev/null
 
 push_if_changed "${MODEL_0_8B_LOCAL}" "${MODEL_0_8B_DEVICE_PATH}" "0.8B"
-push_if_changed "${MODEL_2B_LOCAL}" "${MODEL_2B_DEVICE_PATH}" "2B"
+push_if_changed "${MODEL_1_7B_LOCAL}" "${MODEL_1_7B_DEVICE_PATH}" "1.7B"
 
 echo "Verifying files on device..."
-adb -s "${DEVICE}" shell "test -f '${MODEL_0_8B_DEVICE_PATH}' && test -f '${MODEL_2B_DEVICE_PATH}'"
+adb -s "${DEVICE}" shell "test -f '${MODEL_0_8B_DEVICE_PATH}' && test -f '${MODEL_1_7B_DEVICE_PATH}'"
 
 cat > "${CACHE_FILE}" <<STATE
 DEVICE=${DEVICE}
 DEVICE_DIR=${DEVICE_DIR}
 MODEL_0_8B_DEVICE_PATH=${MODEL_0_8B_DEVICE_PATH}
-MODEL_2B_DEVICE_PATH=${MODEL_2B_DEVICE_PATH}
+MODEL_1_7B_DEVICE_PATH=${MODEL_1_7B_DEVICE_PATH}
 MODEL_0_8B_HOST_SHA=${MODEL_0_8B_HOST_SHA}
-MODEL_2B_HOST_SHA=${MODEL_2B_HOST_SHA}
+MODEL_1_7B_HOST_SHA=${MODEL_1_7B_HOST_SHA}
 MODEL_0_8B_DEVICE_SHA=${MODEL_0_8B_DEVICE_SHA}
-MODEL_2B_DEVICE_SHA=${MODEL_2B_DEVICE_SHA}
+MODEL_1_7B_DEVICE_SHA=${MODEL_1_7B_DEVICE_SHA}
 MODEL_0_8B_SKIPPED=${MODEL_0_8B_SKIPPED}
-MODEL_2B_SKIPPED=${MODEL_2B_SKIPPED}
+MODEL_1_7B_SKIPPED=${MODEL_1_7B_SKIPPED}
 UPDATED_AT=$(date +%FT%T)
 STATE
 
 MODEL_PROVISION_SKIPPED="0"
-if [[ "${MODEL_0_8B_SKIPPED}" == "1" && "${MODEL_2B_SKIPPED}" == "1" ]]; then
+if [[ "${MODEL_0_8B_SKIPPED}" == "1" && "${MODEL_1_7B_SKIPPED}" == "1" ]]; then
   MODEL_PROVISION_SKIPPED="1"
 fi
 
 cat > "${ENV_FILE}" <<ENV
 export POCKETGPT_QWEN_3_5_0_8B_Q4_SIDELOAD_PATH=${MODEL_0_8B_DEVICE_PATH}
-export POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH=${MODEL_2B_DEVICE_PATH}
+export POCKETGPT_QWEN3_1_7B_Q4_K_M_SIDELOAD_PATH=${MODEL_1_7B_DEVICE_PATH}
 export POCKETGPT_STAGE2_MODEL_PROVISION_SKIPPED=${MODEL_PROVISION_SKIPPED}
 ENV
 

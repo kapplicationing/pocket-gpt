@@ -52,7 +52,7 @@ Included:
 1. Offline text chat with streaming responses
 2. Single-image/document-photo understanding
 3. 3-5 local tools (calculator, notes lookup, reminder creation, local search, date/time)
-4. Model routing between `0.8B` and `2B` quantized tiers based on capability rules
+4. Model routing between ultra-fast text, higher-quality small text, and one tiny vision tier based on capability rules
 5. Rolling context + summarization memory
 
 ## MVP UI Product Surface (WP-11)
@@ -62,7 +62,7 @@ UI direction: chat-first, WhatsApp-like conversation timeline with advanced cont
 Simple-first first-session lane (direct replace):
 
 1. First session focuses on `prompt -> response -> one follow-up response` with telemetry tracking.
-2. One-tap `Get ready` is the primary setup action and defaults to `0.8B` download path.
+2. One-tap `Get ready` is the primary setup action and defaults to the `0.6B` text download path.
 3. Advanced controls and tools remain available by default; no follow-up unlock gate is required.
 4. Import fallback remains visible in model setup when download/manifest path is unavailable.
 
@@ -73,7 +73,7 @@ Required MVP UI capabilities:
 3. Session UX with create/switch/delete and persistence across app restarts.
 4. Tool UX with prompt-first shortcuts in the dialog and clear safety/runtime error feedback contracts.
 5. Advanced controls sheet with:
-   - routing mode: `Auto`, `QWEN3_0_6B`, `QWEN_0_8B`, `QWEN_2B`, `SMOLLM3_3B`, `PHI_4_MINI`, `GEMMA_4_E2B`, `BONSAI_8B` (availability depends on packaged model support)
+  - routing mode: `Auto`, `QWEN3_0_6B`, `QWEN3_1_7B`, `QWEN_0_8B`, `LLAMA_3_2_1B` (availability depends on packaged model support)
    - runtime performance profile: `BATTERY`, `BALANCED`, `FAST`
    - GPU acceleration toggle (enabled only when supported on device/runtime path)
    - diagnostics export action
@@ -169,7 +169,7 @@ Excluded (non-MVP):
 
 1. Broad video analysis workflows
 2. On-device model training/fine-tuning (LoRA)
-3. `4B`/`9B` default runtime guarantees on all phones
+3. Larger-than-small-model default runtime guarantees on all phones
 4. Autonomous multi-step open-ended agent loops
 5. Cross-device sync and cloud backup by default
 
@@ -191,7 +191,7 @@ MVP readiness:
 
 ## Assumptions That Must Hold
 
-1. Quantized `0.8B` and `2B` models provide acceptable utility for key tasks
+1. Quantized `0.6B`, `0.8B`, `1B`, and `1.7B` models provide acceptable utility for key tasks
 2. Local image pathway can run within thermal and memory limits
 3. `llama.cpp` baseline can be integrated and stabilized on Android within schedule
 4. Packaging/downloading model artifacts is compatible with app-store constraints

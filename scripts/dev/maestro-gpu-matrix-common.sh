@@ -3,29 +3,20 @@ set -euo pipefail
 
 pocketgpt_gpu_matrix_model_spec() {
   case "$1" in
-    smollm3_3b)
-      printf '%s\n' 'smollm3-3b-q4_k_m|q4_k_m'
-      ;;
-    phi_4_mini)
-      printf '%s\n' 'phi-4-mini-instruct-q4_k_m|q4_k_m'
+    llama_3_2_1b)
+      printf '%s\n' 'llama-3.2-1b-instruct-q4_k_m|q4_k_m'
       ;;
     qwen3_0_6b)
       printf '%s\n' 'qwen3-0.6b-q4_k_m|q4_k_m'
       ;;
+    qwen3_1_7b)
+      printf '%s\n' 'qwen3-1.7b-q4_k_m|q4_k_m'
+      ;;
     qwen_0_8b)
       printf '%s\n' 'qwen3.5-0.8b-q4|q4_0'
       ;;
-    qwen_2b)
-      printf '%s\n' 'qwen3.5-2b-q4|q4_0'
-      ;;
     qwen_0_8b_tiny)
       printf '%s\n' 'qwen3.5-0.8b-q4|ud_iq2_xxs'
-      ;;
-    qwen_2b_tiny)
-      printf '%s\n' 'qwen3.5-2b-q4|ud_iq2_xxs'
-      ;;
-    gemma_4_e2b)
-      printf '%s\n' 'gemma-4-e2b-it-q4_k_m|q4_k_m'
       ;;
     *)
       echo "Unsupported model key: $1" >&2

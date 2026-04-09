@@ -596,10 +596,6 @@ private fun routingModeLabels(mode: RoutingMode): Pair<String, String> {
             stringResource(id = R.string.ui_routing_mode_auto),
             stringResource(id = R.string.ui_routing_mode_auto_desc),
         )
-        RoutingMode.BONSAI_8B -> Pair(
-            stringResource(id = R.string.ui_routing_mode_bonsai),
-            stringResource(id = R.string.ui_routing_mode_bonsai_desc),
-        )
         else -> Pair(mode.name, "")
     }
 }

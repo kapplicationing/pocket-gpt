@@ -150,7 +150,7 @@ data class PerformanceRuntimeConfig(
                 xtcProbability = 0.0f,
                 seed = -1,
                 speculativeEnabled = profile != RuntimePerformanceProfile.BATTERY,
-                speculativeDraftModelId = ModelCatalog.SMOLLM3_3B_UD_IQ2_XXS,
+                speculativeDraftModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
                 speculativeMaxDraftTokens = if (profile == RuntimePerformanceProfile.FAST) 8 else 6,
                 speculativeMinDraftTokens = 2,
                 speculativeDraftGpuLayers = defaultDraftGpuLayers(

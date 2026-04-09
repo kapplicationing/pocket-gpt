@@ -2,12 +2,13 @@ package com.pocketagent.inference
 
 class AdaptiveRoutingPolicy : RoutingModule {
     override fun selectModel(taskType: String, deviceState: DeviceState): String {
-        val allCandidates = ModelCatalog.autoRoutingCandidates(taskType)
+        val task = taskType.trim().lowercase()
+        val allCandidates = taskScopedCandidates(task)
         val candidates = allCandidates
             .filter { descriptor -> deviceState.ramClassGb >= descriptor.minRamGb }
             .ifEmpty { allCandidates }
         if (candidates.isEmpty()) {
-            return ModelCatalog.QWEN_3_5_0_8B_Q4
+            return ModelCatalog.QWEN3_0_6B_Q4_K_M
         }
         val pressure = resourcePressure(deviceState)
         if (pressure >= 2) {
@@ -48,10 +49,21 @@ class AdaptiveRoutingPolicy : RoutingModule {
 
     private fun wantsQuality(taskType: String, deviceState: DeviceState): Boolean {
         return when (taskType.trim().lowercase()) {
-            "long_text" -> deviceState.ramClassGb >= 12
-            "reasoning", "image" -> deviceState.ramClassGb >= 10
-            else -> deviceState.ramClassGb >= 12 && deviceState.batteryPercent >= 50 && deviceState.thermalLevel <= 4
+            "long_text", "reasoning" -> deviceState.ramClassGb >= 8
+            "image" -> true
+            else -> deviceState.ramClassGb >= 10 && deviceState.batteryPercent >= 50 && deviceState.thermalLevel <= 4
         }
+    }
+
+    private fun taskScopedCandidates(taskType: String): List<ModelDescriptor> {
+        val candidates = ModelCatalog.autoRoutingCandidates(taskType)
+        if (taskType == "image") {
+            return candidates
+        }
+        val textFirstCandidates = candidates.filterNot { descriptor ->
+            ModelCatalog.isVisionCapable(descriptor.modelId)
+        }
+        return textFirstCandidates.ifEmpty { candidates }
     }
 
     private fun selectBySpeed(candidates: List<ModelDescriptor>): ModelDescriptor {

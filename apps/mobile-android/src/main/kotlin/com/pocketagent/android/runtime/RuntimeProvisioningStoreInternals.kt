@@ -88,16 +88,6 @@ private val LEGACY_BASELINE_OVERRIDES: Map<String, LegacySpecOverride> = mapOf(
         signatureKey = "model_0_8b_signature",
         importedAtKey = "model_0_8b_imported_at",
     ),
-    ModelCatalog.QWEN_3_5_2B_Q4 to LegacySpecOverride(
-        displayName = "Qwen 3.5 2B (Q4)",
-        fileName = "qwen3.5-2b-q4.gguf",
-        prefTag = "2b",
-        pathKey = "model_2b_path",
-        shaKey = "model_2b_sha256",
-        issuerKey = "model_2b_issuer",
-        signatureKey = "model_2b_signature",
-        importedAtKey = "model_2b_imported_at",
-    ),
 )
 
 internal val BASELINE_MODEL_SPECS: List<ModelSpec> = ModelCatalog.modelDescriptors()

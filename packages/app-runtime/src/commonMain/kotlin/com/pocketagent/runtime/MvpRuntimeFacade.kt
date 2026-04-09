@@ -2,16 +2,18 @@ package com.pocketagent.runtime
 
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.ConversationModule
+import com.pocketagent.core.InMemoryConversationModule
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
-import com.pocketagent.core.InMemoryConversationModule
+import com.pocketagent.core.model.ModelSpecProvider
+import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.InferenceModule
 import com.pocketagent.inference.DeviceState
-import com.pocketagent.nativebridge.ModelLifecycleEvent
-import com.pocketagent.nativebridge.createDefaultRuntimeInferenceModule
 import com.pocketagent.memory.FileBackedMemoryModule
 import com.pocketagent.memory.MemoryModule
+import com.pocketagent.nativebridge.ModelLifecycleEvent
+import com.pocketagent.nativebridge.createDefaultRuntimeInferenceModule
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
@@ -540,6 +542,7 @@ class DefaultRuntimeContainer(
     conversationModule: ConversationModule = InMemoryConversationModule(),
     memoryModule: MemoryModule = FileBackedMemoryModule.defaultRuntimeModule(),
     inferenceModule: InferenceModule? = null,
+    modelSpecProvider: ModelSpecProvider = ModelCatalog,
     memoryBudgetTracker: MemoryBudgetTracker? = null,
     recommendedGpuLayers: (String, PerformanceRuntimeConfig) -> Int? = { _, _ -> null },
     mmProjPathResolver: (String) -> String? = { null },
@@ -548,6 +551,7 @@ class DefaultRuntimeContainer(
         memoryModule = memoryModule,
         runtimeConfig = runtimeConfig,
         inferenceModule = inferenceModule ?: createDefaultRuntimeInferenceModule(),
+        modelSpecProvider = modelSpecProvider,
         memoryBudgetTracker = memoryBudgetTracker,
         recommendedGpuLayers = recommendedGpuLayers,
         mmProjPathResolver = mmProjPathResolver,

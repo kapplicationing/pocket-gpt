@@ -1,5 +1,7 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
+
 /**
  * Canonical interaction schema shared across runtime components.
  * This mirrors OpenAI-style roles/content/tool-calls while remaining provider agnostic.
@@ -55,13 +57,5 @@ private fun defaultInteractionMessageId(): String {
 data class RenderedPrompt(
     val prompt: String,
     val stopSequences: List<String>,
-    val templateProfile: ModelTemplateProfile,
+    val templateFamily: PromptTemplateFamily,
 )
-
-enum class ModelTemplateProfile {
-    CHATML,
-    LLAMA3,
-    PHI,
-    GEMMA,
-    GEMMA4,
-}

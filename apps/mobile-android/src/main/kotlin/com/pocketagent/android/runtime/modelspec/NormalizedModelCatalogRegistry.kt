@@ -10,23 +10,20 @@ import com.pocketagent.core.model.ArtifactSpec
 import com.pocketagent.core.model.CapabilityFlag
 import com.pocketagent.core.model.CapabilityProfile
 import com.pocketagent.core.model.ModelArtifactRole
+import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.core.model.ModelParameterProfile
 import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.core.model.ModelSourceRef
 import com.pocketagent.core.model.ModelVariantSpec
 import com.pocketagent.core.model.NormalizedModelSpec
-import com.pocketagent.core.model.PromptProfile
+import com.pocketagent.core.model.PromptProfileRegistry
 import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.core.model.RuntimeRequirementProfile
 import com.pocketagent.core.model.SourceTrustPolicy
 import com.pocketagent.inference.ModelCatalog
 
-interface NormalizedModelCatalogRegistry {
-    fun allSpecs(): List<NormalizedModelSpec>
-
-    fun specFor(modelId: String): NormalizedModelSpec? = allSpecs().firstOrNull { spec -> spec.modelId == modelId }
-
-    fun variantFor(modelId: String, version: String?): ModelVariantSpec? = specFor(modelId)?.variant(version)
+interface NormalizedModelCatalogRegistry : ModelSpecProvider {
+    override fun allSpecs(): List<NormalizedModelSpec>
 }
 
 class DefaultNormalizedModelCatalogRegistry(
@@ -75,14 +72,14 @@ data class HuggingFaceFileRecord(
 class ManifestSourceAdapter {
     fun adapt(models: List<com.pocketagent.android.runtime.modelmanager.ModelDistributionModel>): List<NormalizedModelSpec> {
         return models.map { model ->
-            val promptProfileId = model.versions.firstNotNullOfOrNull { version -> version.promptProfileId }
-                ?: "manifest-unknown"
+            val promptFamily = promptFamilyFromProfileId(
+                model.versions.firstNotNullOfOrNull { version -> version.promptProfileId },
+            )
             NormalizedModelSpec(
                 modelId = model.modelId,
                 displayName = model.displayName,
-                promptProfile = PromptProfile(
-                    profileId = promptProfileId,
-                    templateFamily = PromptTemplateFamily.CHATML,
+                promptProfile = PromptProfileRegistry.promptProfileFor(
+                    family = promptFamily,
                 ),
                 runtimeRequirements = RuntimeRequirementProfile(
                     runtimeCompatibilityTags = model.versions.flatMapTo(linkedSetOf()) { version ->
@@ -127,9 +124,8 @@ class HuggingFaceSourceAdapter {
                 modelId = model.modelId,
                 displayName = model.displayName,
                 family = model.architecture,
-                promptProfile = PromptProfile(
-                    profileId = "hf-${promptFamily.name.lowercase()}",
-                    templateFamily = promptFamily,
+                promptProfile = PromptProfileRegistry.promptProfileFor(
+                    family = promptFamily,
                 ),
                 capabilities = CapabilityProfile(
                     flags = setOf(CapabilityFlag.SHORT_TEXT) +
@@ -193,9 +189,8 @@ class LocalImportSourceAdapter {
             modelId = modelId,
             displayName = builtIn?.displayName ?: installed.first().displayName,
             family = builtIn?.family,
-            promptProfile = builtIn?.promptProfile ?: PromptProfile(
-                profileId = installed.first().promptProfileId ?: "local-import-unknown",
-                templateFamily = PromptTemplateFamily.CHATML,
+            promptProfile = builtIn?.promptProfile ?: PromptProfileRegistry.promptProfileFor(
+                family = promptFamilyFromProfileId(installed.first().promptProfileId),
             ),
             capabilities = builtIn?.capabilities ?: CapabilityProfile(flags = setOf(CapabilityFlag.SHORT_TEXT)),
             runtimeRequirements = builtIn?.runtimeRequirements ?: RuntimeRequirementProfile(
@@ -283,4 +278,21 @@ private fun InstalledArtifactDescriptor.toCoreArtifact(): ArtifactSpec {
         sha256 = expectedSha256,
         runtimeCompatibility = runtimeCompatibility,
     )
+}
+
+private fun promptFamilyFromProfileId(promptProfileId: String?): PromptTemplateFamily {
+    val normalized = promptProfileId?.trim().orEmpty()
+    if (normalized.isEmpty()) {
+        return PromptTemplateFamily.CHATML
+    }
+    return PromptTemplateFamily.entries.firstOrNull { family ->
+        family.name.equals(normalized, ignoreCase = true)
+    } ?: when (normalized.lowercase()) {
+        "chatml-default", "manifest-unknown", "local-import-unknown" -> PromptTemplateFamily.CHATML
+        "llama3-default" -> PromptTemplateFamily.LLAMA3
+        "phi-default" -> PromptTemplateFamily.PHI
+        "gemma2-it-legacy" -> PromptTemplateFamily.GEMMA
+        "gemma4-e2b" -> PromptTemplateFamily.GEMMA4
+        else -> PromptTemplateFamily.CHATML
+    }
 }

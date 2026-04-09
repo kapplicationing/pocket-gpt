@@ -1,5 +1,6 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -9,7 +10,7 @@ class ResponsePipelineFactoryTest {
     @Test
     fun `factory returns no-op pipeline when profile has no thinking or tools`() {
         val profile = ModelInteractionProfile(
-            templateProfile = ModelTemplateProfile.GEMMA,
+            templateFamily = PromptTemplateFamily.GEMMA,
             thinkingSupport = ThinkingSupport.NONE,
             toolCallSupport = ToolCallSupport.NONE,
         )
@@ -31,7 +32,7 @@ class ResponsePipelineFactoryTest {
     @Test
     fun `factory parses and strips when profile enables think tags and xml tool calls`() {
         val profile = ModelInteractionProfile(
-            templateProfile = ModelTemplateProfile.CHATML,
+            templateFamily = PromptTemplateFamily.CHATML,
             thinkingSupport = ThinkingSupport.THINK_TAGS,
             toolCallSupport = ToolCallSupport.XmlTagFormat(
                 openTag = "<call>",
@@ -59,7 +60,7 @@ class ResponsePipelineFactoryTest {
     @Test
     fun `factory accepts bare json tool payloads for xml tool-call profiles`() {
         val profile = ModelInteractionProfile(
-            templateProfile = ModelTemplateProfile.CHATML,
+            templateFamily = PromptTemplateFamily.CHATML,
             thinkingSupport = ThinkingSupport.THINK_TAGS,
             toolCallSupport = ToolCallSupport.XmlTagFormat(),
         )

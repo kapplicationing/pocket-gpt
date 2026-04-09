@@ -2,6 +2,7 @@ package com.pocketagent.runtime
 
 import com.pocketagent.core.model.NormalizedModelTier
 import com.pocketagent.core.model.NormalizedRuntimeProfile
+import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelCatalog
@@ -21,7 +22,7 @@ enum class StartupRequirement {
 
 data class RuntimeModelMetadata(
     val modelId: String,
-    val templateProfile: ModelTemplateProfile,
+    val templateFamily: PromptTemplateFamily,
     val tier: RuntimeModelTier,
     val startupRequirement: StartupRequirement = StartupRequirement.NONE,
     val defaultForGetReadyProfiles: Set<ModelRuntimeProfile> = emptySet(),
@@ -42,8 +43,8 @@ class ModelRegistry(
 
     fun allMetadata(): List<RuntimeModelMetadata> = metadataByModelId.values.toList()
 
-    fun templateProfilesByModelId(): Map<String, ModelTemplateProfile> {
-        return metadataByModelId.mapValues { (_, metadata) -> metadata.templateProfile }
+    fun templateFamiliesByModelId(): Map<String, PromptTemplateFamily> {
+        return metadataByModelId.mapValues { (_, metadata) -> metadata.templateFamily }
     }
 
     fun startupPolicy(
@@ -98,22 +99,22 @@ class ModelRegistry(
     }
 
     companion object {
-        fun default(): ModelRegistry {
+        fun default(specProvider: ModelSpecProvider = ModelCatalog): ModelRegistry {
             return ModelRegistry(
-                metadataByModelId = defaultMetadata().associateBy { metadata -> metadata.modelId },
+                metadataByModelId = defaultMetadata(specProvider).associateBy { metadata -> metadata.modelId },
                 startupMinimumReadyCount = 1,
             )
         }
 
-        fun defaultMetadata(): List<RuntimeModelMetadata> {
-            return ModelCatalog.normalizedSpecs()
+        fun defaultMetadata(specProvider: ModelSpecProvider = ModelCatalog): List<RuntimeModelMetadata> {
+            return specProvider.allSpecs()
                 .filter { spec ->
                     spec.runtimeRequirements.bridgeSupported || spec.productPolicy.startupCandidate
                 }
                 .map { spec ->
                     RuntimeModelMetadata(
                         modelId = spec.modelId,
-                        templateProfile = spec.promptProfile.templateFamily.toRuntimeTemplateProfile(),
+                        templateFamily = spec.promptProfile.templateFamily,
                         tier = spec.productPolicy.tier.toRuntimeTier(),
                         startupRequirement = when {
                             spec.productPolicy.startupRequired -> StartupRequirement.REQUIRED
@@ -134,16 +135,6 @@ private fun NormalizedModelTier.toRuntimeTier(): RuntimeModelTier {
         NormalizedModelTier.BASELINE -> RuntimeModelTier.BASELINE
         NormalizedModelTier.FAST -> RuntimeModelTier.FAST
         NormalizedModelTier.DEBUG -> RuntimeModelTier.DEBUG
-    }
-}
-
-private fun PromptTemplateFamily.toRuntimeTemplateProfile(): ModelTemplateProfile {
-    return when (this) {
-        PromptTemplateFamily.CHATML -> ModelTemplateProfile.CHATML
-        PromptTemplateFamily.LLAMA3 -> ModelTemplateProfile.LLAMA3
-        PromptTemplateFamily.PHI -> ModelTemplateProfile.PHI
-        PromptTemplateFamily.GEMMA -> ModelTemplateProfile.GEMMA
-        PromptTemplateFamily.GEMMA4 -> ModelTemplateProfile.GEMMA4
     }
 }
 

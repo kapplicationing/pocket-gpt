@@ -10,10 +10,12 @@ import com.pocketagent.core.PolicyModule
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
+import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.inference.AdaptiveRoutingPolicy
 import com.pocketagent.inference.ArtifactVerificationStatus
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.inference.InferenceModule
+import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.RuntimeImageInputModule
 import com.pocketagent.inference.RoutingModule
 import com.pocketagent.memory.FileBackedMemoryModule
@@ -51,7 +53,8 @@ class RuntimeOrchestrator(
     private val memoryModule: MemoryModule = FileBackedMemoryModule.ephemeralRuntimeModule(),
     private val runtimeConfig: RuntimeConfig = RuntimeConfig.fromEnvironment(),
     private val networkPolicyClient: PolicyAwareNetworkClient = PolicyAwareNetworkClient(policyModule),
-    private val modelRegistry: ModelRegistry = ModelRegistry.default(),
+    private val modelSpecProvider: ModelSpecProvider = ModelCatalog,
+    private val modelRegistry: ModelRegistry = ModelRegistry.default(modelSpecProvider),
     private val artifactVerifier: ArtifactVerifier = ArtifactVerifier(runtimeConfig, modelRegistry = modelRegistry),
     private val diagnosticsRedactor: DiagnosticsRedactor = DiagnosticsRedactor(),
     private val memoryBudgetTracker: MemoryBudgetTracker? = null,
@@ -70,9 +73,7 @@ class RuntimeOrchestrator(
     private var currentRuntimeLifecycleEvent: ModelLifecycleEvent = ModelLifecycleEvent(state = ModelLifecycleState.UNLOADED)
     private val imageInputModule = RuntimeImageInputModule(inferenceModule)
     private val sessionManager = RuntimeSessionManager(conversationModule, memoryModule)
-    private val interactionRegistry = ModelInteractionRegistry(
-        profileByModelId = ModelInteractionRegistry.defaultProfiles(),
-    )
+    private val interactionRegistry = ModelInteractionRegistry(specProvider = modelSpecProvider)
     private val interactionPlanner = InteractionPlanner(
         interactionRegistry = interactionRegistry,
         enabledToolNames = toolModule.listEnabledTools(),

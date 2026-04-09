@@ -8,6 +8,7 @@ import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
+import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import kotlinx.coroutines.flow.StateFlow
 
@@ -317,4 +318,8 @@ class AppProvisioningDependencyAccess(
     override fun syncDownloadsFromScheduler() {
         AppRuntimeDependencies.syncDownloadsFromScheduler(context)
     }
+}
+
+fun modelSpecProviderForContext(context: android.content.Context): ModelSpecProvider {
+    return AppRuntimeDependencies.modelSpecProvider(context.applicationContext)
 }

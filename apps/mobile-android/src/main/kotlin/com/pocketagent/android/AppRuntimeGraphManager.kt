@@ -16,6 +16,7 @@ import com.pocketagent.core.ConversationModule
 import com.pocketagent.core.InMemoryConversationModule
 import com.pocketagent.memory.FileBackedMemoryModule
 import com.pocketagent.memory.MemoryModule
+import com.pocketagent.runtime.CompositeModelSpecProvider
 import com.pocketagent.runtime.RuntimeCompositionRoot
 
 internal class AppRuntimeGraphManager {
@@ -32,6 +33,22 @@ internal class AppRuntimeGraphManager {
         RuntimeCompositionRoot.createFacade(
             conversationModule = getOrCreateConversationModule(),
             memoryModule = getOrCreateMemoryModule(),
+            modelSpecProvider = CompositeModelSpecProvider(
+                providers = listOf(
+                    DefaultNormalizedModelCatalogRegistry(
+                        manifestProvider = { modelManifestProvider?.currentManifest() },
+                        installedVersionsProvider = { modelId ->
+                            runtimeProvisioningStore?.listInstalledVersions(modelId).orEmpty()
+                        },
+                        knownModelIdsProvider = {
+                            runtimeProvisioningStore?.snapshot()
+                                ?.models
+                                ?.mapTo(linkedSetOf()) { state -> state.modelId }
+                                ?: emptySet()
+                        },
+                    ),
+                ),
+            ),
             mmProjPathResolver = { modelId ->
                 val store = runtimeProvisioningStore
                     ?: appContext?.let { AndroidRuntimeProvisioningStore(it) }
@@ -102,6 +119,7 @@ internal class AppRuntimeGraphManager {
             runtimeDiagnosticsProvider = { runtimeGateway.runtimeDiagnosticsSnapshot() },
         )
         val normalizedModelCatalogRegistry = DefaultNormalizedModelCatalogRegistry(
+            manifestProvider = { manifestProvider.currentManifest() },
             installedVersionsProvider = { modelId -> provisioningStore.listInstalledVersions(modelId) },
             knownModelIdsProvider = {
                 provisioningStore.snapshot().models.mapTo(linkedSetOf()) { state -> state.modelId }

@@ -1,23 +1,25 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
+
 interface ChatTemplateRenderer {
     fun render(
         messages: List<InteractionMessage>,
-        modelProfile: ModelTemplateProfile,
+        modelProfile: PromptTemplateFamily,
     ): RenderedPrompt
 }
 
 class DefaultChatTemplateRenderer : ChatTemplateRenderer {
     override fun render(
         messages: List<InteractionMessage>,
-        modelProfile: ModelTemplateProfile,
+        modelProfile: PromptTemplateFamily,
     ): RenderedPrompt {
         return when (modelProfile) {
-            ModelTemplateProfile.CHATML -> renderChatMl(messages)
-            ModelTemplateProfile.LLAMA3 -> renderLlama3(messages)
-            ModelTemplateProfile.PHI -> renderPhi(messages)
-            ModelTemplateProfile.GEMMA -> renderGemma(messages)
-            ModelTemplateProfile.GEMMA4 -> renderGemma4(messages)
+            PromptTemplateFamily.CHATML -> renderChatMl(messages)
+            PromptTemplateFamily.LLAMA3 -> renderLlama3(messages)
+            PromptTemplateFamily.PHI -> renderPhi(messages)
+            PromptTemplateFamily.GEMMA -> renderGemma(messages)
+            PromptTemplateFamily.GEMMA4 -> renderGemma4(messages)
         }
     }
 
@@ -37,7 +39,7 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = listOf("<|im_end|>", "<|im_start|>user", "</tool_call>"),
-            templateProfile = ModelTemplateProfile.CHATML,
+            templateFamily = PromptTemplateFamily.CHATML,
         )
     }
 
@@ -56,7 +58,7 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = listOf("<|eot_id|>", "<|start_header_id|>user<|end_header_id|>"),
-            templateProfile = ModelTemplateProfile.LLAMA3,
+            templateFamily = PromptTemplateFamily.LLAMA3,
         )
     }
     private fun renderPhi(messages: List<InteractionMessage>): RenderedPrompt {
@@ -73,7 +75,7 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = listOf("<|end|>", "<|endoftext|>"),
-            templateProfile = ModelTemplateProfile.PHI,
+            templateFamily = PromptTemplateFamily.PHI,
         )
     }
 
@@ -109,7 +111,7 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = listOf("<end_of_turn>", "<start_of_turn>user"),
-            templateProfile = ModelTemplateProfile.GEMMA,
+            templateFamily = PromptTemplateFamily.GEMMA,
         )
     }
 
@@ -133,7 +135,7 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = listOf("<turn|>", "<|turn>user"),
-            templateProfile = ModelTemplateProfile.GEMMA4,
+            templateFamily = PromptTemplateFamily.GEMMA4,
         )
     }
 }

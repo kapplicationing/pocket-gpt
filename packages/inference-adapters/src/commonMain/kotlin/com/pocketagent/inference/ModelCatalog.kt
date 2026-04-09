@@ -7,6 +7,7 @@ import com.pocketagent.core.model.ArtifactSpec
 import com.pocketagent.core.model.CapabilityFlag
 import com.pocketagent.core.model.CapabilityProfile
 import com.pocketagent.core.model.ModelArtifactRole
+import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.core.model.ModelSourceRef
 import com.pocketagent.core.model.ModelVariantSpec
@@ -14,11 +15,10 @@ import com.pocketagent.core.model.NormalizedModelSpec
 import com.pocketagent.core.model.NormalizedModelTier
 import com.pocketagent.core.model.NormalizedRuntimeProfile
 import com.pocketagent.core.model.ProductPolicyProfile
-import com.pocketagent.core.model.PromptProfile
+import com.pocketagent.core.model.PromptProfileRegistry
 import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.core.model.RuntimeBackendFamilyTag
 import com.pocketagent.core.model.RuntimeRequirementProfile
-import com.pocketagent.core.model.SystemPromptHandling
 import com.pocketagent.core.model.ThinkingStrategyId
 import com.pocketagent.core.model.ToolCallStrategyId
 
@@ -64,7 +64,7 @@ data class ModelDescriptor(
     val startupRequired: Boolean,
     val defaultGetReadyProfiles: Set<ModelRuntimeProfile>,
     val envKeyToken: String,
-    val chatTemplateId: String = "CHATML",
+    val templateFamily: PromptTemplateFamily = PromptTemplateFamily.CHATML,
     val interactionFeatures: Set<String> = emptySet(),
     val includeAutoRoutingMode: Boolean = false,
     val explicitRoutingModes: Set<RoutingMode> = emptySet(),
@@ -78,7 +78,7 @@ data class ModelLoadValidation(
     val normalizedModelPath: String? = null,
 )
 
-object ModelCatalog {
+object ModelCatalog : ModelSpecProvider {
     const val SMOKE_ECHO_120M = "smoke-echo-120m-q4"
     const val QWEN_3_5_0_8B_Q4 = "qwen3.5-0.8b-q4"
     const val QWEN_3_5_2B_Q4 = "qwen3.5-2b-q4"
@@ -239,7 +239,7 @@ object ModelCatalog {
             startupRequired = false,
             defaultGetReadyProfiles = emptySet(),
             envKeyToken = "PHI_4_MINI_INSTRUCT_Q4_K_M",
-            chatTemplateId = "PHI",
+            templateFamily = PromptTemplateFamily.PHI,
             interactionFeatures = setOf("THINKING_TAGS"),
             includeAutoRoutingMode = true,
             explicitRoutingModes = setOf(RoutingMode.PHI_4_MINI),
@@ -263,7 +263,7 @@ object ModelCatalog {
             startupRequired = false,
             defaultGetReadyProfiles = emptySet(),
             envKeyToken = "GEMMA_4_E2B_IT_Q4_K_M",
-            chatTemplateId = "GEMMA4",
+            templateFamily = PromptTemplateFamily.GEMMA4,
             includeAutoRoutingMode = false,
             explicitRoutingModes = setOf(RoutingMode.GEMMA_4_E2B),
         ),
@@ -362,9 +362,15 @@ object ModelCatalog {
 
     fun modelDescriptors(): List<ModelDescriptor> = descriptors
 
-    fun normalizedSpecs(): List<NormalizedModelSpec> = normalizedSpecsByModelId.values.toList()
+    override fun allSpecs(): List<NormalizedModelSpec> = normalizedSpecsByModelId.values.toList()
 
-    fun normalizedSpecFor(modelId: String): NormalizedModelSpec? = normalizedSpecsByModelId[modelId]
+    fun normalizedSpecs(): List<NormalizedModelSpec> = allSpecs()
+
+    override fun specFor(modelId: String): NormalizedModelSpec? = normalizedSpecsByModelId[modelId]
+
+    override fun variantFor(modelId: String, version: String?): ModelVariantSpec? = specFor(modelId)?.variant(version)
+
+    fun normalizedSpecFor(modelId: String): NormalizedModelSpec? = specFor(modelId)
 
     fun descriptorFor(modelId: String): ModelDescriptor? = descriptorsByModelId[modelId]
 
@@ -491,51 +497,11 @@ object ModelCatalog {
 
 private fun ModelDescriptor.toNormalizedModelSpec(): NormalizedModelSpec {
     val descriptorModelId = this.modelId
-    val promptProfile = when (chatTemplateId) {
-        "LLAMA3" -> PromptProfile(
-            profileId = "llama3-default",
-            templateFamily = PromptTemplateFamily.LLAMA3,
-            toolCallStrategy = interactionFeatures.toToolCallStrategy(),
-            thinkingStrategy = interactionFeatures.toThinkingStrategy(descriptorModelId, capabilities, chatTemplateId),
-            stopSequences = listOf("<|eot_id|>", "<|start_header_id|>user<|end_header_id|>"),
-        )
-
-        "PHI" -> PromptProfile(
-            profileId = "phi-default",
-            templateFamily = PromptTemplateFamily.PHI,
-            toolCallStrategy = interactionFeatures.toToolCallStrategy(),
-            thinkingStrategy = interactionFeatures.toThinkingStrategy(descriptorModelId, capabilities, chatTemplateId),
-            stopSequences = listOf("<|end|>", "<|endoftext|>"),
-        )
-
-        "GEMMA" -> PromptProfile(
-            profileId = "gemma2-it-legacy",
-            templateFamily = PromptTemplateFamily.GEMMA,
-            systemPromptHandling = SystemPromptHandling.PREPEND_TO_USER,
-            toolCallStrategy = interactionFeatures.toToolCallStrategy(),
-            thinkingStrategy = interactionFeatures.toThinkingStrategy(descriptorModelId, capabilities, chatTemplateId),
-            assistantRoleName = "model",
-            stopSequences = listOf("<end_of_turn>", "<start_of_turn>user"),
-        )
-
-        "GEMMA4" -> PromptProfile(
-            profileId = "gemma4-e2b",
-            templateFamily = PromptTemplateFamily.GEMMA4,
-            systemPromptHandling = SystemPromptHandling.NATIVE,
-            toolCallStrategy = interactionFeatures.toToolCallStrategy(),
-            thinkingStrategy = interactionFeatures.toThinkingStrategy(descriptorModelId, capabilities, chatTemplateId),
-            assistantRoleName = "model",
-            stopSequences = listOf("<turn|>", "<|turn>user"),
-        )
-
-        else -> PromptProfile(
-            profileId = "chatml-default",
-            templateFamily = PromptTemplateFamily.CHATML,
-            toolCallStrategy = interactionFeatures.toToolCallStrategy(),
-            thinkingStrategy = interactionFeatures.toThinkingStrategy(descriptorModelId, capabilities, chatTemplateId),
-            stopSequences = listOf("<|im_end|>", "<|im_start|>user", "</tool_call>"),
-        )
-    }
+    val promptProfile = PromptProfileRegistry.promptProfileFor(
+        family = templateFamily,
+        toolCallStrategy = interactionFeatures.toToolCallStrategy(),
+        thinkingStrategy = interactionFeatures.toThinkingStrategy(),
+    )
     val primaryVariantId = descriptorModelId.substringAfterLast('-')
         .takeIf { it.contains('_') || it.startsWith("q") }
         ?: descriptorModelId
@@ -632,27 +598,8 @@ private fun Set<String>.toToolCallStrategy(): ToolCallStrategyId {
 }
 
 private fun Set<String>.toThinkingStrategy(
-    modelId: String,
-    capabilities: Set<ModelCapability>,
-    chatTemplateId: String,
 ): ThinkingStrategyId {
-    if (contains("THINKING_TAGS")) {
-        return ThinkingStrategyId.THINK_TAGS
-    }
-    val normalizedModelId = modelId.lowercase()
-    val knownThinkingModel = normalizedModelId.contains("deepseek-r1") ||
-        normalizedModelId.contains("qwen3") ||
-        normalizedModelId.contains("qwen3.5") ||
-        normalizedModelId.contains("smollm3") ||
-        normalizedModelId.contains("phi-4")
-    if (knownThinkingModel) {
-        return ThinkingStrategyId.THINK_TAGS
-    }
-    return if (capabilities.contains(ModelCapability.REASONING) && chatTemplateId != "GEMMA" && chatTemplateId != "GEMMA4") {
-        ThinkingStrategyId.THINK_TAGS
-    } else {
-        ThinkingStrategyId.NONE
-    }
+    return if (contains("THINKING_TAGS")) ThinkingStrategyId.THINK_TAGS else ThinkingStrategyId.NONE
 }
 
 private fun ModelTier.toNormalizedTier(): NormalizedModelTier {

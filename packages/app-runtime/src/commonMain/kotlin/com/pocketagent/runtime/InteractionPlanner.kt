@@ -19,7 +19,7 @@ class InteractionPlanner(
         showThinking: Boolean? = null,
     ): RenderedPrompt {
         val interactionProfile = interactionRegistry.interactionProfileForModel(modelId)
-        val templateProfile = interactionProfile.templateProfile
+        val templateFamily = interactionProfile.templateFamily
         val enrichedMessages = mutableListOf<InteractionMessage>()
         val systemText = buildString {
             append("You are a helpful assistant. Respond in the same language as the user.")
@@ -64,7 +64,7 @@ class InteractionPlanner(
                 .map { message -> message.removeThinkingFromContext(interactionProfile.thinkingSupport) },
             promptTokenBudget = promptTokenBudget,
         )
-        return templateRenderer.render(messages = enrichedMessages, modelProfile = templateProfile)
+        return templateRenderer.render(messages = enrichedMessages, modelProfile = templateFamily)
     }
 
     @JvmName("buildRenderedPromptFromTurns")

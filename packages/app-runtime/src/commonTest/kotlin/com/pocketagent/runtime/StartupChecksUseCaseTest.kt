@@ -1,6 +1,7 @@
 package com.pocketagent.runtime
 
 import com.pocketagent.core.PolicyModule
+import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.inference.InferenceModule
 import com.pocketagent.inference.InferenceRequest
@@ -416,13 +417,13 @@ private fun startupRegistryWithMinimumReady(minimumReadyCount: Int): ModelRegist
         metadataByModelId = listOf(
             RuntimeModelMetadata(
                 modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-                templateProfile = ModelTemplateProfile.CHATML,
+                templateFamily = PromptTemplateFamily.CHATML,
                 tier = RuntimeModelTier.BASELINE,
                 startupRequirement = StartupRequirement.OPTIONAL,
             ),
             RuntimeModelMetadata(
                 modelId = ModelCatalog.QWEN_3_5_2B_Q4,
-                templateProfile = ModelTemplateProfile.CHATML,
+                templateFamily = PromptTemplateFamily.CHATML,
                 tier = RuntimeModelTier.BASELINE,
                 startupRequirement = StartupRequirement.OPTIONAL,
             ),

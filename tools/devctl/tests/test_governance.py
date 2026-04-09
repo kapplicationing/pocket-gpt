@@ -434,14 +434,14 @@ class GovernanceTest(unittest.TestCase):
             '            modelId = MODEL_A,\n'
             '            bridgeSupported = true,\n'
             '            startupCandidate = true,\n'
-            '            chatTemplateId = "CHATML",\n'
+            '            templateFamily = PromptTemplateFamily.CHATML,\n'
             '            explicitRoutingModes = setOf(RoutingMode.MODEL_A_MODE),\n'
             '        ),\n'
             '        ModelDescriptor(\n'
             '            modelId = MODEL_B,\n'
             '            bridgeSupported = true,\n'
             '            startupCandidate = false,\n'
-            '            chatTemplateId = "PHI",\n'
+            '            templateFamily = PromptTemplateFamily.PHI,\n'
             '        ),\n'
             '    )\n'
             '}\n',
@@ -489,13 +489,16 @@ class GovernanceTest(unittest.TestCase):
             with self.assertRaises(DevctlError):
                 governance.model_audit(root)
 
-    def test_model_audit_fails_for_invalid_chat_template_id(self) -> None:
+    def test_model_audit_fails_for_invalid_template_family(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._seed_model_audit_repo(root)
             catalog_path = root / "packages/inference-adapters/src/commonMain/kotlin/com/pocketagent/inference/ModelCatalog.kt"
             text = catalog_path.read_text(encoding="utf-8")
-            catalog_path.write_text(text.replace('"PHI"', '"INVALID_TEMPLATE"'), encoding="utf-8")
+            catalog_path.write_text(
+                text.replace("PromptTemplateFamily.PHI", "PromptTemplateFamily.INVALID_TEMPLATE"),
+                encoding="utf-8",
+            )
             with self.assertRaises(DevctlError):
                 governance.model_audit(root)
 
@@ -507,8 +510,8 @@ class GovernanceTest(unittest.TestCase):
             text = catalog_path.read_text(encoding="utf-8")
             catalog_path.write_text(
                 text.replace(
-                    'chatTemplateId = "CHATML",',
-                    'chatTemplateId = "CHATML",\n            interactionFeatures = setOf("TOOL_CALL_XML", "UNSUPPORTED_FEATURE"),',
+                    'templateFamily = PromptTemplateFamily.CHATML,',
+                    'templateFamily = PromptTemplateFamily.CHATML,\n            interactionFeatures = setOf("TOOL_CALL_XML", "UNSUPPORTED_FEATURE"),',
                     1,
                 ),
                 encoding="utf-8",

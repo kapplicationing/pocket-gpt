@@ -1,5 +1,6 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.inference.DeviceState
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -13,7 +14,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "model-1" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.XmlTagFormat(),
                     ),
@@ -59,7 +60,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "model-1" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.NONE,
                     ),
@@ -92,7 +93,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "model-1" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.XmlTagFormat(),
                     ),
@@ -122,12 +123,12 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "chatml-model" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.XmlTagFormat(),
                     ),
                     "gemma-model" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.GEMMA,
+                        templateFamily = PromptTemplateFamily.GEMMA,
                         thinkingSupport = ThinkingSupport.NONE,
                         toolCallSupport = ToolCallSupport.NONE,
                     ),
@@ -169,7 +170,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "chatml-model" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.NONE,
                     ),
@@ -201,7 +202,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "model-1" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.NONE,
                         toolCallSupport = ToolCallSupport.NONE,
                     ),
@@ -240,7 +241,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "model-1" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.NONE,
                     ),
@@ -280,7 +281,7 @@ class InteractionPlannerTest {
             interactionRegistry = ModelInteractionRegistry(
                 profileByModelId = mapOf(
                     "chatml-model" to ModelInteractionProfile(
-                        templateProfile = ModelTemplateProfile.CHATML,
+                        templateFamily = PromptTemplateFamily.CHATML,
                         thinkingSupport = ThinkingSupport.THINK_TAGS,
                         toolCallSupport = ToolCallSupport.NONE,
                     ),
@@ -311,7 +312,7 @@ class InteractionPlannerTest {
 private class EchoTemplateRenderer : ChatTemplateRenderer {
     override fun render(
         messages: List<InteractionMessage>,
-        modelProfile: ModelTemplateProfile,
+        modelProfile: PromptTemplateFamily,
     ): RenderedPrompt {
         val prompt = messages.joinToString(separator = "\n") { message ->
             val text = message.parts
@@ -328,7 +329,7 @@ private class EchoTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = emptyList(),
-            templateProfile = modelProfile,
+            templateFamily = modelProfile,
         )
     }
 }
@@ -336,7 +337,7 @@ private class EchoTemplateRenderer : ChatTemplateRenderer {
 private class ImageAwareTemplateRenderer : ChatTemplateRenderer {
     override fun render(
         messages: List<InteractionMessage>,
-        modelProfile: ModelTemplateProfile,
+        modelProfile: PromptTemplateFamily,
     ): RenderedPrompt {
         val prompt = messages.joinToString(separator = "\n") { message ->
             message.parts.joinToString(separator = "") { part ->
@@ -349,7 +350,7 @@ private class ImageAwareTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = prompt,
             stopSequences = emptyList(),
-            templateProfile = modelProfile,
+            templateFamily = modelProfile,
         )
     }
 }

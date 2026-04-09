@@ -9,6 +9,7 @@ import com.pocketagent.inference.RoutingModule
 import com.pocketagent.nativebridge.CachePolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ModelLifecycleCoordinatorTest {
     @Test
@@ -119,6 +120,31 @@ class ModelLifecycleCoordinatorTest {
         )
 
         assertEquals(ModelCatalog.SMOLLM3_3B_Q4_K_M, selected)
+    }
+
+    @Test
+    fun `explicit routing fallback emits warning when resolver has no binding`() {
+        val warnings = mutableListOf<String>()
+        val inference = LifecycleInferenceModule(
+            availableModels = listOf(ModelCatalog.QWEN_3_5_0_8B_Q4),
+        )
+        val coordinator = ModelLifecycleCoordinator(
+            inferenceModule = inference,
+            routingModule = LifecycleRoutingModule(selectedModel = ModelCatalog.QWEN_3_5_0_8B_Q4),
+            runtimeConfig = lifecycleRuntimeConfig(),
+            explicitModelIdResolver = { null },
+            onWarning = warnings::add,
+        )
+
+        val selected = coordinator.selectRunnableModelId(
+            routingMode = RoutingMode.QWEN_0_8B,
+            taskType = "short_text",
+            deviceState = DEVICE_STATE,
+        )
+
+        assertEquals(ModelCatalog.QWEN_3_5_0_8B_Q4, selected)
+        assertEquals(1, warnings.size)
+        assertTrue(warnings.single().contains("falling back to auto-routing"))
     }
 }
 

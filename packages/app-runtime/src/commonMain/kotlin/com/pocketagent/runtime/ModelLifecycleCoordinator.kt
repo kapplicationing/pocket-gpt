@@ -12,6 +12,8 @@ internal class ModelLifecycleCoordinator(
     private val routingModule: RoutingModule,
     private val runtimeConfig: RuntimeConfig,
     private val residentModelIdProvider: () -> String? = { null },
+    private val explicitModelIdResolver: (RoutingMode) -> String? = ModelCatalog::modelIdForRoutingMode,
+    private val onWarning: (String) -> Unit = { },
 ) {
     fun selectRunnableModelId(
         routingMode: RoutingMode,
@@ -60,7 +62,11 @@ internal class ModelLifecycleCoordinator(
         if (routingMode == RoutingMode.AUTO) {
             return routingModule.selectModel(taskType, deviceState)
         }
-        return ModelCatalog.modelIdForRoutingMode(routingMode)
-            ?: routingModule.selectModel(taskType, deviceState)
+        val explicitModelId = explicitModelIdResolver(routingMode)
+        if (explicitModelId != null) {
+            return explicitModelId
+        }
+        onWarning("RoutingMode $routingMode has no catalog binding; falling back to auto-routing")
+        return routingModule.selectModel(taskType, deviceState)
     }
 }

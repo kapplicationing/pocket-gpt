@@ -69,6 +69,38 @@
       ]
     },
     {
+      "modelId": "bonsai-1.7b-q1_0_g128",
+      "displayName": "1-bit Bonsai 1.7B",
+      "versions": [
+        {
+          "version": "q1_0_g128",
+          "downloadUrl": "https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf",
+          "expectedSha256": "3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3",
+          "provenanceIssuer": "huggingface/prism-ml",
+          "provenanceSignature": "",
+          "verificationPolicy": "INTEGRITY_ONLY",
+          "runtimeCompatibility": "android-arm64-v8a",
+          "fileSizeBytes": 248302272
+        }
+      ]
+    },
+    {
+      "modelId": "bonsai-4b-q1_0_g128",
+      "displayName": "1-bit Bonsai 4B",
+      "versions": [
+        {
+          "version": "q1_0_g128",
+          "downloadUrl": "https://huggingface.co/prism-ml/Bonsai-4B-gguf/resolve/main/Bonsai-4B.gguf",
+          "expectedSha256": "4524b3f997f0f06444e568d1f26e2efd69effa3218c7ad3047432fb171e42168",
+          "provenanceIssuer": "huggingface/prism-ml",
+          "provenanceSignature": "",
+          "verificationPolicy": "INTEGRITY_ONLY",
+          "runtimeCompatibility": "android-arm64-v8a",
+          "fileSizeBytes": 572270624
+        }
+      ]
+    },
+    {
       "modelId": "bonsai-8b-q1_0_g128",
       "displayName": "1-bit Bonsai 8B",
       "versions": [

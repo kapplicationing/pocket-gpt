@@ -1,5 +1,6 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.ModelRuntimeProfile
 import kotlin.test.Test
@@ -49,13 +50,13 @@ class ModelRegistryTest {
             metadataByModelId = listOf(
                 RuntimeModelMetadata(
                     modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-                    templateProfile = ModelTemplateProfile.CHATML,
+                    templateFamily = PromptTemplateFamily.CHATML,
                     tier = RuntimeModelTier.BASELINE,
                     startupRequirement = StartupRequirement.REQUIRED,
                 ),
                 RuntimeModelMetadata(
                     modelId = ModelCatalog.QWEN_3_5_2B_Q4,
-                    templateProfile = ModelTemplateProfile.CHATML,
+                    templateFamily = PromptTemplateFamily.CHATML,
                     tier = RuntimeModelTier.BASELINE,
                     startupRequirement = StartupRequirement.OPTIONAL,
                 ),
@@ -95,16 +96,16 @@ class ModelRegistryTest {
     }
 
     @Test
-    fun `template profiles are driven by catalog chatTemplateId`() {
+    fun `template families are driven by catalog templateFamily`() {
         val metadata = ModelRegistry.default().allMetadata()
 
         metadata.forEach { entry ->
             val descriptor = ModelCatalog.descriptorFor(entry.modelId)
             if (descriptor != null) {
                 assertEquals(
-                    ModelTemplateProfile.valueOf(descriptor.chatTemplateId),
-                    entry.templateProfile,
-                    "template profile mismatch for ${entry.modelId}",
+                    descriptor.templateFamily,
+                    entry.templateFamily,
+                    "template family mismatch for ${entry.modelId}",
                 )
             }
         }

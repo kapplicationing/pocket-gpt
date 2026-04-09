@@ -5,6 +5,7 @@ import com.pocketagent.core.ObservabilityModule
 import com.pocketagent.core.PolicyModule
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
+import com.pocketagent.core.model.PromptTemplateFamily
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.inference.InferenceModule
 import com.pocketagent.inference.InferenceRequest
@@ -750,7 +751,7 @@ private class RecordingTemplateRenderer : ChatTemplateRenderer {
 
     override fun render(
         messages: List<InteractionMessage>,
-        modelProfile: ModelTemplateProfile,
+        modelProfile: PromptTemplateFamily,
     ): RenderedPrompt {
         lastMessages = messages
         lastPrompt = messages.joinToString(separator = "\n") { message ->
@@ -761,7 +762,7 @@ private class RecordingTemplateRenderer : ChatTemplateRenderer {
         return RenderedPrompt(
             prompt = lastPrompt,
             stopSequences = emptyList(),
-            templateProfile = modelProfile,
+            templateFamily = modelProfile,
         )
     }
 

@@ -1,5 +1,6 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -20,7 +21,7 @@ class ChatTemplateRendererTest {
                     parts = listOf(InteractionContentPart.Text("hello")),
                 ),
             ),
-            modelProfile = ModelTemplateProfile.CHATML,
+            modelProfile = PromptTemplateFamily.CHATML,
         )
 
         assertTrue(rendered.prompt.contains("<|im_start|>system"))
@@ -38,7 +39,7 @@ class ChatTemplateRendererTest {
                     parts = listOf(InteractionContentPart.Text("hello")),
                 ),
             ),
-            modelProfile = ModelTemplateProfile.LLAMA3,
+            modelProfile = PromptTemplateFamily.LLAMA3,
         )
 
         assertTrue(rendered.prompt.contains("<|begin_of_text|>"))
@@ -67,7 +68,7 @@ class ChatTemplateRendererTest {
                     ),
                 ),
             ),
-            modelProfile = ModelTemplateProfile.CHATML,
+            modelProfile = PromptTemplateFamily.CHATML,
         )
 
         assertTrue(rendered.prompt.contains("<tool_call>"))
@@ -85,7 +86,7 @@ class ChatTemplateRendererTest {
                     toolCallId = "tc-1",
                 ),
             ),
-            modelProfile = ModelTemplateProfile.CHATML,
+            modelProfile = PromptTemplateFamily.CHATML,
         )
 
         assertTrue(rendered.prompt.contains("<|im_start|>tool"))
@@ -109,7 +110,7 @@ class ChatTemplateRendererTest {
                     parts = listOf(InteractionContentPart.Text("Hi there!")),
                 ),
             ),
-            modelProfile = ModelTemplateProfile.GEMMA,
+            modelProfile = PromptTemplateFamily.GEMMA,
         )
 
         assertTrue(rendered.prompt.startsWith("<bos>"), "should start with <bos>")
@@ -117,7 +118,7 @@ class ChatTemplateRendererTest {
         assertTrue(rendered.prompt.contains("<start_of_turn>model\nHi there!"), "assistant rendered as model role")
         assertTrue(rendered.prompt.endsWith("<start_of_turn>model\n"), "generation prompt uses model role")
         assertEquals(listOf("<end_of_turn>", "<start_of_turn>user"), rendered.stopSequences)
-        assertEquals(ModelTemplateProfile.GEMMA, rendered.templateProfile)
+        assertEquals(PromptTemplateFamily.GEMMA, rendered.templateFamily)
     }
 
     @Test
@@ -129,7 +130,7 @@ class ChatTemplateRendererTest {
                     parts = listOf(InteractionContentPart.Text("test")),
                 ),
             ),
-            modelProfile = ModelTemplateProfile.CHATML,
+            modelProfile = PromptTemplateFamily.CHATML,
         )
 
         assertTrue(rendered.stopSequences.contains("</tool_call>"))

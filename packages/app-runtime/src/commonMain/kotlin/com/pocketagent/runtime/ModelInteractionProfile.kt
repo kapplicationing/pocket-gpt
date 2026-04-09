@@ -1,7 +1,9 @@
 package com.pocketagent.runtime
 
+import com.pocketagent.core.model.PromptTemplateFamily
+
 data class ModelInteractionProfile(
-    val templateProfile: ModelTemplateProfile,
+    val templateFamily: PromptTemplateFamily,
     val thinkingSupport: ThinkingSupport = ThinkingSupport.NONE,
     val toolCallSupport: ToolCallSupport = ToolCallSupport.NONE,
     val systemPromptStrategy: SystemPromptStrategy = SystemPromptStrategy.NATIVE,

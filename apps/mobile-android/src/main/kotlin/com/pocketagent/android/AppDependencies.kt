@@ -18,14 +18,16 @@ import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
+import com.pocketagent.core.model.ModelSpecProvider
+import com.pocketagent.runtime.CompositeModelSpecProvider
 import com.pocketagent.runtime.MvpRuntimeFacade
+import com.pocketagent.runtime.RuntimeCompositionRoot
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import com.pocketagent.runtime.RuntimeWarmupSupport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
-import com.pocketagent.runtime.RuntimeCompositionRoot
 
 object AppRuntimeDependencies {
     private val graphManager = AppRuntimeGraphManager()
@@ -75,6 +77,9 @@ object AppRuntimeDependencies {
             conversationModule = graph.conversationModule,
             memoryModule = graph.memoryModule,
             inferenceModule = createDefaultAndroidInferenceModule(context.applicationContext),
+            modelSpecProvider = CompositeModelSpecProvider(
+                providers = listOf(graph.normalizedModelCatalogRegistry),
+            ),
             memoryBudgetTracker = runtimeTuning.memoryBudgetTracker,
             recommendedGpuLayers = { modelId, config ->
                 runtimeTuning
@@ -118,6 +123,12 @@ object AppRuntimeDependencies {
 
     fun runtimeTuning(context: Context): AndroidRuntimeTuningStore {
         return graphManager.runtimeTuning(context)
+    }
+
+    fun modelSpecProvider(context: Context): ModelSpecProvider {
+        return CompositeModelSpecProvider(
+            providers = listOf(graphManager.getOrCreateRuntimeGraph(context).normalizedModelCatalogRegistry),
+        )
     }
 
     fun modelAdmissionPolicy(context: Context): ModelAdmissionPolicy {

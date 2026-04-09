@@ -1070,12 +1070,15 @@ def model_audit(repo_root: Path = REPO_ROOT) -> None:
         if f"RoutingMode.{enum_val}" not in catalog_text:
             errors.append(f"RoutingMode.{enum_val} not bound in any ModelDescriptor explicitRoutingModes")
 
-    # Check 5: chatTemplateId values reference valid ModelTemplateProfile enum values
+    # Check 5: templateFamily values reference valid PromptTemplateFamily enum values
     valid_template_ids = {"CHATML", "LLAMA3", "PHI", "GEMMA", "GEMMA4"}
-    for match in re.finditer(r'chatTemplateId\s*=\s*"(\w+)"', catalog_text):
+    for match in re.finditer(r'templateFamily\s*=\s*PromptTemplateFamily\.(\w+)', catalog_text):
         template_id = match.group(1)
         if template_id not in valid_template_ids:
-            errors.append(f"chatTemplateId '{template_id}' is not a valid ModelTemplateProfile value (valid: {valid_template_ids})")
+            errors.append(
+                f"templateFamily '{template_id}' is not a valid PromptTemplateFamily value "
+                f"(valid: {valid_template_ids})",
+            )
 
     # Check 6: Maestro GPU matrix has entries for startup-candidate models
     maestro_path = repo_root / MAESTRO_GPU_MATRIX_PATH

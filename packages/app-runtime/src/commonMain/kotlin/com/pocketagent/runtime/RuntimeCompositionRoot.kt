@@ -2,7 +2,9 @@ package com.pocketagent.runtime
 
 import com.pocketagent.core.ConversationModule
 import com.pocketagent.core.InMemoryConversationModule
+import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.inference.InferenceModule
+import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.memory.FileBackedMemoryModule
 import com.pocketagent.memory.MemoryModule
 
@@ -12,6 +14,7 @@ object RuntimeCompositionRoot {
         conversationModule: ConversationModule = InMemoryConversationModule(),
         memoryModule: MemoryModule = FileBackedMemoryModule.defaultRuntimeModule(),
         inferenceModule: InferenceModule? = null,
+        modelSpecProvider: ModelSpecProvider = ModelCatalog,
         memoryBudgetTracker: MemoryBudgetTracker? = null,
         recommendedGpuLayers: (String, PerformanceRuntimeConfig) -> Int? = { _, _ -> null },
         mmProjPathResolver: (String) -> String? = { null },
@@ -21,6 +24,7 @@ object RuntimeCompositionRoot {
             conversationModule = conversationModule,
             memoryModule = memoryModule,
             inferenceModule = inferenceModule,
+            modelSpecProvider = modelSpecProvider,
             memoryBudgetTracker = memoryBudgetTracker,
             recommendedGpuLayers = recommendedGpuLayers,
             mmProjPathResolver = mmProjPathResolver,
@@ -32,6 +36,7 @@ object RuntimeCompositionRoot {
         conversationModule: ConversationModule = InMemoryConversationModule(),
         memoryModule: MemoryModule = FileBackedMemoryModule.defaultRuntimeModule(),
         inferenceModule: InferenceModule? = null,
+        modelSpecProvider: ModelSpecProvider = ModelCatalog,
         memoryBudgetTracker: MemoryBudgetTracker? = null,
         recommendedGpuLayers: (String, PerformanceRuntimeConfig) -> Int? = { _, _ -> null },
         mmProjPathResolver: (String) -> String? = { null },
@@ -42,6 +47,7 @@ object RuntimeCompositionRoot {
                 conversationModule = conversationModule,
                 memoryModule = memoryModule,
                 inferenceModule = inferenceModule,
+                modelSpecProvider = modelSpecProvider,
                 memoryBudgetTracker = memoryBudgetTracker,
                 recommendedGpuLayers = recommendedGpuLayers,
                 mmProjPathResolver = mmProjPathResolver,

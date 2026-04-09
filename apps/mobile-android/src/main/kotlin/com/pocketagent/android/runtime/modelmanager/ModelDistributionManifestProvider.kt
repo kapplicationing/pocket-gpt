@@ -23,6 +23,9 @@ class ModelDistributionManifestProvider(
     },
     private val bundledManifestLoader: (() -> String?)? = null,
 ) {
+    @Volatile
+    private var cachedManifest: ModelDistributionManifest? = null
+
     suspend fun loadManifest(): ModelDistributionManifest = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val bundled = loadBundledManifest()
@@ -31,7 +34,7 @@ class ModelDistributionManifestProvider(
             return@withContext bundled.copy(
                 source = ManifestSource.BUNDLED,
                 syncedAtEpochMs = now,
-            )
+            ).also { manifest -> cachedManifest = manifest }
         }
 
         val remotePayload = runCatching { remoteManifestLoader(endpoint) }
@@ -47,7 +50,7 @@ class ModelDistributionManifestProvider(
                 },
                 syncedAtEpochMs = now,
                 lastError = mergeWarnings(bundled.lastError, parsedRemote.lastError),
-            )
+            ).also { manifest -> cachedManifest = manifest }
         }
 
         val remoteError = remoteManifest.exceptionOrNull()?.message
@@ -60,7 +63,11 @@ class ModelDistributionManifestProvider(
                 bundled.lastError,
                 "MODEL_MANIFEST_REMOTE_FETCH_FAILED:$remoteError",
             ),
-        )
+        ).also { manifest -> cachedManifest = manifest }
+    }
+
+    fun currentManifest(): ModelDistributionManifest {
+        return cachedManifest ?: loadBundledManifest().also { manifest -> cachedManifest = manifest }
     }
 
     private fun loadBundledManifest(): ModelDistributionManifest {

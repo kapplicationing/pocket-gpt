@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pocketagent.android.BuildConfig
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.MODEL_OFFLOAD_REASON_MANUAL
+import com.pocketagent.android.runtime.modelSpecProviderForContext
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ModalSurface
@@ -77,7 +78,11 @@ fun PocketAgentApp(
     val canAttachImages = canAttachImagesForModel(activeModelId)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val currentActiveSurface by rememberUpdatedState(state.activeSurface)
-    val interactionRegistry = remember { ModelInteractionRegistry() }
+    val interactionRegistry = remember(context) {
+        ModelInteractionRegistry(
+            specProvider = modelSpecProviderForContext(context),
+        )
+    }
     val thinkingToggleModelId = modelLoadingState.loadedModel?.modelId ?: state.runtime.activeModelId
     val showThinkingToggle = thinkingToggleModelId?.let { modelId ->
         runCatching {

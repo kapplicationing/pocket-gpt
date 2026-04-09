@@ -16,9 +16,9 @@ class ModelInteractionRegistryTest {
             .forEach { descriptor ->
                 val profile = registry.interactionProfileForModel(descriptor.modelId)
                 assertEquals(
-                    ModelTemplateProfile.valueOf(descriptor.chatTemplateId),
-                    profile.templateProfile,
-                    "template profile mismatch for ${descriptor.modelId}",
+                    descriptor.templateFamily,
+                    profile.templateFamily,
+                    "template family mismatch for ${descriptor.modelId}",
                 )
             }
     }

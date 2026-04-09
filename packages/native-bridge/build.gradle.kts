@@ -14,6 +14,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":packages:core-domain"))
     implementation(project(":packages:inference-adapters"))
     testImplementation(kotlin("test"))
 }

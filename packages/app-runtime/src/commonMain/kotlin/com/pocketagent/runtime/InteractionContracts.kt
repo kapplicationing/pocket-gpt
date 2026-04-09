@@ -63,4 +63,5 @@ enum class ModelTemplateProfile {
     LLAMA3,
     PHI,
     GEMMA,
+    GEMMA4,
 }

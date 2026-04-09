@@ -1071,7 +1071,7 @@ def model_audit(repo_root: Path = REPO_ROOT) -> None:
             errors.append(f"RoutingMode.{enum_val} not bound in any ModelDescriptor explicitRoutingModes")
 
     # Check 5: chatTemplateId values reference valid ModelTemplateProfile enum values
-    valid_template_ids = {"CHATML", "LLAMA3", "PHI", "GEMMA"}
+    valid_template_ids = {"CHATML", "LLAMA3", "PHI", "GEMMA", "GEMMA4"}
     for match in re.finditer(r'chatTemplateId\s*=\s*"(\w+)"', catalog_text):
         template_id = match.group(1)
         if template_id not in valid_template_ids:

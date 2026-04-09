@@ -17,6 +17,7 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
             ModelTemplateProfile.LLAMA3 -> renderLlama3(messages)
             ModelTemplateProfile.PHI -> renderPhi(messages)
             ModelTemplateProfile.GEMMA -> renderGemma(messages)
+            ModelTemplateProfile.GEMMA4 -> renderGemma4(messages)
         }
     }
 
@@ -109,6 +110,30 @@ class DefaultChatTemplateRenderer : ChatTemplateRenderer {
             prompt = prompt,
             stopSequences = listOf("<end_of_turn>", "<start_of_turn>user"),
             templateProfile = ModelTemplateProfile.GEMMA,
+        )
+    }
+
+    private fun renderGemma4(messages: List<InteractionMessage>): RenderedPrompt {
+        // Gemma 4 uses "model" instead of "assistant" and has native system role support.
+        val prompt = buildString {
+            append("<bos>")
+            messages.forEach { message ->
+                val role = when (message.role) {
+                    InteractionRole.ASSISTANT -> "model"
+                    else -> message.role.toTemplateRole()
+                }
+                append("<|turn>")
+                append(role)
+                append("\n")
+                append(message.renderedText())
+                append("<turn|>")
+            }
+            append("<|turn>model\n")
+        }
+        return RenderedPrompt(
+            prompt = prompt,
+            stopSequences = listOf("<turn|>", "<|turn>user"),
+            templateProfile = ModelTemplateProfile.GEMMA4,
         )
     }
 }

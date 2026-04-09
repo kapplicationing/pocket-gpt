@@ -133,18 +133,18 @@
       ]
     },
     {
-      "modelId": "gemma-2-2b-it-q4_k_m",
-      "displayName": "Gemma 2 2B IT (Q4_K_M)",
+      "modelId": "gemma-4-e2b-it-q4_k_m",
+      "displayName": "Gemma 4 E2B-it (Q4_K_M)",
       "versions": [
         {
           "version": "q4_k_m",
-          "downloadUrl": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-          "expectedSha256": "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
-          "provenanceIssuer": "huggingface/bartowski",
+          "downloadUrl": "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
+          "expectedSha256": "a67d147c4b461fd5ad394acffa954ecc8686970671d2de8562d6db8888181011",
+          "provenanceIssuer": "huggingface/unsloth",
           "provenanceSignature": "",
           "verificationPolicy": "INTEGRITY_ONLY",
           "runtimeCompatibility": "android-arm64-v8a",
-          "fileSizeBytes": 1708582752
+          "fileSizeBytes": 3106731392
         }
       ]
     }

@@ -24,8 +24,8 @@ pocketgpt_gpu_matrix_model_spec() {
     qwen_2b_tiny)
       printf '%s\n' 'qwen3.5-2b-q4|ud_iq2_xxs'
       ;;
-    gemma_2_2b)
-      printf '%s\n' 'gemma-2-2b-it-q4_k_m|q4_k_m'
+    gemma_4_e2b)
+      printf '%s\n' 'gemma-4-e2b-it-q4_k_m|q4_k_m'
       ;;
     *)
       echo "Unsupported model key: $1" >&2

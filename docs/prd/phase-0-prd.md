@@ -73,7 +73,7 @@ Required MVP UI capabilities:
 3. Session UX with create/switch/delete and persistence across app restarts.
 4. Tool UX with prompt-first shortcuts in the dialog and clear safety/runtime error feedback contracts.
 5. Advanced controls sheet with:
-   - routing mode: `Auto`, `QWEN3_0_6B`, `QWEN_0_8B`, `QWEN_2B`, `SMOLLM3_3B`, `PHI_4_MINI`, `GEMMA_2_2B`, `BONSAI_8B` (availability depends on packaged model support)
+   - routing mode: `Auto`, `QWEN3_0_6B`, `QWEN_0_8B`, `QWEN_2B`, `SMOLLM3_3B`, `PHI_4_MINI`, `GEMMA_4_E2B`, `BONSAI_8B` (availability depends on packaged model support)
    - runtime performance profile: `BATTERY`, `BALANCED`, `FAST`
    - GPU acceleration toggle (enabled only when supported on device/runtime path)
    - diagnostics export action

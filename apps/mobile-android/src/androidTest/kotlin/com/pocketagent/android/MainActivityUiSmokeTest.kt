@@ -662,7 +662,7 @@ private class FakeRuntimeFacade : MvpRuntimeFacade {
                         RoutingMode.QWEN_2B -> "qwen-2b"
                         RoutingMode.SMOLLM3_3B -> "smollm3-3b"
                         RoutingMode.PHI_4_MINI -> "phi-4-mini"
-                        RoutingMode.GEMMA_2_2B -> "gemma-2-2b"
+                        RoutingMode.GEMMA_4_E2B -> "gemma-4-e2b"
                         RoutingMode.BONSAI_8B -> "bonsai-8b"
                     },
                     text = "runtime response for $latestUserText",

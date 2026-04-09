@@ -160,10 +160,10 @@ class ModelCatalogTest {
 
     @Test
     fun `normalized specs expose prompt profile and artifact bundle metadata`() {
-        val gemma = ModelCatalog.normalizedSpecFor(ModelCatalog.GEMMA_2_2B_Q4_K_M)
+        val gemma = ModelCatalog.normalizedSpecFor(ModelCatalog.GEMMA_4_E2B_Q4_K_M)
         val qwenVision = ModelCatalog.normalizedSpecFor(ModelCatalog.QWEN_3_5_0_8B_Q4)
 
-        assertEquals("gemma2-it-legacy", gemma?.promptProfile?.profileId)
+        assertEquals("gemma4-e2b", gemma?.promptProfile?.profileId)
         assertEquals("model", gemma?.promptProfile?.assistantRoleName)
         assertTrue(
             qwenVision?.variants?.firstOrNull()

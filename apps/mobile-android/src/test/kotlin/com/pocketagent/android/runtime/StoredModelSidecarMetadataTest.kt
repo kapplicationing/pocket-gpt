@@ -57,7 +57,7 @@ class StoredModelSidecarMetadataTest {
             file.writeText(
                 """
                 {
-                  "modelId": "gemma-2-2b-it-q4_k_m",
+                  "modelId": "gemma-4-e2b-it-q4_k_m",
                   "version": "q4_k_m",
                   "gguf": {
                     "architecture": {

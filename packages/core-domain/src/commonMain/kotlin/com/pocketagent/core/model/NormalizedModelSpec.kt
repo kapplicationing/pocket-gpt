@@ -33,6 +33,7 @@ enum class PromptTemplateFamily {
     LLAMA3,
     PHI,
     GEMMA,
+    GEMMA4,
 }
 
 enum class SystemPromptHandling {

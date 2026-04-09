@@ -335,7 +335,7 @@ class SendMessageUseCaseTest {
                     "<tool_call>{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"}}</tool_call>",
                 ),
             ),
-            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.GEMMA_2_2B_Q4_K_M),
+            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.GEMMA_4_E2B_Q4_K_M),
         )
 
         val response = fixture.useCase.execute(
@@ -685,7 +685,7 @@ private class SendRecordingInferenceModule(
         return listOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4,
             ModelCatalog.QWEN_3_5_2B_Q4,
-            ModelCatalog.GEMMA_2_2B_Q4_K_M,
+            ModelCatalog.GEMMA_4_E2B_Q4_K_M,
         )
     }
 
@@ -906,31 +906,31 @@ private fun sendRuntimeConfig(
         artifactPayloadByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to payload0,
             ModelCatalog.QWEN_3_5_2B_Q4 to payload2,
-            ModelCatalog.GEMMA_2_2B_Q4_K_M to payloadGemma,
+            ModelCatalog.GEMMA_4_E2B_Q4_K_M to payloadGemma,
             ModelCatalog.BONSAI_8B_Q1_0_G128 to payloadBonsai,
         ),
         artifactFilePathByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "",
             ModelCatalog.QWEN_3_5_2B_Q4 to "",
-            ModelCatalog.GEMMA_2_2B_Q4_K_M to "",
+            ModelCatalog.GEMMA_4_E2B_Q4_K_M to "",
             ModelCatalog.BONSAI_8B_Q1_0_G128 to "",
         ),
         artifactSha256ByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to sendSha256(payload0),
             ModelCatalog.QWEN_3_5_2B_Q4 to sendSha256(payload2),
-            ModelCatalog.GEMMA_2_2B_Q4_K_M to sendSha256(payloadGemma),
+            ModelCatalog.GEMMA_4_E2B_Q4_K_M to sendSha256(payloadGemma),
             ModelCatalog.BONSAI_8B_Q1_0_G128 to sendSha256(payloadBonsai),
         ),
         artifactProvenanceIssuerByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "internal-release",
             ModelCatalog.QWEN_3_5_2B_Q4 to "internal-release",
-            ModelCatalog.GEMMA_2_2B_Q4_K_M to "internal-release",
+            ModelCatalog.GEMMA_4_E2B_Q4_K_M to "internal-release",
             ModelCatalog.BONSAI_8B_Q1_0_G128 to "internal-release",
         ),
         artifactProvenanceSignatureByModelId = mapOf(
             ModelCatalog.QWEN_3_5_0_8B_Q4 to "sig-0",
             ModelCatalog.QWEN_3_5_2B_Q4 to "sig-2",
-            ModelCatalog.GEMMA_2_2B_Q4_K_M to "sig-gemma",
+            ModelCatalog.GEMMA_4_E2B_Q4_K_M to "sig-gemma",
             ModelCatalog.BONSAI_8B_Q1_0_G128 to "sig-bonsai",
         ),
         runtimeCompatibilityTag = "android-arm64-v8a",

@@ -86,7 +86,7 @@ object ModelCatalog {
     const val SMOLLM3_3B_UD_IQ2_XXS = "smollm3-3b-ud-iq2_xxs"
     const val QWEN3_0_6B_Q4_K_M = "qwen3-0.6b-q4_k_m"
     const val PHI_4_MINI_Q4_K_M = "phi-4-mini-instruct-q4_k_m"
-    const val GEMMA_2_2B_Q4_K_M = "gemma-2-2b-it-q4_k_m"
+    const val GEMMA_4_E2B_Q4_K_M = "gemma-4-e2b-it-q4_k_m"
     const val BONSAI_1_7B_Q1_0_G128 = "bonsai-1.7b-q1_0_g128"
     const val BONSAI_4B_Q1_0_G128 = "bonsai-4b-q1_0_g128"
     const val BONSAI_8B_Q1_0_G128 = "bonsai-8b-q1_0_g128"
@@ -245,7 +245,7 @@ object ModelCatalog {
             explicitRoutingModes = setOf(RoutingMode.PHI_4_MINI),
         ),
         ModelDescriptor(
-            modelId = GEMMA_2_2B_Q4_K_M,
+            modelId = GEMMA_4_E2B_Q4_K_M,
             tier = ModelTier.BASELINE,
             family = ModelFamily.GEMMA,
             bridgeSupported = true,
@@ -255,17 +255,17 @@ object ModelCatalog {
                 ModelCapability.LONG_TEXT,
                 ModelCapability.REASONING,
             ),
-            minRamGb = 8,
-            qualityRank = 6,
-            speedRank = 0,
+            minRamGb = 6,
+            qualityRank = 50,
+            speedRank = 60,
             fallbackPriority = 22,
             startupCandidate = true,
             startupRequired = false,
             defaultGetReadyProfiles = emptySet(),
-            envKeyToken = "GEMMA_2_2B_IT_Q4_K_M",
-            chatTemplateId = "GEMMA",
+            envKeyToken = "GEMMA_4_E2B_IT_Q4_K_M",
+            chatTemplateId = "GEMMA4",
             includeAutoRoutingMode = false,
-            explicitRoutingModes = setOf(RoutingMode.GEMMA_2_2B),
+            explicitRoutingModes = setOf(RoutingMode.GEMMA_4_E2B),
         ),
         ModelDescriptor(
             modelId = BONSAI_1_7B_Q1_0_G128,
@@ -518,6 +518,16 @@ private fun ModelDescriptor.toNormalizedModelSpec(): NormalizedModelSpec {
             stopSequences = listOf("<end_of_turn>", "<start_of_turn>user"),
         )
 
+        "GEMMA4" -> PromptProfile(
+            profileId = "gemma4-e2b",
+            templateFamily = PromptTemplateFamily.GEMMA4,
+            systemPromptHandling = SystemPromptHandling.NATIVE,
+            toolCallStrategy = interactionFeatures.toToolCallStrategy(),
+            thinkingStrategy = interactionFeatures.toThinkingStrategy(descriptorModelId, capabilities, chatTemplateId),
+            assistantRoleName = "model",
+            stopSequences = listOf("<turn|>", "<|turn>user"),
+        )
+
         else -> PromptProfile(
             profileId = "chatml-default",
             templateFamily = PromptTemplateFamily.CHATML,
@@ -638,7 +648,7 @@ private fun Set<String>.toThinkingStrategy(
     if (knownThinkingModel) {
         return ThinkingStrategyId.THINK_TAGS
     }
-    return if (capabilities.contains(ModelCapability.REASONING) && chatTemplateId != "GEMMA") {
+    return if (capabilities.contains(ModelCapability.REASONING) && chatTemplateId != "GEMMA" && chatTemplateId != "GEMMA4") {
         ThinkingStrategyId.THINK_TAGS
     } else {
         ThinkingStrategyId.NONE

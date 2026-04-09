@@ -36,10 +36,10 @@ class ModelInteractionRegistryTest {
         assertEquals(ThinkingSupport.THINK_TAGS, phiProfile.thinkingSupport)
         assertEquals(ToolCallSupport.NONE, phiProfile.toolCallSupport)
 
-        val gemmaProfile = registry.interactionProfileForModel(ModelCatalog.GEMMA_2_2B_Q4_K_M)
+        val gemmaProfile = registry.interactionProfileForModel(ModelCatalog.GEMMA_4_E2B_Q4_K_M)
         assertEquals(ThinkingSupport.NONE, gemmaProfile.thinkingSupport)
         assertEquals(ToolCallSupport.NONE, gemmaProfile.toolCallSupport)
-        assertEquals(SystemPromptStrategy.PREPEND_TO_USER, gemmaProfile.systemPromptStrategy)
+        assertEquals(SystemPromptStrategy.NATIVE, gemmaProfile.systemPromptStrategy)
         assertEquals("model", gemmaProfile.roleNameOverrides[InteractionRole.ASSISTANT])
     }
 

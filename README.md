@@ -27,7 +27,7 @@ Offline, privacy-first AI assistant for Android — runs large language models d
 - Qwen2.5-0.5B / 0.8B / 2B (Q4_K_M, Q8_0)
 - SmolLM2-135M / 360M / 1.7B
 - Phi3.5-mini-instruct
-- Gemma 2 2B
+- Gemma 4 E2B-it
 
 ## Quick Start
 

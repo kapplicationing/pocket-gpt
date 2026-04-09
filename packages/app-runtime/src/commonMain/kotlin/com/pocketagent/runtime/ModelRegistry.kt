@@ -143,6 +143,7 @@ private fun PromptTemplateFamily.toRuntimeTemplateProfile(): ModelTemplateProfil
         PromptTemplateFamily.LLAMA3 -> ModelTemplateProfile.LLAMA3
         PromptTemplateFamily.PHI -> ModelTemplateProfile.PHI
         PromptTemplateFamily.GEMMA -> ModelTemplateProfile.GEMMA
+        PromptTemplateFamily.GEMMA4 -> ModelTemplateProfile.GEMMA4
     }
 }
 

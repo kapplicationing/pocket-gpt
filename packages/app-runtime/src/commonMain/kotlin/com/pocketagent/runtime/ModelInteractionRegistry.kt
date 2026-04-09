@@ -42,6 +42,7 @@ class ModelInteractionRegistry(
                 PromptTemplateFamily.LLAMA3 -> ModelTemplateProfile.LLAMA3
                 PromptTemplateFamily.PHI -> ModelTemplateProfile.PHI
                 PromptTemplateFamily.GEMMA -> ModelTemplateProfile.GEMMA
+                PromptTemplateFamily.GEMMA4 -> ModelTemplateProfile.GEMMA4
             }
             val toolCallSupport = if (spec.promptProfile.toolCallStrategy == ToolCallStrategyId.XML_TAGS) {
                 ToolCallSupport.XmlTagFormat()

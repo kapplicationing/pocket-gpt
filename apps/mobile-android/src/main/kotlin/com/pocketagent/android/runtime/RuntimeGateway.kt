@@ -181,7 +181,8 @@ class MvpRuntimeGateway(
     override fun exportDiagnostics(): String {
         val probe = gpuOffloadStatus()
         val runtimeSupported = runCatching { facade.supportsGpuOffload() }.getOrElse { false }
-        return facade.exportDiagnostics() + buildGpuDiagnosticsFooter(runtimeSupported = runtimeSupported, probe = probe)
+        return facade.exportDiagnostics() +
+            buildGpuDiagnosticsFooter(runtimeSupported = runtimeSupported, probe = probe)
     }
 
     override fun setRoutingMode(mode: RoutingMode) {
@@ -290,11 +291,10 @@ class MvpRuntimeGateway(
 
     override fun reportGpuRuntimeFailure(reason: GpuProbeFailureReason, detail: String?) {
         invalidateGpuAndDiagnosticsCaches()
-        runCatching { gpuOffloadQualifier.reportRuntimeFailure(reason = reason, detail = detail) }
+            runCatching { gpuOffloadQualifier.reportRuntimeFailure(reason = reason, detail = detail) }
             .onFailure { error ->
-                safeLogInfo(
-                    "GPU_OFFLOAD|demote_failed|reason=$reason|detail=${detail.orEmpty()}|error=${error.message ?: error::class.simpleName}",
-                )
+                val errorName = error.message ?: error::class.simpleName
+                safeLogInfo("GPU_OFFLOAD|demote_failed|reason=$reason|detail=${detail.orEmpty()}|error=$errorName")
             }
     }
 
@@ -375,14 +375,19 @@ class MvpRuntimeGateway(
         return buildString {
             appendLine()
             append(
-                "GPU_OFFLOAD|runtime_supported=$runtimeSupported|device_feature_advisory_supported=${deviceAdvisory.supportedForProbe}|" +
+                "GPU_OFFLOAD|runtime_supported=$runtimeSupported|" +
+                    "device_feature_advisory_supported=${deviceAdvisory.supportedForProbe}|" +
                     "device_feature_release_opencl_eligible=${deviceAdvisory.automaticOpenClEligible}|" +
-                    "device_feature_arm64=${deviceAdvisory.isArm64V8a}|device_feature_emulator=${deviceAdvisory.isEmulator}|" +
-                    "device_feature_adreno=${deviceAdvisory.isAdrenoFamily}|device_feature_dotprod=${deviceAdvisory.hasArmDotProd}|" +
-                    "device_feature_i8mm=${deviceAdvisory.hasArmI8mm}|device_feature_adreno_gen=${deviceAdvisory.adrenoGeneration}|" +
+                    "device_feature_arm64=${deviceAdvisory.isArm64V8a}|" +
+                    "device_feature_emulator=${deviceAdvisory.isEmulator}|" +
+                    "device_feature_adreno=${deviceAdvisory.isAdrenoFamily}|" +
+                    "device_feature_dotprod=${deviceAdvisory.hasArmDotProd}|" +
+                    "device_feature_i8mm=${deviceAdvisory.hasArmI8mm}|" +
+                    "device_feature_adreno_gen=${deviceAdvisory.adrenoGeneration}|" +
                     "device_feature_reason=${deviceAdvisory.reason}|" +
                     "probe_status=${probe.status}|probe_layers=${probe.maxStableGpuLayers}|" +
-                    "probe_reason=${probe.failureReason ?: "none"}|probe_source=runtime_plus_probe|probe_detail=${probe.detail.orEmpty()}",
+                    "probe_reason=${probe.failureReason ?: "none"}|" +
+                    "probe_source=runtime_plus_probe|probe_detail=${probe.detail.orEmpty()}",
             )
             appendLine()
             append(gpuOffloadQualifier.diagnosticsLine())
@@ -424,31 +429,32 @@ class MvpRuntimeGateway(
         if (code == "template_unavailable") {
             return false
         }
-        if (
-            code.contains("jni") ||
-            code.contains("gpu") ||
-            code.contains("opencl") ||
-            code.contains("hexagon") ||
-            code.contains("backend") ||
-            code.contains("remote_process_died") ||
-            code.contains("remote_runtime")
-        ) {
+        if (code.containsAnyGpuFailureToken()) {
             return true
         }
         val normalizedMessage = message.lowercase()
-        if (
-            normalizedMessage.contains("gpu") ||
-            normalizedMessage.contains("opencl") ||
-            normalizedMessage.contains("hexagon") ||
-            normalizedMessage.contains("backend") ||
-            normalizedMessage.contains("n_gpu_layers") ||
-            normalizedMessage.contains("native load")
-        ) {
+        if (normalizedMessage.containsAnyGpuFailureToken()) {
             return true
         }
         return code == "runtime_error"
     }
 }
+
+private fun String.containsAnyGpuFailureToken(): Boolean {
+    return GPU_FAILURE_TOKENS.any { token -> contains(token) }
+}
+
+private val GPU_FAILURE_TOKENS = listOf(
+    "jni",
+    "gpu",
+    "opencl",
+    "hexagon",
+    "backend",
+    "remote_process_died",
+    "remote_runtime",
+    "n_gpu_layers",
+    "native load",
+)
 
 private const val GPU_OFFLOAD_STATUS_CACHE_TTL_MS = 5_000L
 private const val RUNTIME_DIAGNOSTICS_CACHE_TTL_MS = 2_000L

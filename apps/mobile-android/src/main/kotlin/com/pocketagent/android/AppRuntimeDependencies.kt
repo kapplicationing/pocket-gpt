@@ -310,7 +310,9 @@ object AppRuntimeDependencies {
         context: Context,
         version: ModelDistributionVersion,
     ): Boolean {
-        return graphManager.getOrCreateRuntimeGraph(context).modelDownloadManager.shouldWarnForMeteredLargeDownload(version)
+        return graphManager.getOrCreateRuntimeGraph(context)
+            .modelDownloadManager
+            .shouldWarnForMeteredLargeDownload(version)
     }
 
     fun setDownloadWifiOnlyEnabled(context: Context, enabled: Boolean) {

@@ -237,99 +237,51 @@ internal class AppRuntimeLifecycleCoordinator(
     }
 
     fun reconcileLifecycleState(graph: AppRuntimeGraph) {
-        val quickFp = buildReconcileQuickFingerprint(graph)
-        val now = System.currentTimeMillis()
-        if (quickFp == lastReconcileQuickFingerprint && now - lastReconcileAtMs < RECONCILE_SKIP_WINDOW_MS) {
+        if (shouldSkipReconcile(graph)) {
             return
         }
-        lastReconcileQuickFingerprint = quickFp
-        lastReconcileAtMs = now
         val loaded = graph.runtimeFacade.loadedModel()
         val activeGenerationCount = graph.runtimeFacade.activeGenerationCount()
         val current = lifecycleState.value
-        val normalizedLoaded = if (loaded != null) {
-            val installedVersions = runCatching {
-                graph.provisioningStore.listInstalledVersions(loaded.modelId)
-            }.getOrElse {
-                emptyList()
-            }
-            val resolvedVersion = loaded.modelVersion
-                ?: installedVersions
-                    .firstOrNull { descriptor -> descriptor.isActive }
-                    ?.version
-            if (resolvedVersion == null) {
-                graph.runtimeFacade.offloadModel(reason = "reconcile_missing_version")
-                null
-            } else {
-                val installed = installedVersions.firstOrNull { descriptor -> descriptor.version == resolvedVersion }
-                val fileExists = installed?.absolutePath
-                    ?.let { path -> java.io.File(path).let { it.exists() && it.isFile } }
-                    ?: false
-                if (!fileExists) {
-                    graph.runtimeFacade.offloadModel(reason = "reconcile_missing_file")
-                    null
-                } else {
-                    RuntimeLoadedModel(
-                        modelId = loaded.modelId,
-                        modelVersion = resolvedVersion,
-                    )
-                }
-            }
-        } else {
-            null
-        }
+        val normalizedLoaded = normalizeLoadedModel(graph = graph, loaded = loaded)
         val lastUsed = graph.provisioningStore.lastLoadedModel()?.let { ref ->
             RuntimeLoadedModel(modelId = ref.modelId, modelVersion = ref.version)
         }
-        val shouldKeepFailedState = current.state == ModelLifecycleState.FAILED &&
-            current.requestedModel != null &&
-            normalizedLoaded == null
-        val shouldKeepLoadingState = current.state == ModelLifecycleState.LOADING &&
-            current.requestedModel != null &&
-            normalizedLoaded == null
-        val shouldKeepOffloadingState = current.state == ModelLifecycleState.OFFLOADING &&
-            current.requestedModel != null &&
-            normalizedLoaded == null
-        val preserveCompletedDetail = normalizedLoaded != null &&
-            current.loadingStage == ModelLoadingStage.COMPLETED &&
-            !current.loadingDetail.isNullOrBlank()
-        val reconciledState = when {
-            normalizedLoaded != null -> ModelLifecycleState.LOADED
-            current.queuedOffload && activeGenerationCount > 0 -> ModelLifecycleState.OFFLOADING
-            shouldKeepLoadingState -> ModelLifecycleState.LOADING
-            shouldKeepOffloadingState -> ModelLifecycleState.OFFLOADING
-            shouldKeepFailedState -> ModelLifecycleState.FAILED
-            else -> ModelLifecycleState.UNLOADED
-        }
+        val preserveCompletedDetail = shouldPreserveCompletedDetail(
+            current = current,
+            normalizedLoaded = normalizedLoaded,
+        )
+        val reconciledState = reconcileState(
+            current = current,
+            normalizedLoaded = normalizedLoaded,
+            activeGenerationCount = activeGenerationCount,
+        )
         lifecycleState.value = current.copy(
             state = reconciledState,
             loadedModel = normalizedLoaded,
-            requestedModel = when (reconciledState) {
-                ModelLifecycleState.LOADING,
-                ModelLifecycleState.OFFLOADING,
-                ModelLifecycleState.FAILED,
-                -> current.requestedModel
-                else -> null
-            },
-            errorCode = if (reconciledState == ModelLifecycleState.FAILED) current.errorCode else null,
-            errorDetail = if (reconciledState == ModelLifecycleState.FAILED) current.errorDetail else null,
+            requestedModel = reconcileRequestedModel(
+                current = current,
+                reconciledState = reconciledState,
+            ),
+            errorCode = keepFailedStateValue(reconciledState, current.errorCode),
+            errorDetail = keepFailedStateValue(reconciledState, current.errorDetail),
             lastUsedModel = lastUsed,
             queuedOffload = current.queuedOffload && activeGenerationCount > 0,
-            loadingDetail = when {
-                preserveCompletedDetail -> current.loadingDetail
-                normalizedLoaded != null -> null
-                else -> current.loadingDetail
-            },
-            loadingStage = when {
-                preserveCompletedDetail -> current.loadingStage
-                normalizedLoaded != null -> null
-                else -> current.loadingStage
-            },
-            loadingProgress = when {
-                preserveCompletedDetail -> current.loadingProgress
-                normalizedLoaded != null -> null
-                else -> current.loadingProgress
-            },
+            loadingDetail = reconcileLoadingField(
+                currentValue = current.loadingDetail,
+                preserveCompletedDetail = preserveCompletedDetail,
+                normalizedLoaded = normalizedLoaded,
+            ),
+            loadingStage = reconcileLoadingField(
+                currentValue = current.loadingStage,
+                preserveCompletedDetail = preserveCompletedDetail,
+                normalizedLoaded = normalizedLoaded,
+            ),
+            loadingProgress = reconcileLoadingField(
+                currentValue = current.loadingProgress,
+                preserveCompletedDetail = preserveCompletedDetail,
+                normalizedLoaded = normalizedLoaded,
+            ),
             updatedAtEpochMs = System.currentTimeMillis(),
         )
     }
@@ -407,33 +359,14 @@ internal class AppRuntimeLifecycleCoordinator(
     private fun applyLifecycleEvent(event: ModelLifecycleEvent) {
         val current = lifecycleState.value
         val eventModel = event.modelId?.let { RuntimeLoadedModel(it, event.modelVersion) }
-        val loadedModel = when (event.state) {
-            ModelLifecycleState.LOADED -> eventModel ?: current.loadedModel
-            ModelLifecycleState.UNLOADED -> when {
-                event.modelId == null -> null
-                current.loadedModel?.modelId == event.modelId -> null
-                else -> current.loadedModel
-            }
-            else -> current.loadedModel
-        }
-        val requestedModel = when (event.state) {
-            ModelLifecycleState.LOADING,
-            ModelLifecycleState.OFFLOADING,
-            -> current.requestedModel ?: eventModel
-
-            ModelLifecycleState.LOADED,
-            ModelLifecycleState.UNLOADED,
-            -> null
-
-            ModelLifecycleState.FAILED ->
-                current.requestedModel ?: eventModel
-        }
+        val loadedModel = resolveEventLoadedModel(current = current, event = event, eventModel = eventModel)
+        val requestedModel = resolveEventRequestedModel(current = current, event = event, eventModel = eventModel)
         lifecycleState.value = current.copy(
             state = event.state,
             loadedModel = loadedModel,
             requestedModel = requestedModel,
-            errorCode = event.error?.code ?: if (event.state == ModelLifecycleState.FAILED) current.errorCode else null,
-            errorDetail = event.error?.detail ?: if (event.state == ModelLifecycleState.FAILED) current.errorDetail else null,
+            errorCode = resolveEventErrorCode(current = current, event = event),
+            errorDetail = resolveEventErrorDetail(current = current, event = event),
             loadingDetail = event.loadingDetail ?: current.loadingDetail,
             loadingStage = event.loadingStage,
             loadingProgress = event.loadingProgress,
@@ -441,6 +374,177 @@ internal class AppRuntimeLifecycleCoordinator(
             updatedAtEpochMs = System.currentTimeMillis(),
         )
     }
+
+    private fun shouldSkipReconcile(graph: AppRuntimeGraph): Boolean {
+        val quickFp = buildReconcileQuickFingerprint(graph)
+        val now = System.currentTimeMillis()
+        val shouldSkip = quickFp == lastReconcileQuickFingerprint &&
+            now - lastReconcileAtMs < RECONCILE_SKIP_WINDOW_MS
+        if (!shouldSkip) {
+            lastReconcileQuickFingerprint = quickFp
+            lastReconcileAtMs = now
+        }
+        return shouldSkip
+    }
+
+    private fun normalizeLoadedModel(
+        graph: AppRuntimeGraph,
+        loaded: RuntimeLoadedModel?,
+    ): RuntimeLoadedModel? {
+        if (loaded == null) {
+            return null
+        }
+        val installedVersions = runCatching {
+            graph.provisioningStore.listInstalledVersions(loaded.modelId)
+        }.getOrElse {
+            emptyList()
+        }
+        val resolvedVersion = loaded.modelVersion
+            ?: installedVersions.firstOrNull { descriptor -> descriptor.isActive }?.version
+        if (resolvedVersion == null) {
+            graph.runtimeFacade.offloadModel(reason = "reconcile_missing_version")
+            return null
+        }
+        val installed = installedVersions.firstOrNull { descriptor -> descriptor.version == resolvedVersion }
+        val fileExists = installed?.absolutePath
+            ?.let { path -> java.io.File(path).let { it.exists() && it.isFile } }
+            ?: false
+        if (!fileExists) {
+            graph.runtimeFacade.offloadModel(reason = "reconcile_missing_file")
+            return null
+        }
+        return RuntimeLoadedModel(modelId = loaded.modelId, modelVersion = resolvedVersion)
+    }
+}
+
+private fun shouldPreserveCompletedDetail(
+    current: RuntimeModelLifecycleSnapshot,
+    normalizedLoaded: RuntimeLoadedModel?,
+): Boolean {
+    return normalizedLoaded != null &&
+        current.loadingStage == ModelLoadingStage.COMPLETED &&
+        !current.loadingDetail.isNullOrBlank()
+}
+
+private fun reconcileState(
+    current: RuntimeModelLifecycleSnapshot,
+    normalizedLoaded: RuntimeLoadedModel?,
+    activeGenerationCount: Int,
+): ModelLifecycleState {
+    if (normalizedLoaded != null) {
+        return ModelLifecycleState.LOADED
+    }
+    if (current.queuedOffload && activeGenerationCount > 0) {
+        return ModelLifecycleState.OFFLOADING
+    }
+    if (shouldKeepCurrentState(current = current, target = ModelLifecycleState.LOADING)) {
+        return ModelLifecycleState.LOADING
+    }
+    if (shouldKeepCurrentState(current = current, target = ModelLifecycleState.OFFLOADING)) {
+        return ModelLifecycleState.OFFLOADING
+    }
+    if (shouldKeepCurrentState(current = current, target = ModelLifecycleState.FAILED)) {
+        return ModelLifecycleState.FAILED
+    }
+    return ModelLifecycleState.UNLOADED
+}
+
+private fun shouldKeepCurrentState(
+    current: RuntimeModelLifecycleSnapshot,
+    target: ModelLifecycleState,
+): Boolean {
+    return current.state == target && current.requestedModel != null
+}
+
+private fun reconcileRequestedModel(
+    current: RuntimeModelLifecycleSnapshot,
+    reconciledState: ModelLifecycleState,
+): RuntimeLoadedModel? {
+    return when (reconciledState) {
+        ModelLifecycleState.LOADING,
+        ModelLifecycleState.OFFLOADING,
+        ModelLifecycleState.FAILED,
+        -> current.requestedModel
+
+        ModelLifecycleState.LOADED,
+        ModelLifecycleState.UNLOADED,
+        -> null
+    }
+}
+
+private fun <T> keepFailedStateValue(reconciledState: ModelLifecycleState, value: T?): T? {
+    return if (reconciledState == ModelLifecycleState.FAILED) value else null
+}
+
+private fun <T> reconcileLoadingField(
+    currentValue: T?,
+    preserveCompletedDetail: Boolean,
+    normalizedLoaded: RuntimeLoadedModel?,
+): T? {
+    return when {
+        preserveCompletedDetail -> currentValue
+        normalizedLoaded != null -> null
+        else -> currentValue
+    }
+}
+
+private fun resolveEventLoadedModel(
+    current: RuntimeModelLifecycleSnapshot,
+    event: ModelLifecycleEvent,
+    eventModel: RuntimeLoadedModel?,
+): RuntimeLoadedModel? {
+    return when (event.state) {
+        ModelLifecycleState.LOADED -> eventModel ?: current.loadedModel
+        ModelLifecycleState.UNLOADED -> {
+            if (event.modelId == null || current.loadedModel?.modelId == event.modelId) {
+                null
+            } else {
+                current.loadedModel
+            }
+        }
+        else -> current.loadedModel
+    }
+}
+
+private fun resolveEventRequestedModel(
+    current: RuntimeModelLifecycleSnapshot,
+    event: ModelLifecycleEvent,
+    eventModel: RuntimeLoadedModel?,
+): RuntimeLoadedModel? {
+    return when (event.state) {
+        ModelLifecycleState.LOADING,
+        ModelLifecycleState.OFFLOADING,
+        ModelLifecycleState.FAILED,
+        -> current.requestedModel ?: eventModel
+
+        ModelLifecycleState.LOADED,
+        ModelLifecycleState.UNLOADED,
+        -> null
+    }
+}
+
+private fun resolveEventErrorCode(
+    current: RuntimeModelLifecycleSnapshot,
+    event: ModelLifecycleEvent,
+): ModelLifecycleErrorCode? {
+    return event.error?.code ?: takeFailedStateValue(
+        event = event,
+        currentValue = current.errorCode,
+    )
+}
+
+private fun resolveEventErrorDetail(
+    current: RuntimeModelLifecycleSnapshot,
+    event: ModelLifecycleEvent,
+): String? {
+    return event.error?.detail ?: takeFailedStateValue(
+        event = event,
+        currentValue = current.errorDetail,
+    )
+}
+
+private fun <T> takeFailedStateValue(event: ModelLifecycleEvent, currentValue: T?): T? {
+    return if (event.state == ModelLifecycleState.FAILED) currentValue else null
 }
 
 private fun buildReconcileQuickFingerprint(graph: AppRuntimeGraph): String {

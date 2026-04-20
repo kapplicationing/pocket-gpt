@@ -35,7 +35,7 @@ class ArchitectureBoundaryTest {
             "apps/mobile-android/src/main/kotlin/com/pocketagent/android",
         )
         val allowedSuffixes = setOf(
-            "com/pocketagent/android/AppDependencies.kt",
+            "com/pocketagent/android/AppRuntimeDependencies.kt",
             "com/pocketagent/android/runtime/ProvisioningGateway.kt",
             "com/pocketagent/android/runtime/RuntimeBootstrapper.kt",
             "com/pocketagent/android/runtime/modelmanager/ModelDownloadCancelReceiver.kt",

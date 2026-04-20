@@ -63,8 +63,10 @@ class AndroidMvpContainer(
     private val artifactPayloadByModelId: Map<String, ByteArray> = runtimeEnvConfig.artifactPayloadByModelId,
     private val artifactFilePathByModelId: Map<String, String> = runtimeEnvConfig.artifactFilePathByModelId,
     private val artifactSha256ByModelId: Map<String, String> = runtimeEnvConfig.artifactSha256ByModelId,
-    private val artifactProvenanceIssuerByModelId: Map<String, String> = runtimeEnvConfig.artifactProvenanceIssuerByModelId,
-    private val artifactProvenanceSignatureByModelId: Map<String, String> = runtimeEnvConfig.artifactProvenanceSignatureByModelId,
+    private val artifactProvenanceIssuerByModelId: Map<String, String> =
+        runtimeEnvConfig.artifactProvenanceIssuerByModelId,
+    private val artifactProvenanceSignatureByModelId: Map<String, String> =
+        runtimeEnvConfig.artifactProvenanceSignatureByModelId,
     private val runtimeCompatibilityTag: String = runtimeEnvConfig.runtimeCompatibilityTag,
     private val requireNativeRuntimeForStartupChecks: Boolean = runtimeEnvConfig.requireNativeRuntimeForStartupChecks,
     private val prefixCacheEnabled: Boolean = runtimeEnvConfig.prefixCacheEnabled,

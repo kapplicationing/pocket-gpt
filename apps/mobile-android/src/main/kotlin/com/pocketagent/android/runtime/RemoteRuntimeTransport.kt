@@ -281,7 +281,10 @@ internal class MessengerRemoteRuntimeTransport(
             detail = "probe_transport_disconnected",
         )
         val transportErrorCode = reply.getString(LlamaRuntimeIpc.EXTRA_ERROR_CODE).orEmpty()
-        if (!reply.getBoolean(LlamaRuntimeIpc.EXTRA_OK, false) && !reply.containsKey(LlamaRuntimeIpc.EXTRA_PROBE_STATUS)) {
+        if (
+            !reply.getBoolean(LlamaRuntimeIpc.EXTRA_OK, false) &&
+            !reply.containsKey(LlamaRuntimeIpc.EXTRA_PROBE_STATUS)
+        ) {
             val reason = when (transportErrorCode) {
                 REMOTE_ERROR_TIMEOUT -> GpuProbeFailureReason.PROBE_TIMEOUT
                 REMOTE_ERROR_BIND_FAILED -> GpuProbeFailureReason.PROBE_BIND_FAILED

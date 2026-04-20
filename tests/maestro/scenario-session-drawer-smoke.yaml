@@ -7,31 +7,16 @@ tags:
     clearState: true
 - runFlow:
     when:
-      visible: "Welcome to Pocket GPT"
-    commands:
-      - tapOn:
-          id: "onboarding_next"
-      - extendedWaitUntil:
-          visible: "Step 2 of 3"
-          timeout: 20000
-      - tapOn:
-          id: "onboarding_next"
-      - extendedWaitUntil:
-          visible: "Step 3 of 3"
-          timeout: 20000
-      - tapOn:
-          id: "onboarding_get_started"
-- runFlow:
-    when:
       visible: "Skip"
     commands:
       - tapOn:
           id: "onboarding_skip"
 - runFlow:
     when:
-      visible: "Get ready"
+      visible: "Get started"
     commands:
-      - tapOn: "Get ready"
+      - tapOn:
+          id: "onboarding_get_started"
 - tapOn:
     id: "session_drawer_button"
 - assertVisible: "Create session"

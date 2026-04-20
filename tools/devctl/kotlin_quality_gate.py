@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -35,12 +36,115 @@ def _run_gradle_analysis(repo_root: Path) -> None:
         gradle_tasks.append(f"{module_path}:detekt")
         gradle_tasks.append(f"{module_path}:ktlintCheck")
     command = ["./gradlew", "--no-daemon", *gradle_tasks]
-    result = subprocess.run(command, cwd=repo_root, check=False, capture_output=True, text=True)
+    result = subprocess.run(
+        command,
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_gradle_subprocess_env(),
+    )
     if result.returncode != 0:
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
         details = "\n".join(part for part in (stdout, stderr) if part)
         raise RuntimeError(f"Gradle static analysis failed.\n{details}")
+
+
+def _gradle_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    gradle_java_home = _resolve_gradle_java_home()
+    if gradle_java_home is not None:
+        home = str(gradle_java_home)
+        env["JAVA_HOME"] = home
+        env["ORG_GRADLE_JAVA_HOME"] = home
+    return env
+
+
+def _resolve_gradle_java_home() -> Path | None:
+    java_home = _current_java_home()
+    if java_home is None:
+        return None
+    major = _java_major_version(java_home)
+    if major is None or major < 25:
+        return None
+    return _find_jdk21_home()
+
+
+def _current_java_home() -> Path | None:
+    current = os.environ.get("JAVA_HOME", "").strip() or os.environ.get("ORG_GRADLE_JAVA_HOME", "").strip()
+    if not current:
+        return None
+    return Path(current)
+
+
+def _java_major_version(java_home: Path) -> int | None:
+    java_bin = java_home / "bin" / "java"
+    if not java_bin.exists():
+        return None
+    result = subprocess.run(
+        [str(java_bin), "-version"],
+        cwd=java_home,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    version_output = "\n".join(part for part in ((result.stdout or "").strip(), (result.stderr or "").strip()) if part)
+    return _parse_java_major_version(version_output)
+
+
+def _parse_java_major_version(version_text: str) -> int | None:
+    for line in version_text.splitlines():
+        match = re.search(r'version\s+"([^"]+)"', line)
+        if match:
+            return _major_from_version_string(match.group(1))
+    return None
+
+
+def _major_from_version_string(version_string: str) -> int | None:
+    cleaned = version_string.strip()
+    if not cleaned:
+        return None
+    parts = cleaned.split(".")
+    if parts[0] == "1" and len(parts) > 1:
+        return int(parts[1]) if parts[1].isdigit() else None
+    first = re.match(r"^(\d+)", parts[0])
+    return int(first.group(1)) if first else None
+
+
+def _find_jdk21_home() -> Path | None:
+    for env_var in ("JAVA_21_HOME", "JDK21_HOME", "JAVA21_HOME", "OPENJDK21_HOME"):
+        candidate_value = os.environ.get(env_var, "").strip()
+        if not candidate_value:
+            continue
+        candidate = Path(candidate_value)
+        if _java_major_version(candidate) == 21:
+            return candidate
+
+    mac_java_home = Path("/usr/libexec/java_home")
+    if mac_java_home.exists():
+        result = subprocess.run(
+            [str(mac_java_home), "-v", "21"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        candidate_value = (result.stdout or "").strip()
+        if result.returncode == 0 and candidate_value:
+            candidate = Path(candidate_value)
+            if _java_major_version(candidate) == 21:
+                return candidate
+
+    for candidate_value in (
+        "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home",
+        "/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home",
+        "/Library/Java/JavaVirtualMachines/openjdk-21.jdk/Contents/Home",
+    ):
+        candidate = Path(candidate_value)
+        if candidate.exists() and _java_major_version(candidate) == 21:
+            return candidate
+
+    return None
 
 
 def _parse_detekt_report(report_path: Path, repo_root: Path) -> list[Finding]:

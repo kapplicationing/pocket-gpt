@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest import mock
 
-from tools.devctl.kotlin_quality_gate import Finding, collect_findings, run_gate
+from tools.devctl.kotlin_quality_gate import (
+    Finding,
+    _gradle_subprocess_env,
+    _parse_java_major_version,
+    _resolve_gradle_java_home,
+    collect_findings,
+    run_gate,
+)
 
 
 class KotlinQualityGateTest(unittest.TestCase):
@@ -120,6 +129,71 @@ class KotlinQualityGateTest(unittest.TestCase):
             self.assertEqual(1, len(findings))
             self.assertEqual(0, len(changed_findings))
             self.assertEqual([], changed_files)
+
+    def test_parse_java_major_version_handles_modern_and_legacy_formats(self) -> None:
+        self.assertEqual(25, _parse_java_major_version('openjdk version "25.0.1" 2025-09-16'))
+        self.assertEqual(21, _parse_java_major_version('openjdk version "21.0.10" 2026-01-20'))
+        self.assertEqual(8, _parse_java_major_version('java version "1.8.0_412"'))
+        self.assertIsNone(_parse_java_major_version("not a java version string"))
+
+    def test_resolve_gradle_java_home_keeps_current_jdk_when_compatible(self) -> None:
+        with mock.patch.dict(os.environ, {"JAVA_HOME": "/fake/jdk-21"}, clear=True), mock.patch(
+            "tools.devctl.kotlin_quality_gate._java_major_version",
+            return_value=21,
+        ) as version_mock, mock.patch("tools.devctl.kotlin_quality_gate._find_jdk21_home") as find_mock:
+            self.assertIsNone(_resolve_gradle_java_home())
+            version_mock.assert_called_once()
+            find_mock.assert_not_called()
+
+    def test_resolve_gradle_java_home_uses_jdk21_fallback_for_java25(self) -> None:
+        fallback_home = Path("/opt/fallback/jdk-21")
+        with mock.patch.dict(os.environ, {"JAVA_HOME": "/fake/jdk-25"}, clear=True), mock.patch(
+            "tools.devctl.kotlin_quality_gate._java_major_version",
+            return_value=25,
+        ), mock.patch(
+            "tools.devctl.kotlin_quality_gate._find_jdk21_home",
+            return_value=fallback_home,
+        ):
+            self.assertEqual(fallback_home, _resolve_gradle_java_home())
+
+    def test_gradle_env_injects_fallback_java_home(self) -> None:
+        fallback_home = Path("/opt/fallback/jdk-21")
+        captured: dict[str, object] = {}
+
+        def fake_run(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+        with mock.patch.dict(os.environ, {"JAVA_HOME": "/fake/jdk-25"}, clear=True), mock.patch(
+            "tools.devctl.kotlin_quality_gate._resolve_gradle_java_home",
+            return_value=fallback_home,
+        ), mock.patch(
+            "tools.devctl.kotlin_quality_gate.subprocess.run",
+            side_effect=fake_run,
+        ):
+            from tools.devctl.kotlin_quality_gate import _run_gradle_analysis
+
+            _run_gradle_analysis(Path("/repo"))
+
+        self.assertEqual(
+            str(fallback_home),
+            captured["kwargs"]["env"]["JAVA_HOME"],
+        )
+        self.assertEqual(
+            str(fallback_home),
+            captured["kwargs"]["env"]["ORG_GRADLE_JAVA_HOME"],
+        )
+
+    def test_gradle_env_keeps_existing_java_home_without_fallback(self) -> None:
+        with mock.patch.dict(os.environ, {"JAVA_HOME": "/fake/jdk-21"}, clear=True), mock.patch(
+            "tools.devctl.kotlin_quality_gate._resolve_gradle_java_home",
+            return_value=None,
+        ):
+            env = _gradle_subprocess_env()
+
+        self.assertEqual("/fake/jdk-21", env["JAVA_HOME"])
+        self.assertNotIn("ORG_GRADLE_JAVA_HOME", env)
 
 
 if __name__ == "__main__":

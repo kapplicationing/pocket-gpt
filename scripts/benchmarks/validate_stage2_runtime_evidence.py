@@ -81,13 +81,13 @@ def _validate_metrics_csv(path: Path, expect_scenarios: set[str] | None = None) 
             raise ValidationError(f"Missing required scenario rows in {path}: {', '.join(missing)}")
 
 
-def _validate_model_2b(path: Path) -> None:
+def _validate_model_1_7b(path: Path) -> None:
     _, rows = _read_csv_rows(path)
     seen_scenarios: set[str] = set()
     for idx, row in enumerate(rows, start=2):
         model = (row.get("model") or row.get("model_id") or "").strip().lower()
         if "1.7b" not in model:
-            raise ValidationError(f"model-2b-metrics row is not a 1.7B model in {path}:{idx}")
+            raise ValidationError(f"model-1.7b-metrics row is not a 1.7B model in {path}:{idx}")
         scenario = (row.get("scenario") or "").strip().upper()
         if scenario:
             seen_scenarios.add(scenario)
@@ -119,7 +119,7 @@ def validate_run_dir(run_dir: Path) -> None:
     _validate_metrics_csv(run_dir / "scenario-b.csv", expect_scenarios={"B"})
     _validate_metrics_csv(run_dir / "stage-2-threshold-input.csv", expect_scenarios={"A", "B"})
     _validate_metrics_csv(run_dir / "model-1.7b-metrics.csv")
-    _validate_model_2b(run_dir / "model-1.7b-metrics.csv")
+    _validate_model_1_7b(run_dir / "model-1.7b-metrics.csv")
     _validate_logcat(run_dir / "logcat.txt")
 
 

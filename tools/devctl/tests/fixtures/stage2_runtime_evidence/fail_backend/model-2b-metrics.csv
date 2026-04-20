@@ -1,3 +1,0 @@
-scenario,backend,model,first_token_ms,decode_tps
-A,NATIVE_JNI,qwen3.5-2b-q4,240.0,9.4
-B,NATIVE_JNI,qwen3.5-2b-q4,310.0,8.1

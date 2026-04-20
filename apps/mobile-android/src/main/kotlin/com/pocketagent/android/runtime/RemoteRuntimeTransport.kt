@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.Message
@@ -63,6 +64,12 @@ internal interface RemoteRuntimeTransport {
 internal class MessengerRemoteRuntimeTransport(
     context: Context,
 ) : RemoteRuntimeTransport {
+    companion object {
+        private val ipcLooper: Looper by lazy {
+            HandlerThread("PocketRemoteIpc").apply { start() }.looper
+        }
+    }
+
     private val appContext = context.applicationContext
     private val connectionEpoch = AtomicLong(1L)
     private val nextCorrelationId = AtomicInteger(1)
@@ -77,7 +84,7 @@ internal class MessengerRemoteRuntimeTransport(
     @Volatile
     private var bindLatch: CountDownLatch? = null
 
-    private val incomingHandler = Handler(Looper.getMainLooper()) { message ->
+    private val incomingHandler = Handler(ipcLooper) { message ->
         when (message.what) {
             LlamaRuntimeIpc.MSG_REPLY -> {
                 val reply = synchronized(transportLock) { pendingReplies.remove(message.arg1) }

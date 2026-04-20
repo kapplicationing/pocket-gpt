@@ -61,6 +61,7 @@ internal class AppRuntimeGraphManager {
 
     fun resetForTests() {
         synchronized(lock) {
+            runtimeGraph?.normalizedModelCatalogRegistry?.invalidateModelSpecCache()
             runtimeGraph = null
             runtimeTuningStore = null
         }

@@ -30,6 +30,7 @@ import com.pocketagent.runtime.SamplingOverrides
 import com.pocketagent.runtime.RuntimeConfig
 import com.pocketagent.runtime.RuntimeOrchestrator
 import com.pocketagent.runtime.RuntimeRequestContext
+import com.pocketagent.android.voice.AndroidLocalToolRuntime
 import com.pocketagent.tools.SafeLocalToolRuntime
 import com.pocketagent.tools.ToolModule
 
@@ -41,6 +42,14 @@ private fun defaultInferenceModule(appContext: Context? = null): InferenceModule
     }
 }
 
+private fun defaultToolModule(appContext: Context? = null): ToolModule {
+    return if (appContext != null) {
+        AndroidLocalToolRuntime(appContext.applicationContext)
+    } else {
+        SafeLocalToolRuntime()
+    }
+}
+
 class AndroidMvpContainer(
     private val appContext: Context? = null,
     private val conversationModule: ConversationModule = InMemoryConversationModule(),
@@ -48,7 +57,7 @@ class AndroidMvpContainer(
     private val routingModule: RoutingModule = AdaptiveRoutingPolicy(),
     private val policyModule: PolicyModule = DefaultPolicyModule(offlineOnly = true),
     private val observabilityModule: ObservabilityModule = InMemoryObservabilityModule(),
-    private val toolModule: ToolModule = SafeLocalToolRuntime(),
+    private val toolModule: ToolModule = defaultToolModule(appContext),
     private val memoryModule: MemoryModule = FileBackedMemoryModule.ephemeralRuntimeModule(),
     private val runtimeEnvConfig: RuntimeConfig = RuntimeConfig.fromEnvironment(),
     private val artifactPayloadByModelId: Map<String, ByteArray> = runtimeEnvConfig.artifactPayloadByModelId,

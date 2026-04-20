@@ -37,11 +37,19 @@ internal class AppRuntimeLifecycleCoordinator(
     @Volatile
     private var lifecycleActionToken: Long = 0L
 
+    @Volatile
+    private var lastReconcileQuickFingerprint: String? = null
+
+    @Volatile
+    private var lastReconcileAtMs: Long = 0L
+
     fun resetForTests() {
         lifecycleEventSubscription?.close()
         lifecycleEventSubscription = null
         lifecycleState.value = RuntimeModelLifecycleSnapshot.initial()
         lifecycleActionToken = 0L
+        lastReconcileQuickFingerprint = null
+        lastReconcileAtMs = 0L
         memoryEstimateRecorder(null)
     }
 
@@ -229,6 +237,13 @@ internal class AppRuntimeLifecycleCoordinator(
     }
 
     fun reconcileLifecycleState(graph: AppRuntimeGraph) {
+        val quickFp = buildReconcileQuickFingerprint(graph)
+        val now = System.currentTimeMillis()
+        if (quickFp == lastReconcileQuickFingerprint && now - lastReconcileAtMs < RECONCILE_SKIP_WINDOW_MS) {
+            return
+        }
+        lastReconcileQuickFingerprint = quickFp
+        lastReconcileAtMs = now
         val loaded = graph.runtimeFacade.loadedModel()
         val activeGenerationCount = graph.runtimeFacade.activeGenerationCount()
         val current = lifecycleState.value
@@ -427,3 +442,12 @@ internal class AppRuntimeLifecycleCoordinator(
         )
     }
 }
+
+private fun buildReconcileQuickFingerprint(graph: AppRuntimeGraph): String {
+    val loaded = graph.runtimeFacade.loadedModel()
+    val lastRef = graph.provisioningStore.lastLoadedModel()
+    val genCount = graph.runtimeFacade.activeGenerationCount()
+    return "${loaded?.modelId}:${loaded?.modelVersion}:${lastRef?.modelId}:${lastRef?.version}:$genCount"
+}
+
+private const val RECONCILE_SKIP_WINDOW_MS = 50L

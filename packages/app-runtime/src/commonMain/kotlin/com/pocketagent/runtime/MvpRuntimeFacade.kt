@@ -14,6 +14,8 @@ import com.pocketagent.memory.FileBackedMemoryModule
 import com.pocketagent.memory.MemoryModule
 import com.pocketagent.nativebridge.ModelLifecycleEvent
 import com.pocketagent.nativebridge.createDefaultRuntimeInferenceModule
+import com.pocketagent.tools.SafeLocalToolRuntime
+import com.pocketagent.tools.ToolModule
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
@@ -543,6 +545,7 @@ class DefaultRuntimeContainer(
     memoryModule: MemoryModule = FileBackedMemoryModule.defaultRuntimeModule(),
     inferenceModule: InferenceModule? = null,
     modelSpecProvider: ModelSpecProvider = ModelCatalog,
+    toolModule: ToolModule = SafeLocalToolRuntime(),
     memoryBudgetTracker: MemoryBudgetTracker? = null,
     recommendedGpuLayers: (String, PerformanceRuntimeConfig) -> Int? = { _, _ -> null },
     mmProjPathResolver: (String) -> String? = { null },
@@ -552,6 +555,7 @@ class DefaultRuntimeContainer(
         runtimeConfig = runtimeConfig,
         inferenceModule = inferenceModule ?: createDefaultRuntimeInferenceModule(),
         modelSpecProvider = modelSpecProvider,
+        toolModule = toolModule,
         memoryBudgetTracker = memoryBudgetTracker,
         recommendedGpuLayers = recommendedGpuLayers,
         mmProjPathResolver = mmProjPathResolver,

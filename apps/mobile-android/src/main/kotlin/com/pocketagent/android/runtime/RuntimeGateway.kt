@@ -116,6 +116,16 @@ class MvpRuntimeGateway(
     private val runtimeTuning: RuntimeTuning = RuntimeTuning.DISABLED,
 ) : ChatRuntimeService {
     private val tag = "RuntimeGateway"
+    private val gpuStatusLock = Any()
+    @Volatile
+    private var gpuStatusCache: GpuProbeResult? = null
+    @Volatile
+    private var gpuStatusCachedAtMs: Long = 0L
+    private val diagnosticsLock = Any()
+    @Volatile
+    private var diagnosticsCache: RuntimeDiagnosticsSnapshot? = null
+    @Volatile
+    private var diagnosticsCachedAtMs: Long = 0L
     private val planner = ChatStreamRequestPlanner(
         runtimeGenerationTimeoutMs = 0L,
         recommendedConfig = { modelIdHint, baseConfig, gpuQualifiedLayers ->
@@ -169,42 +179,9 @@ class MvpRuntimeGateway(
     }
 
     override fun exportDiagnostics(): String {
+        val probe = gpuOffloadStatus()
         val runtimeSupported = runCatching { facade.supportsGpuOffload() }.getOrElse { false }
-        val deviceAdvisory = runCatching { deviceGpuOffloadSupport.advisory() }.getOrElse {
-            DeviceGpuOffloadAdvisory(
-                supportedForProbe = false,
-                automaticOpenClEligible = false,
-                reason = "advisory_query_failed:${it.message ?: it::class.simpleName}",
-            )
-        }
-        val probe = runCatching { gpuOffloadQualifier.evaluate(runtimeSupported, deviceAdvisory) }.getOrElse {
-            GpuProbeResult(
-                status = GpuProbeStatus.FAILED,
-                failureReason = GpuProbeFailureReason.UNKNOWN,
-                detail = "probe_evaluation_failed:${it.message ?: it::class.simpleName}",
-            )
-        }
-        val tuningDiagnostics = runtimeTuning.diagnosticsReport().takeIf { it.isNotBlank() }
-        val diagnosticFooter = buildString {
-            appendLine()
-            append(
-                "GPU_OFFLOAD|runtime_supported=$runtimeSupported|device_feature_advisory_supported=${deviceAdvisory.supportedForProbe}|" +
-                    "device_feature_release_opencl_eligible=${deviceAdvisory.automaticOpenClEligible}|" +
-                    "device_feature_arm64=${deviceAdvisory.isArm64V8a}|device_feature_emulator=${deviceAdvisory.isEmulator}|" +
-                    "device_feature_adreno=${deviceAdvisory.isAdrenoFamily}|device_feature_dotprod=${deviceAdvisory.hasArmDotProd}|" +
-                    "device_feature_i8mm=${deviceAdvisory.hasArmI8mm}|device_feature_adreno_gen=${deviceAdvisory.adrenoGeneration}|" +
-                    "device_feature_reason=${deviceAdvisory.reason}|" +
-                    "probe_status=${probe.status}|probe_layers=${probe.maxStableGpuLayers}|" +
-                    "probe_reason=${probe.failureReason ?: "none"}|probe_source=runtime_plus_probe|probe_detail=${probe.detail.orEmpty()}",
-            )
-            appendLine()
-            append(gpuOffloadQualifier.diagnosticsLine())
-            tuningDiagnostics?.let {
-                appendLine()
-                append(it)
-            }
-        }
-        return facade.exportDiagnostics() + diagnosticFooter
+        return facade.exportDiagnostics() + buildGpuDiagnosticsFooter(runtimeSupported = runtimeSupported, probe = probe)
     }
 
     override fun setRoutingMode(mode: RoutingMode) {
@@ -224,8 +201,28 @@ class MvpRuntimeGateway(
     override fun runtimeBackend(): String? = facade.runtimeBackend()
 
     override fun runtimeDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot {
-        val diagnostics = runCatching { exportDiagnostics() }.getOrElse { "" }
-        return RuntimeDiagnosticsSnapshotParser.parse(diagnostics)
+        val now = System.currentTimeMillis()
+        diagnosticsCache?.let { cached ->
+            if (now - diagnosticsCachedAtMs < RUNTIME_DIAGNOSTICS_CACHE_TTL_MS) {
+                return cached
+            }
+        }
+        synchronized(diagnosticsLock) {
+            val again = System.currentTimeMillis()
+            diagnosticsCache?.let { cached ->
+                if (again - diagnosticsCachedAtMs < RUNTIME_DIAGNOSTICS_CACHE_TTL_MS) {
+                    return cached
+                }
+            }
+            val rawFacade = runCatching { facade.exportDiagnostics() }.getOrElse { "" }
+            val probe = gpuOffloadStatus()
+            val runtimeSupported = runCatching { facade.supportsGpuOffload() }.getOrElse { false }
+            val footer = buildGpuDiagnosticsFooter(runtimeSupported = runtimeSupported, probe = probe)
+            val parsed = RuntimeDiagnosticsSnapshotParser.parse(rawFacade + footer)
+            diagnosticsCache = parsed
+            diagnosticsCachedAtMs = again
+            return parsed
+        }
     }
 
     override fun loadModel(modelId: String, modelVersion: String?): RuntimeModelLifecycleCommandResult {
@@ -292,6 +289,7 @@ class MvpRuntimeGateway(
     }
 
     override fun reportGpuRuntimeFailure(reason: GpuProbeFailureReason, detail: String?) {
+        invalidateGpuAndDiagnosticsCaches()
         runCatching { gpuOffloadQualifier.reportRuntimeFailure(reason = reason, detail = detail) }
             .onFailure { error ->
                 safeLogInfo(
@@ -301,6 +299,27 @@ class MvpRuntimeGateway(
     }
 
     override fun gpuOffloadStatus(): GpuProbeResult {
+        val now = System.currentTimeMillis()
+        gpuStatusCache?.let { cached ->
+            if (now - gpuStatusCachedAtMs < GPU_OFFLOAD_STATUS_CACHE_TTL_MS) {
+                return cached
+            }
+        }
+        synchronized(gpuStatusLock) {
+            val t = System.currentTimeMillis()
+            gpuStatusCache?.let { cached ->
+                if (t - gpuStatusCachedAtMs < GPU_OFFLOAD_STATUS_CACHE_TTL_MS) {
+                    return cached
+                }
+            }
+            val probe = computeGpuOffloadStatusUncached()
+            gpuStatusCache = probe
+            gpuStatusCachedAtMs = t
+            return probe
+        }
+    }
+
+    private fun computeGpuOffloadStatusUncached(): GpuProbeResult {
         val runtimeSupported = runCatching { facade.supportsGpuOffload() }.getOrElse { false }
         val deviceAdvisory = runCatching { deviceGpuOffloadSupport.advisory() }.getOrElse {
             DeviceGpuOffloadAdvisory(
@@ -327,6 +346,51 @@ class MvpRuntimeGateway(
             )
         }
         return probe
+    }
+
+    internal fun invalidatePerformanceCaches() {
+        invalidateGpuAndDiagnosticsCaches()
+    }
+
+    private fun invalidateGpuAndDiagnosticsCaches() {
+        synchronized(gpuStatusLock) {
+            gpuStatusCache = null
+            gpuStatusCachedAtMs = 0L
+        }
+        synchronized(diagnosticsLock) {
+            diagnosticsCache = null
+            diagnosticsCachedAtMs = 0L
+        }
+    }
+
+    private fun buildGpuDiagnosticsFooter(runtimeSupported: Boolean, probe: GpuProbeResult): String {
+        val deviceAdvisory = runCatching { deviceGpuOffloadSupport.advisory() }.getOrElse {
+            DeviceGpuOffloadAdvisory(
+                supportedForProbe = false,
+                automaticOpenClEligible = false,
+                reason = "advisory_query_failed:${it.message ?: it::class.simpleName}",
+            )
+        }
+        val tuningDiagnostics = runtimeTuning.diagnosticsReport().takeIf { it.isNotBlank() }
+        return buildString {
+            appendLine()
+            append(
+                "GPU_OFFLOAD|runtime_supported=$runtimeSupported|device_feature_advisory_supported=${deviceAdvisory.supportedForProbe}|" +
+                    "device_feature_release_opencl_eligible=${deviceAdvisory.automaticOpenClEligible}|" +
+                    "device_feature_arm64=${deviceAdvisory.isArm64V8a}|device_feature_emulator=${deviceAdvisory.isEmulator}|" +
+                    "device_feature_adreno=${deviceAdvisory.isAdrenoFamily}|device_feature_dotprod=${deviceAdvisory.hasArmDotProd}|" +
+                    "device_feature_i8mm=${deviceAdvisory.hasArmI8mm}|device_feature_adreno_gen=${deviceAdvisory.adrenoGeneration}|" +
+                    "device_feature_reason=${deviceAdvisory.reason}|" +
+                    "probe_status=${probe.status}|probe_layers=${probe.maxStableGpuLayers}|" +
+                    "probe_reason=${probe.failureReason ?: "none"}|probe_source=runtime_plus_probe|probe_detail=${probe.detail.orEmpty()}",
+            )
+            appendLine()
+            append(gpuOffloadQualifier.diagnosticsLine())
+            tuningDiagnostics?.let {
+                appendLine()
+                append(it)
+            }
+        }
     }
 
     private fun safeLogInfo(message: String) {
@@ -385,3 +449,6 @@ class MvpRuntimeGateway(
         return code == "runtime_error"
     }
 }
+
+private const val GPU_OFFLOAD_STATUS_CACHE_TTL_MS = 5_000L
+private const val RUNTIME_DIAGNOSTICS_CACHE_TTL_MS = 2_000L

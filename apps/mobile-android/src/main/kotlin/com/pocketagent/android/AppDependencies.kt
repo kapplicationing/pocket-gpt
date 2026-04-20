@@ -18,6 +18,7 @@ import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
+import com.pocketagent.android.voice.AndroidLocalToolRuntime
 import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.runtime.CompositeModelSpecProvider
 import com.pocketagent.runtime.MvpRuntimeFacade
@@ -30,6 +31,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
 
 object AppRuntimeDependencies {
+    private val runtimeInstallFingerprintLock = Any()
+    @Volatile
+    private var lastRuntimeInstallFingerprint: String? = null
     private val graphManager = AppRuntimeGraphManager()
     private val lifecycleCoordinator = AppRuntimeLifecycleCoordinator(
         graphProvider = { context -> graphManager.getOrCreateRuntimeGraph(context) },
@@ -59,6 +63,9 @@ object AppRuntimeDependencies {
         warmupOrchestrator.cancelActiveWarmup()
         lifecycleCoordinator.resetForTests()
         graphManager.resetForTests()
+        synchronized(runtimeInstallFingerprintLock) {
+            lastRuntimeInstallFingerprint = null
+        }
     }
 
     internal fun cancelBackgroundWorkForTests() {
@@ -70,6 +77,13 @@ object AppRuntimeDependencies {
             return
         }
         val graph = graphManager.getOrCreateRuntimeGraph(context)
+        val fingerprint = runtimeGraphInstallFingerprint(graph)
+        synchronized(runtimeInstallFingerprintLock) {
+            if (fingerprint == lastRuntimeInstallFingerprint) {
+                lifecycleCoordinator.reconcileLifecycleState(graph)
+                return
+            }
+        }
         val store = graph.provisioningStore
         val runtimeTuning = graph.runtimeTuning
         val newFacade = RuntimeCompositionRoot.createFacade(
@@ -80,6 +94,7 @@ object AppRuntimeDependencies {
             modelSpecProvider = CompositeModelSpecProvider(
                 providers = listOf(graph.normalizedModelCatalogRegistry),
             ),
+            toolModule = AndroidLocalToolRuntime(context.applicationContext),
             memoryBudgetTracker = runtimeTuning.memoryBudgetTracker,
             recommendedGpuLayers = { modelId, config ->
                 runtimeTuning
@@ -96,6 +111,10 @@ object AppRuntimeDependencies {
             },
         )
         graph.runtimeFacade.replace(newFacade)
+        graph.runtimeGateway.invalidatePerformanceCaches()
+        synchronized(runtimeInstallFingerprintLock) {
+            lastRuntimeInstallFingerprint = fingerprint
+        }
         lifecycleCoordinator.attachLifecycleObserver(graph)
         lifecycleCoordinator.reconcileLifecycleState(graph)
         if (startupWarmupEnabled()) {
@@ -325,6 +344,24 @@ object AppRuntimeDependencies {
     suspend fun offloadModel(context: Context, reason: String): RuntimeModelLifecycleCommandResult {
         return lifecycleCoordinator.offloadModel(context, reason)
     }
+}
+
+private fun runtimeGraphInstallFingerprint(graph: AppRuntimeGraph): String {
+    val manifest = graph.modelManifestProvider.currentManifest()
+    val manifestPart = manifest?.models.orEmpty()
+        .sortedBy { it.modelId }
+        .joinToString("|") { model ->
+            model.modelId + ":" + model.versions.joinToString(",") { v ->
+                "${v.version}:${v.expectedSha256}"
+            }
+        }
+    val snap = graph.provisioningStore.snapshot()
+    val provPart = snap.models.sortedBy { it.modelId }.joinToString("|") { state ->
+        state.modelId + ":" + state.activeVersion.orEmpty() + ":" + state.installedVersions
+            .sortedBy { it.version }
+            .joinToString(",") { "${it.version}:${it.isActive}:${it.sha256}" }
+    }
+    return "$manifestPart###$provPart"
 }
 
 internal fun loadedVersionForRemovalGuard(

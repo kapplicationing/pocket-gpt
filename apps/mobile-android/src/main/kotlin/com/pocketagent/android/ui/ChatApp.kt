@@ -1,12 +1,6 @@
 package com.pocketagent.android.ui
 
-import android.Manifest
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -32,13 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pocketagent.android.BuildConfig
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.MODEL_OFFLOAD_REASON_MANUAL
 import com.pocketagent.android.runtime.modelSpecProviderForContext
-import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
@@ -128,10 +120,8 @@ fun PocketAgentApp(
         onCommitDelete = viewModel::deleteSession,
     )
     val isOffline = rememberIsOffline()
-    val selectedModelIdForImport by appViewModel.selectedModelIdForImport.collectAsState()
     val pendingGetReadyActivation by appViewModel.pendingGetReadyActivation.collectAsState()
     val pendingMeteredWarningVersion by appViewModel.pendingMeteredWarningVersion.collectAsState()
-    val pendingNotificationPermissionVersion by appViewModel.pendingNotificationPermissionVersion.collectAsState()
     val pendingRoutingModeSwitch by appViewModel.pendingRoutingModeSwitch.collectAsState()
     val lastDownloadTransitionRefreshKey by appViewModel.lastDownloadTransitionRefreshKey.collectAsState()
     val readinessRefreshSequence by appViewModel.readinessRefreshSequence.collectAsState()
@@ -184,100 +174,18 @@ fun PocketAgentApp(
             }
         },
     )
-    val beginDownload: (ModelDistributionVersion) -> Unit = { version ->
-        scope.launch {
-            startModelDownload(
-                context = context,
-                version = version,
-                enqueueDownload = { selected -> provisioningViewModel.enqueueDownload(selected) },
-                onStatus = { message -> provisioningViewModel.setStatusMessage(message) },
-            )
-        }
-    }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        val version = pendingNotificationPermissionVersion
-        appViewModel.setPendingNotificationPermissionVersion(null)
-        if (version == null) {
-            return@rememberLauncherForActivityResult
-        }
-        if (!granted) {
-            provisioningViewModel.setStatusMessage(
-                context.getString(R.string.ui_model_download_notifications_disabled),
-            )
-        }
-        beginDownload(version)
-    }
-    val launchDownloadFlow: (ModelDistributionVersion) -> Unit = { version ->
-        when {
-            provisioningViewModel.shouldWarnForMeteredLargeDownload(version) -> {
-                appViewModel.setPendingMeteredWarningVersion(version)
-            }
-
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
-                appViewModel.setPendingNotificationPermissionVersion(version)
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-
-            else -> beginDownload(version)
-        }
-    }
-    val microphonePermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) {
-            voiceController.setEnabled(true)
-            if (!voiceState.batteryOptimizationIgnored) {
-                runCatching {
-                    context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-            }
-        } else {
-            scope.launch {
-                snackbarHostState.showSnackbar(context.getString(R.string.ui_voice_activation_microphone_required))
-            }
-        }
-    }
-    val assistantRoleLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) {
-        voiceController.refresh()
-    }
+    val chatAppLaunchers = rememberChatAppLaunchers(
+        context = context,
+        scope = scope,
+        snackbarHostState = snackbarHostState,
+        appViewModel = appViewModel,
+        viewModel = viewModel,
+        provisioningViewModel = provisioningViewModel,
+        voiceController = voiceController,
+        voiceState = voiceState,
+    )
     val openModelSheet: () -> Unit = {
         viewModel.showSurface(ModalSurface.ModelLibrary)
-    }
-    val toggleVoiceActivation: (Boolean) -> Unit = { enabled ->
-        when {
-            !enabled -> voiceController.setEnabled(false)
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
-                microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            else -> {
-                voiceController.setEnabled(true)
-                if (!voiceState.batteryOptimizationIgnored) {
-                    runCatching {
-                        context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
-                }
-            }
-        }
-    }
-    val requestAssistantRole: () -> Unit = {
-        val roleIntent = voiceController.requestAssistantRoleIntent()
-        if (roleIntent != null) {
-            assistantRoleLauncher.launch(roleIntent)
-        }
-    }
-    val openBatteryOptimizationSettings: () -> Unit = {
-        runCatching {
-            context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure {
-            context.startActivity(voiceController.openAppSettingsIntent())
-        }
-    }
-    val openAppSettings: () -> Unit = {
-        context.startActivity(voiceController.openAppSettingsIntent())
     }
     val showBusyModelOperationFeedback: () -> Unit = {
         scope.launch {
@@ -397,7 +305,7 @@ fun PocketAgentApp(
             }
 
             appViewModel.setPendingGetReadyActivation(defaultVersion.modelId to defaultVersion.version)
-            launchDownloadFlow(defaultVersion)
+            chatAppLaunchers.launchDownloadFlow(defaultVersion)
             openModelSheet()
         }
     }
@@ -453,51 +361,6 @@ fun PocketAgentApp(
         viewModel.resetPresetMappingsToDefaults()
         if (matched != null && matched != ModelPreset.AUTO) {
             handleRoutingModeSelected(viewModel.presetBackingStore.routingModeForPreset(matched))
-        }
-    }
-    val launchImageAttachmentPicker = rememberImageAttachmentLauncher(
-        context = context,
-        scope = scope,
-        snackbarHostState = snackbarHostState,
-        onAttachImage = viewModel::addAttachedImage,
-    )
-    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        val modelId = appViewModel.selectedModelIdForImport.value ?: return@rememberLauncherForActivityResult
-        if (uri == null) {
-            provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_import_cancelled))
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_import_in_progress))
-            provisioningViewModel.importModelFromUri(
-                modelId = modelId,
-                sourceUri = uri,
-            ).onSuccess { result ->
-                val statusMessage = if (result.isActive) {
-                    context.getString(
-                        R.string.ui_model_import_success_active,
-                        result.modelId,
-                        result.version,
-                    )
-                } else {
-                    context.getString(
-                        R.string.ui_model_import_success_inactive,
-                        result.modelId,
-                        result.version,
-                    )
-                }
-                viewModel.refreshRuntimeReadiness(
-                    statusDetailOverride = statusMessage,
-                )
-                provisioningViewModel.setStatusMessage(statusMessage)
-            }.onFailure { error ->
-                provisioningViewModel.setStatusMessage(
-                    context.getString(
-                        R.string.ui_model_import_failure,
-                        error.message ?: "Unknown import error",
-                    ),
-                )
-            }
         }
     }
 
@@ -600,7 +463,7 @@ fun PocketAgentApp(
                     canAttachImages = canAttachImages,
                     showThinkingToggle = showThinkingToggle,
                     thinkingEnabled = state.activeSession?.completionSettings?.showThinking == true,
-                    onAttachImage = launchImageAttachmentPicker,
+                    onAttachImage = chatAppLaunchers.launchImageAttachmentPicker,
                     onBlockedAction = onBlockedAction,
                 )
             },
@@ -641,9 +504,9 @@ fun PocketAgentApp(
         provisioningViewModel = provisioningViewModel,
         appViewModel = appViewModel,
         onLaunchImportPicker = {
-            modelPicker.launch(arrayOf("*/*"))
+            chatAppLaunchers.launchModelImportPicker()
         },
-        onLaunchDownloadFlow = launchDownloadFlow,
+        onLaunchDownloadFlow = chatAppLaunchers.launchDownloadFlow,
         onLoadModelVersion = loadModelVersionAction,
         onLoadLastUsedModel = loadLastUsedModelAction,
         onOffloadModel = offloadModelAction,
@@ -667,10 +530,10 @@ fun PocketAgentApp(
         onResetPresetMappings = onResetPresetMappings,
         onPerformanceProfileSelected = viewModel::setPerformanceProfile,
         onKeepAlivePreferenceSelected = viewModel::setKeepAlivePreference,
-        onVoiceActivationChanged = toggleVoiceActivation,
-        onRequestAssistantRole = requestAssistantRole,
-        onOpenBatteryOptimizationSettings = openBatteryOptimizationSettings,
-        onOpenAppSettings = openAppSettings,
+        onVoiceActivationChanged = chatAppLaunchers.toggleVoiceActivation,
+        onRequestAssistantRole = chatAppLaunchers.requestAssistantRole,
+        onOpenBatteryOptimizationSettings = chatAppLaunchers.openBatteryOptimizationSettings,
+        onOpenAppSettings = chatAppLaunchers.openAppSettings,
         onWifiOnlyDownloadsChanged = provisioningViewModel::setDownloadWifiOnlyEnabled,
         onGpuAccelerationEnabledChanged = viewModel::setGpuAccelerationEnabled,
         onExportDiagnostics = viewModel::exportDiagnostics,
@@ -685,7 +548,7 @@ fun PocketAgentApp(
         onConfirmMeteredDownloadWarning = { version ->
             provisioningViewModel.acknowledgeLargeDownloadCellularWarning()
             appViewModel.setPendingMeteredWarningVersion(null)
-            launchDownloadFlow(version)
+            chatAppLaunchers.launchDownloadFlow(version)
         },
         onOnboardingPageChanged = viewModel::setOnboardingPage,
         onNextOnboardingPage = viewModel::nextOnboardingPage,

@@ -159,23 +159,19 @@ class KotlinQualityGateTest(unittest.TestCase):
 
     def test_find_supported_jdk_home_prefers_jdk21_when_available(self) -> None:
         jdk21 = Path("/opt/jdk-21")
-        jdk24 = Path("/opt/jdk-24")
 
         def fake_find(major: int) -> Path | None:
-            return {21: jdk21, 24: jdk24}.get(major)
+            return {21: jdk21}.get(major)
 
         with mock.patch("tools.devctl.kotlin_quality_gate._find_jdk_home", side_effect=fake_find):
             self.assertEqual(jdk21, _find_supported_jdk_home())
 
-    def test_find_supported_jdk_home_uses_newest_supported_version_when_jdk21_missing(self) -> None:
-        jdk24 = Path("/opt/jdk-24")
-        jdk23 = Path("/opt/jdk-23")
-
+    def test_find_supported_jdk_home_returns_none_without_jdk21(self) -> None:
         def fake_find(major: int) -> Path | None:
-            return {24: jdk24, 23: jdk23}.get(major)
+            return None
 
         with mock.patch("tools.devctl.kotlin_quality_gate._find_jdk_home", side_effect=fake_find):
-            self.assertEqual(jdk24, _find_supported_jdk_home())
+            self.assertIsNone(_find_supported_jdk_home())
 
     def test_gradle_env_injects_fallback_java_home(self) -> None:
         fallback_home = Path("/opt/fallback/jdk-21")

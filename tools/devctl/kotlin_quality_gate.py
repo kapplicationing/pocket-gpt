@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-_SUPPORTED_GRADLE_JAVA_MAJORS = (21, 24, 23, 22, 20, 19, 18, 17)
+_SUPPORTED_GRADLE_JAVA_MAJORS = (21,)
 
 
 @dataclass(frozen=True)

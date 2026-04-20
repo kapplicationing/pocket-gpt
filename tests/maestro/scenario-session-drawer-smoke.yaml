@@ -5,18 +5,11 @@ tags:
 ---
 - launchApp:
     clearState: true
-- runFlow:
-    when:
-      visible: "Skip"
-    commands:
-      - tapOn:
-          id: "onboarding_skip"
-- runFlow:
-    when:
-      visible: "Get started"
-    commands:
-      - tapOn:
-          id: "onboarding_get_started"
+- extendedWaitUntil:
+    visible: "Skip"
+    timeout: 20000
+- tapOn:
+    id: "onboarding_skip"
 - tapOn:
     id: "session_drawer_button"
 - assertVisible: "Create session"

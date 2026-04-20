@@ -76,20 +76,7 @@ class AndroidMvpContainer(
     private val streamContractV2Enabled: Boolean = runtimeEnvConfig.streamContractV2Enabled,
     private val networkPolicyClient: PolicyAwareNetworkClient = PolicyAwareNetworkClient(policyModule),
 ) {
-    private val runtimeConfig = RuntimeConfig(
-        artifactPayloadByModelId = artifactPayloadByModelId,
-        artifactFilePathByModelId = artifactFilePathByModelId,
-        artifactSha256ByModelId = artifactSha256ByModelId,
-        artifactProvenanceIssuerByModelId = artifactProvenanceIssuerByModelId,
-        artifactProvenanceSignatureByModelId = artifactProvenanceSignatureByModelId,
-        runtimeCompatibilityTag = runtimeCompatibilityTag,
-        requireNativeRuntimeForStartupChecks = requireNativeRuntimeForStartupChecks,
-            prefixCacheEnabled = prefixCacheEnabled,
-            prefixCacheStrict = prefixCacheStrict,
-            responseCacheTtlSec = responseCacheTtlSec,
-            responseCacheMaxEntries = responseCacheMaxEntries,
-            streamContractV2Enabled = streamContractV2Enabled,
-        )
+    private val runtimeConfig = buildRuntimeConfig()
 
     private val orchestrator = RuntimeOrchestrator(
         conversationModule = conversationModule,
@@ -222,6 +209,23 @@ class AndroidMvpContainer(
     fun getRoutingMode(): RoutingMode = orchestrator.getRoutingMode()
 
     fun runtimeBackend(): RuntimeBackend? = orchestrator.runtimeBackendEnum()
+
+    private fun buildRuntimeConfig(): RuntimeConfig {
+        return RuntimeConfig(
+            artifactPayloadByModelId = artifactPayloadByModelId,
+            artifactFilePathByModelId = artifactFilePathByModelId,
+            artifactSha256ByModelId = artifactSha256ByModelId,
+            artifactProvenanceIssuerByModelId = artifactProvenanceIssuerByModelId,
+            artifactProvenanceSignatureByModelId = artifactProvenanceSignatureByModelId,
+            runtimeCompatibilityTag = runtimeCompatibilityTag,
+            requireNativeRuntimeForStartupChecks = requireNativeRuntimeForStartupChecks,
+            prefixCacheEnabled = prefixCacheEnabled,
+            prefixCacheStrict = prefixCacheStrict,
+            responseCacheTtlSec = responseCacheTtlSec,
+            responseCacheMaxEntries = responseCacheMaxEntries,
+            streamContractV2Enabled = streamContractV2Enabled,
+        )
+    }
 
     companion object {
         const val MODEL_ENV_PREFIX: String = RuntimeConfig.MODEL_ENV_PREFIX

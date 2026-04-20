@@ -1,0 +1,79 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible: "Welcome to Pocket GPT"
+    commands:
+      - tapOn:
+          id: "onboarding_next"
+      - extendedWaitUntil:
+          visible: "Step 2 of 3"
+          timeout: 20000
+      - tapOn:
+          id: "onboarding_next"
+      - extendedWaitUntil:
+          visible: "Step 3 of 3"
+          timeout: 20000
+      - tapOn:
+          id: "onboarding_get_started"
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn:
+          id: "onboarding_skip"
+- runFlow:
+    when:
+      visible: "Refresh"
+    commands:
+      - tapOn:
+          id: "refresh_button"
+- runFlow:
+    when:
+      visible: "Load last used"
+    commands:
+      - tapOn: "Load last used"
+- runFlow:
+    when:
+      visible: "Setup"
+    commands:
+      - runFlow:
+          when:
+            visible: "Get ready"
+          commands:
+            - tapOn: "Get ready"
+      - runFlow:
+          when:
+            visible: "Load last used"
+          commands:
+            - tapOn: "Load last used"
+      - runFlow:
+          when:
+            visible: "Setup"
+          commands:
+            - tapOn:
+                id: "send_button"
+      - runFlow:
+          when:
+            visible: "Load last used"
+          commands:
+            - tapOn: "Load last used"
+      - runFlow:
+          when:
+            visible: "Setup"
+          commands:
+            - runFlow: shared/open-model-library.yaml
+      - runFlow:
+          when:
+            visible: "Load"
+          commands:
+            - tapOn: "Load"
+- extendedWaitUntil:
+    notVisible: "Setup"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Loading…"
+    timeout: 180000
+- extendedWaitUntil:
+    visible: "Send"
+    timeout: 60000

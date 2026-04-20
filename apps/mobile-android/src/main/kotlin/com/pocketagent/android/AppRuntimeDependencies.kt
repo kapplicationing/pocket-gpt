@@ -8,7 +8,6 @@ import com.pocketagent.android.runtime.ModelAdmissionAction
 import com.pocketagent.android.runtime.ModelAdmissionPolicy
 import com.pocketagent.android.runtime.toAdmissionSubject
 import com.pocketagent.android.runtime.ModelMemoryEstimator
-import com.pocketagent.android.runtime.createDefaultAndroidInferenceModule
 import com.pocketagent.android.runtime.RuntimeModelImportResult
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
@@ -18,11 +17,9 @@ import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
-import com.pocketagent.android.voice.AndroidLocalToolRuntime
 import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.runtime.CompositeModelSpecProvider
 import com.pocketagent.runtime.MvpRuntimeFacade
-import com.pocketagent.runtime.RuntimeCompositionRoot
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import com.pocketagent.runtime.RuntimeWarmupSupport
 import kotlinx.coroutines.CoroutineScope
@@ -84,32 +81,7 @@ object AppRuntimeDependencies {
                 return
             }
         }
-        val store = graph.provisioningStore
-        val runtimeTuning = graph.runtimeTuning
-        val newFacade = RuntimeCompositionRoot.createFacade(
-            runtimeConfig = store.runtimeConfig(),
-            conversationModule = graph.conversationModule,
-            memoryModule = graph.memoryModule,
-            inferenceModule = createDefaultAndroidInferenceModule(context.applicationContext),
-            modelSpecProvider = CompositeModelSpecProvider(
-                providers = listOf(graph.normalizedModelCatalogRegistry),
-            ),
-            toolModule = AndroidLocalToolRuntime(context.applicationContext),
-            memoryBudgetTracker = runtimeTuning.memoryBudgetTracker,
-            recommendedGpuLayers = { modelId, config ->
-                runtimeTuning
-                    .applyRecommendedConfig(
-                        modelIdHint = modelId,
-                        baseConfig = config,
-                        gpuQualifiedLayers = config.gpuLayers.coerceAtLeast(0),
-                    )
-                    .gpuLayers
-                    .takeIf { it != config.gpuLayers }
-            },
-            mmProjPathResolver = { modelId ->
-                store.resolveMmProjPath(modelId)
-            },
-        )
+        val newFacade = AppRuntimeFacadeFactory.buildProductionRuntimeFacade(context, graph)
         graph.runtimeFacade.replace(newFacade)
         graph.runtimeGateway.invalidatePerformanceCaches()
         synchronized(runtimeInstallFingerprintLock) {

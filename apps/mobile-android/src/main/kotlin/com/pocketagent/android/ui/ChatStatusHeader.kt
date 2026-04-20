@@ -81,14 +81,12 @@ internal fun OfflineAndStatusHeader(
         ?.detail
         ?.takeIf { detail -> detail.isNotBlank() }
 
-    // Task 2.1: Determine if we are in the collapsed "ready" state
     val isReadyAndClean = modelLoadingState is ModelLoadingState.Loaded
         && state.runtime.modelRuntimeStatus == ModelRuntimeStatus.READY
         && state.runtime.lastErrorUserMessage == null
         && loadedLifecycleNotice == null
     val lifecycleAnimationKey = modelLoadingState.visualStateKey()
 
-    // Task 2.1: AnimatedContent for smooth transition between collapsed and expanded
     AnimatedContent(
         targetState = isReadyAndClean,
         transitionSpec = {
@@ -98,8 +96,6 @@ internal fun OfflineAndStatusHeader(
         label = "StatusHeaderCollapse",
     ) { ready ->
         if (ready) {
-            // Collapsed: model is ready and info is already shown in the top bar chip.
-            // Only show something if we're offline.
             if (isOffline) {
                 Row(
                     modifier = Modifier
@@ -113,7 +109,6 @@ internal fun OfflineAndStatusHeader(
                 }
             }
         } else {
-            // Expanded: full Card with all content
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
@@ -129,11 +124,9 @@ internal fun OfflineAndStatusHeader(
                         horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
                         verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
                     ) {
-                        // Task 3.7: Offline indicator at the start of FlowRow
                         if (isOffline) {
                             OfflineStatusChip()
                         }
-                        // Task 4.5: AnimatedContent for lifecycle chip
                         AnimatedContent(
                             targetState = lifecycleAnimationKey,
                             transitionSpec = {
@@ -143,32 +136,8 @@ internal fun OfflineAndStatusHeader(
                             label = "LifecycleChipAnimation",
                         ) {
                             val targetLoadingState = modelLoadingState
-                            val targetColors = when (targetLoadingState) {
-                                is ModelLoadingState.Loaded -> AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                                is ModelLoadingState.Loading -> AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                    labelColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                                )
-                                is ModelLoadingState.Offloading -> AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                                is ModelLoadingState.Error -> AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    labelColor = MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                                is ModelLoadingState.Idle -> AssistChipDefaults.assistChipColors()
-                            }
-                            val targetIcon = when (targetLoadingState) {
-                                is ModelLoadingState.Loaded -> Icons.Filled.CheckCircle
-                                is ModelLoadingState.Loading -> Icons.Filled.Sync
-                                is ModelLoadingState.Offloading -> Icons.Filled.HourglassEmpty
-                                is ModelLoadingState.Error -> Icons.Filled.Error
-                                is ModelLoadingState.Idle -> Icons.Filled.RadioButtonUnchecked
-                            }
+                            val targetColors = targetLoadingState.assistChipColors()
+                            val targetIcon = targetLoadingState.leadingIcon()
                             val targetLabel = targetLoadingState.readableRuntimeStateLabel()
                             AssistChip(
                                 onClick = onOpenModels,
@@ -439,4 +408,34 @@ private fun ModelLoadingState.visualStateKey(): String {
         is ModelLoadingState.Offloading -> "offloading"
         is ModelLoadingState.Error -> "error"
     }
+}
+
+@Composable
+private fun ModelLoadingState.assistChipColors() = when (this) {
+    is ModelLoadingState.Loaded -> AssistChipDefaults.assistChipColors(
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    )
+    is ModelLoadingState.Loading -> AssistChipDefaults.assistChipColors(
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        labelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+    )
+    is ModelLoadingState.Offloading -> AssistChipDefaults.assistChipColors(
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    )
+    is ModelLoadingState.Error -> AssistChipDefaults.assistChipColors(
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        labelColor = MaterialTheme.colorScheme.onErrorContainer,
+    )
+    is ModelLoadingState.Idle -> AssistChipDefaults.assistChipColors()
+}
+
+@Composable
+private fun ModelLoadingState.leadingIcon() = when (this) {
+    is ModelLoadingState.Loaded -> Icons.Filled.CheckCircle
+    is ModelLoadingState.Loading -> Icons.Filled.Sync
+    is ModelLoadingState.Offloading -> Icons.Filled.HourglassEmpty
+    is ModelLoadingState.Error -> Icons.Filled.Error
+    is ModelLoadingState.Idle -> Icons.Filled.RadioButtonUnchecked
 }

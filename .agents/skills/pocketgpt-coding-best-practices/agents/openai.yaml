@@ -1,0 +1,7 @@
+interface:
+  display_name: "PocketGPT Coding Best Practices"
+  short_description: "Keeps PocketGPT layering, contracts, and refactors consistent"
+  default_prompt: "Use $skill-name when editing PocketGPT code. Preserve boundaries, keep UI thin, prefer typed contracts and coordinators, centralize repeated helpers, and avoid service-locator or stringly-typed drift."
+
+policy:
+  allow_implicit_invocation: true

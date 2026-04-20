@@ -10,6 +10,7 @@ from unittest import mock
 from tools.devctl.kotlin_quality_gate import (
     Finding,
     _gradle_subprocess_env,
+    _find_supported_jdk_home,
     _parse_java_major_version,
     _resolve_gradle_java_home,
     collect_findings,
@@ -140,7 +141,7 @@ class KotlinQualityGateTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"JAVA_HOME": "/fake/jdk-21"}, clear=True), mock.patch(
             "tools.devctl.kotlin_quality_gate._java_major_version",
             return_value=21,
-        ) as version_mock, mock.patch("tools.devctl.kotlin_quality_gate._find_jdk21_home") as find_mock:
+        ) as version_mock, mock.patch("tools.devctl.kotlin_quality_gate._find_supported_jdk_home") as find_mock:
             self.assertIsNone(_resolve_gradle_java_home())
             version_mock.assert_called_once()
             find_mock.assert_not_called()
@@ -151,10 +152,30 @@ class KotlinQualityGateTest(unittest.TestCase):
             "tools.devctl.kotlin_quality_gate._java_major_version",
             return_value=25,
         ), mock.patch(
-            "tools.devctl.kotlin_quality_gate._find_jdk21_home",
+            "tools.devctl.kotlin_quality_gate._find_supported_jdk_home",
             return_value=fallback_home,
         ):
             self.assertEqual(fallback_home, _resolve_gradle_java_home())
+
+    def test_find_supported_jdk_home_prefers_jdk21_when_available(self) -> None:
+        jdk21 = Path("/opt/jdk-21")
+        jdk24 = Path("/opt/jdk-24")
+
+        def fake_find(major: int) -> Path | None:
+            return {21: jdk21, 24: jdk24}.get(major)
+
+        with mock.patch("tools.devctl.kotlin_quality_gate._find_jdk_home", side_effect=fake_find):
+            self.assertEqual(jdk21, _find_supported_jdk_home())
+
+    def test_find_supported_jdk_home_uses_newest_supported_version_when_jdk21_missing(self) -> None:
+        jdk24 = Path("/opt/jdk-24")
+        jdk23 = Path("/opt/jdk-23")
+
+        def fake_find(major: int) -> Path | None:
+            return {24: jdk24, 23: jdk23}.get(major)
+
+        with mock.patch("tools.devctl.kotlin_quality_gate._find_jdk_home", side_effect=fake_find):
+            self.assertEqual(jdk24, _find_supported_jdk_home())
 
     def test_gradle_env_injects_fallback_java_home(self) -> None:
         fallback_home = Path("/opt/fallback/jdk-21")

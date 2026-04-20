@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+_SUPPORTED_GRADLE_JAVA_MAJORS = (21, 24, 23, 22, 20, 19, 18, 17)
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -68,7 +70,7 @@ def _resolve_gradle_java_home() -> Path | None:
     major = _java_major_version(java_home)
     if major is None or major < 25:
         return None
-    return _find_jdk21_home()
+    return _find_supported_jdk_home()
 
 
 def _current_java_home() -> Path | None:
@@ -112,19 +114,27 @@ def _major_from_version_string(version_string: str) -> int | None:
     return int(first.group(1)) if first else None
 
 
-def _find_jdk21_home() -> Path | None:
-    for env_var in ("JAVA_21_HOME", "JDK21_HOME", "JAVA21_HOME", "OPENJDK21_HOME"):
+def _find_supported_jdk_home() -> Path | None:
+    for major in _SUPPORTED_GRADLE_JAVA_MAJORS:
+        candidate = _find_jdk_home(major)
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _find_jdk_home(major: int) -> Path | None:
+    for env_var in _jdk_env_vars(major):
         candidate_value = os.environ.get(env_var, "").strip()
         if not candidate_value:
             continue
         candidate = Path(candidate_value)
-        if _java_major_version(candidate) == 21:
+        if _java_major_version(candidate) == major:
             return candidate
 
     mac_java_home = Path("/usr/libexec/java_home")
     if mac_java_home.exists():
         result = subprocess.run(
-            [str(mac_java_home), "-v", "21"],
+            [str(mac_java_home), "-v", str(major)],
             check=False,
             capture_output=True,
             text=True,
@@ -132,19 +142,32 @@ def _find_jdk21_home() -> Path | None:
         candidate_value = (result.stdout or "").strip()
         if result.returncode == 0 and candidate_value:
             candidate = Path(candidate_value)
-            if _java_major_version(candidate) == 21:
+            if _java_major_version(candidate) == major:
                 return candidate
 
-    for candidate_value in (
-        "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home",
-        "/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home",
-        "/Library/Java/JavaVirtualMachines/openjdk-21.jdk/Contents/Home",
-    ):
+    for candidate_value in _jdk_common_home_candidates(major):
         candidate = Path(candidate_value)
-        if candidate.exists() and _java_major_version(candidate) == 21:
+        if candidate.exists() and _java_major_version(candidate) == major:
             return candidate
 
     return None
+
+
+def _jdk_env_vars(major: int) -> tuple[str, ...]:
+    return (
+        f"JAVA_{major}_HOME",
+        f"JDK{major}_HOME",
+        f"JAVA{major}_HOME",
+        f"OPENJDK{major}_HOME",
+    )
+
+
+def _jdk_common_home_candidates(major: int) -> tuple[str, ...]:
+    return (
+        f"/opt/homebrew/opt/openjdk@{major}/libexec/openjdk.jdk/Contents/Home",
+        f"/usr/local/opt/openjdk@{major}/libexec/openjdk.jdk/Contents/Home",
+        f"/Library/Java/JavaVirtualMachines/openjdk-{major}.jdk/Contents/Home",
+    )
 
 
 def _parse_detekt_report(report_path: Path, repo_root: Path) -> list[Finding]:

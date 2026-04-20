@@ -1,11 +1,9 @@
 package com.pocketagent.android.ui
 
-import android.content.Context
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,11 +53,11 @@ import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.runtime.ModelInteractionRegistry
 import com.pocketagent.runtime.ThinkingSupport
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
@@ -457,20 +455,12 @@ fun PocketAgentApp(
             handleRoutingModeSelected(viewModel.presetBackingStore.routingModeForPreset(matched))
         }
     }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val localPath = copyContentUriToLocal(context, uri)
-                if (localPath != null) {
-                    viewModel.addAttachedImage(localPath)
-                } else {
-                    snackbarHostState.showSnackbar(
-                        message = context.getString(R.string.ui_image_attach_failed),
-                    )
-                }
-            }
-        }
-    }
+    val launchImageAttachmentPicker = rememberImageAttachmentLauncher(
+        context = context,
+        scope = scope,
+        snackbarHostState = snackbarHostState,
+        onAttachImage = viewModel::addAttachedImage,
+    )
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         val modelId = appViewModel.selectedModelIdForImport.value ?: return@rememberLauncherForActivityResult
         if (uri == null) {
@@ -610,7 +600,7 @@ fun PocketAgentApp(
                     canAttachImages = canAttachImages,
                     showThinkingToggle = showThinkingToggle,
                     thinkingEnabled = state.activeSession?.completionSettings?.showThinking == true,
-                    onAttachImage = { imagePicker.launch("image/*") },
+                    onAttachImage = launchImageAttachmentPicker,
                     onBlockedAction = onBlockedAction,
                 )
             },
@@ -741,36 +731,6 @@ private fun ChatComposerDock(
         onOpenCompletionSettings = { viewModel.showSurface(ModalSurface.CompletionSettings) },
         onBlockedAction = onBlockedAction,
     )
-}
-
-private suspend fun copyContentUriToLocal(context: Context, uri: Uri): String? {
-    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        runCatching {
-            val mimeType = context.contentResolver.getType(uri)
-            val extension = MimeTypeMap.getSingleton()
-                .getExtensionFromMimeType(mimeType)
-                ?.lowercase()
-                ?: uri.lastPathSegment?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
-                ?: "jpg"
-            val imagesDir = java.io.File(context.cacheDir, "attached_images").apply { mkdirs() }
-            // Clean up stale attached images older than 1 hour
-            val staleThresholdMs = 60 * 60 * 1000L
-            imagesDir.listFiles()?.forEach { file ->
-                if (System.currentTimeMillis() - file.lastModified() > staleThresholdMs) {
-                    file.delete()
-                }
-            }
-            val target = java.io.File(imagesDir, "img_${System.currentTimeMillis()}.$extension")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            } ?: return@runCatching null
-            if (target.length() == 0L) {
-                target.delete()
-                return@runCatching null
-            }
-            target.absolutePath
-        }.getOrNull()
-    }
 }
 
 internal fun canAttachImagesForModel(modelId: String?): Boolean {

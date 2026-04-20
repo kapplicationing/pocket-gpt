@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.pocketagent.android.R
 import com.pocketagent.android.ui.theme.tickLight
+import com.pocketagent.core.ModelPreset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,16 +37,14 @@ internal fun PocketAgentTopBar(
     lastUsedModelLabel: String?,
     modelLibraryState: ModelLibraryUiState,
     onOpenSessionDrawer: () -> Unit,
-    onLoadModelVersion: (String, String) -> Unit,
+    onModelPresetSelected: (ModelPreset) -> Unit,
     onOpenModelLibrary: () -> Unit,
     onOpenAdvancedSettings: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     var showModelMenu by remember { mutableStateOf(false) }
-    val installedModels = remember(modelLibraryState) {
-        modelLibraryState.snapshot.models.flatMap { model ->
-            model.installedVersions.map { version -> model to version }
-        }
+    val hasInstalledModels = remember(modelLibraryState) {
+        modelLibraryState.snapshot.models.any { model -> model.installedVersions.isNotEmpty() }
     }
 
     TopAppBar(
@@ -76,7 +75,7 @@ internal fun PocketAgentTopBar(
                 AssistChip(
                     onClick = {
                         haptic.tickLight()
-                        if (installedModels.isEmpty()) {
+                        if (!hasInstalledModels) {
                             onOpenModelLibrary()
                         } else {
                             showModelMenu = true
@@ -99,17 +98,13 @@ internal fun PocketAgentTopBar(
                     expanded = showModelMenu,
                     onDismissRequest = { showModelMenu = false },
                 ) {
-                    installedModels.forEach { (model, version) ->
+                    ModelPreset.selectablePresets.forEach { preset ->
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "${model.displayName} ${version.version}".trim(),
-                                )
-                            },
+                            text = { Text(text = presetQuickMenuTitle(preset)) },
                             onClick = {
                                 haptic.tickLight()
                                 showModelMenu = false
-                                onLoadModelVersion(model.modelId, version.version)
+                                onModelPresetSelected(preset)
                             },
                         )
                     }
@@ -137,4 +132,14 @@ internal fun PocketAgentTopBar(
             }
         },
     )
+}
+
+@Composable
+private fun presetQuickMenuTitle(preset: ModelPreset): String {
+    return when (preset) {
+        ModelPreset.AUTO -> stringResource(id = R.string.ui_preset_auto)
+        ModelPreset.QUICK -> stringResource(id = R.string.ui_preset_quick)
+        ModelPreset.BALANCED -> stringResource(id = R.string.ui_preset_balanced_chat)
+        ModelPreset.VISION -> stringResource(id = R.string.ui_preset_vision)
+    }
 }

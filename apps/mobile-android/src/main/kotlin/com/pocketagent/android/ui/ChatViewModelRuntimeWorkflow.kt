@@ -99,11 +99,9 @@ internal fun ChatViewModel.setGpuAccelerationEnabledInternal(enabled: Boolean) {
 }
 
 internal fun ChatViewModel.prefillComposerInternal(text: String) {
+    applyComposerDraft(text)
     _uiState.update { state ->
-        state.copy(
-            composer = state.composer.copy(text = text),
-            activeSurface = ModalSurface.None,
-        )
+        state.copy(activeSurface = ModalSurface.None)
     }
 }
 
@@ -200,6 +198,7 @@ internal fun ChatViewModel.bootstrapStateInternal() {
     val loadedState = persistenceFlow.loadBootstrapState()
     val bootstrapResult = startupFlow.bootstrap(loadedState)
     _uiState.value = bootstrapResult.state
+    applyComposerDraft(bootstrapResult.state.composer.text)
     bootstrapResult.hydrateSessionId?.let { sessionId ->
         hydrateSessionMessagesIfNeeded(sessionId)
     }

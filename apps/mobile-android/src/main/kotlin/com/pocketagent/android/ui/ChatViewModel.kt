@@ -27,6 +27,7 @@ import com.pocketagent.android.ui.controllers.StartupProbeController
 import com.pocketagent.android.ui.controllers.StartupReadinessCoordinator
 import com.pocketagent.android.ui.controllers.TimelineProjector
 import com.pocketagent.android.ui.controllers.ToolLoopUseCase
+import com.pocketagent.android.runtime.PresetBackingStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.android.ui.state.ChatSessionUiModel
@@ -52,6 +53,7 @@ import com.pocketagent.android.ui.state.StreamTerminalState
 import com.pocketagent.android.ui.state.UiError
 import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.android.ui.state.toModelLoadingState
+import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.core.SessionId
@@ -64,8 +66,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlin.math.abs
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,6 +79,7 @@ import kotlinx.coroutines.withContext
 class ChatViewModel(
     internal val runtimeFacade: ChatRuntimeService,
     sessionPersistence: SessionPersistence,
+    internal val presetBackingStore: PresetBackingStore,
     private val provisioningGateway: ProvisioningGateway? = null,
     internal val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     internal val runtimeGenerationTimeoutMs: Long = 0L,
@@ -110,6 +117,8 @@ class ChatViewModel(
 ) : ViewModel(), ModelOperationHandler {
     internal val _uiState = MutableStateFlow(ChatUiState())
     val uiState = _uiState.asStateFlow()
+    internal val _composerDraftText = MutableStateFlow("")
+    val composerDraftText: StateFlow<String> = _composerDraftText.asStateFlow()
     internal val _modelLoadingState = MutableStateFlow<ModelLoadingState>(ModelLoadingState.Idle())
     val modelLoadingState = _modelLoadingState.asStateFlow()
     internal var gpuProbeRefreshJob: Job? = null
@@ -175,9 +184,7 @@ class ChatViewModel(
     }
 
     fun onComposerChanged(text: String) {
-        _uiState.update { state ->
-            state.copy(composer = state.composer.copy(text = text))
-        }
+        _composerDraftText.value = text
         if (text.isBlank()) {
             return
         }
@@ -185,6 +192,21 @@ class ChatViewModel(
         if (now - lastKeepAliveTouchAtMs >= COMPOSER_KEEP_ALIVE_TOUCH_DEBOUNCE_MS) {
             lastKeepAliveTouchAtMs = now
             runtimeFacade.touchKeepAlive()
+        }
+    }
+
+    /**
+     * Keeps [composerDraftText] and [ChatUiState.composer] text aligned for programmatic updates
+     * (edit/regenerate/prefill/bootstrap). Keystrokes use [onComposerChanged] only on the draft flow.
+     */
+    internal fun applyComposerDraft(text: String) {
+        _composerDraftText.value = text
+        _uiState.update { state ->
+            if (state.composer.text == text) {
+                state
+            } else {
+                state.copy(composer = state.composer.copy(text = text))
+            }
         }
     }
 
@@ -279,6 +301,15 @@ class ChatViewModel(
 
     fun setRoutingMode(mode: RoutingMode) {
         setRoutingModeInternal(mode)
+    }
+
+    fun setModelPreset(preset: ModelPreset) {
+        val mode = presetBackingStore.routingModeForPreset(preset)
+        setRoutingModeInternal(mode)
+    }
+
+    fun resetPresetMappingsToDefaults() {
+        presetBackingStore.resetToDefaults()
     }
 
     fun setPerformanceProfile(profile: RuntimePerformanceProfile) {
@@ -680,9 +711,10 @@ class ChatViewModel(
         applyLifecycleSnapshot(gateway.currentModelLifecycle().toModelLoadingState())
         modelLifecycleSyncJob?.cancel()
         modelLifecycleSyncJob = viewModelScope.launch {
-            gateway.observeModelLifecycle().collect { snapshot ->
-                applyLifecycleSnapshot(snapshot.toModelLoadingState())
-            }
+            gateway.observeModelLifecycle()
+                .map { snapshot -> snapshot.toModelLoadingState() }
+                .distinctUntilChanged { a, b -> modelLoadingStatesEquivalentForUi(a, b) }
+                .collect { loadingState -> applyLifecycleSnapshot(loadingState) }
         }
     }
 
@@ -887,3 +919,48 @@ private fun lifecycleErrorMessage(
 }
 
 private const val MODEL_OPERATION_DEBOUNCE_MS = 500L
+
+internal fun modelLoadingStatesEquivalentForUi(a: ModelLoadingState, b: ModelLoadingState): Boolean {
+    if (a::class != b::class) {
+        return false
+    }
+    return when (a) {
+        is ModelLoadingState.Loading -> {
+            b is ModelLoadingState.Loading &&
+                a.requestedModel == b.requestedModel &&
+                a.loadedModel == b.loadedModel &&
+                a.lastUsedModel == b.lastUsedModel &&
+                a.stage == b.stage &&
+                abs((a.progress ?: 0f) - (b.progress ?: 0f)) < LOADING_PROGRESS_UI_EPSILON
+        }
+        is ModelLoadingState.Idle -> {
+            b is ModelLoadingState.Idle &&
+                a.loadedModel == b.loadedModel &&
+                a.lastUsedModel == b.lastUsedModel
+        }
+        is ModelLoadingState.Loaded -> {
+            b is ModelLoadingState.Loaded &&
+                a.model == b.model &&
+                a.lastUsedModel == b.lastUsedModel &&
+                a.detail == b.detail
+        }
+        is ModelLoadingState.Offloading -> {
+            b is ModelLoadingState.Offloading &&
+                a.loadedModel == b.loadedModel &&
+                a.lastUsedModel == b.lastUsedModel &&
+                a.reason == b.reason &&
+                a.queued == b.queued
+        }
+        is ModelLoadingState.Error -> {
+            b is ModelLoadingState.Error &&
+                a.requestedModel == b.requestedModel &&
+                a.loadedModel == b.loadedModel &&
+                a.lastUsedModel == b.lastUsedModel &&
+                a.message == b.message &&
+                a.code == b.code &&
+                a.detail == b.detail
+        }
+    }
+}
+
+private const val LOADING_PROGRESS_UI_EPSILON = 0.04f

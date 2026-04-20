@@ -46,17 +46,28 @@ import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
-import com.pocketagent.core.RoutingMode
+import com.pocketagent.android.voice.VoiceActivationUiState
+import com.pocketagent.android.runtime.PresetBackingStore
+import com.pocketagent.core.ModelPreset
+import com.pocketagent.inference.ModelDisplayNames
+import com.pocketagent.inference.PresetRoutingResolver
 import com.pocketagent.runtime.RuntimePerformanceProfile
 
 @Composable
 internal fun AdvancedSettingsSheet(
     state: ChatUiState,
+    voiceState: VoiceActivationUiState,
     wifiOnlyDownloadsEnabled: Boolean,
     onDefaultThinkingEnabledChanged: (Boolean) -> Unit,
-    onRoutingModeSelected: (RoutingMode) -> Unit,
+    presetBackingStore: PresetBackingStore,
+    onModelPresetSelected: (ModelPreset) -> Unit,
+    onOpenPresetCustomization: () -> Unit,
     onPerformanceProfileSelected: (RuntimePerformanceProfile) -> Unit,
     onKeepAlivePreferenceSelected: (RuntimeKeepAlivePreference) -> Unit,
+    onVoiceActivationChanged: (Boolean) -> Unit,
+    onRequestAssistantRole: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
     onWifiOnlyDownloadsChanged: (Boolean) -> Unit,
     onGpuAccelerationEnabledChanged: (Boolean) -> Unit,
     onExportDiagnostics: () -> Unit,
@@ -105,18 +116,25 @@ internal fun AdvancedSettingsSheet(
         when (selectedTab) {
             0 -> GeneralTabContent(
                 state = state,
+                voiceState = voiceState,
                 wifiOnlyDownloadsEnabled = wifiOnlyDownloadsEnabled,
                 haptic = haptic,
                 onPerformanceProfileSelected = onPerformanceProfileSelected,
                 onWifiOnlyDownloadsChanged = onWifiOnlyDownloadsChanged,
                 onDefaultThinkingEnabledChanged = onDefaultThinkingEnabledChanged,
                 onKeepAlivePreferenceSelected = onKeepAlivePreferenceSelected,
+                onVoiceActivationChanged = onVoiceActivationChanged,
+                onRequestAssistantRole = onRequestAssistantRole,
+                onOpenBatteryOptimizationSettings = onOpenBatteryOptimizationSettings,
+                onOpenAppSettings = onOpenAppSettings,
             )
             1 -> ModelTabContent(
                 state = state,
                 gpuToggleEnabled = gpuToggleEnabled,
                 haptic = haptic,
-                onRoutingModeSelected = onRoutingModeSelected,
+                presetBackingStore = presetBackingStore,
+                onModelPresetSelected = onModelPresetSelected,
+                onOpenPresetCustomization = onOpenPresetCustomization,
                 onGpuAccelerationEnabledChanged = onGpuAccelerationEnabledChanged,
             )
             2 -> AboutTabContent(
@@ -131,12 +149,17 @@ internal fun AdvancedSettingsSheet(
 @Composable
 private fun GeneralTabContent(
     state: ChatUiState,
+    voiceState: VoiceActivationUiState,
     wifiOnlyDownloadsEnabled: Boolean,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
     onPerformanceProfileSelected: (RuntimePerformanceProfile) -> Unit,
     onWifiOnlyDownloadsChanged: (Boolean) -> Unit,
     onDefaultThinkingEnabledChanged: (Boolean) -> Unit,
     onKeepAlivePreferenceSelected: (RuntimeKeepAlivePreference) -> Unit,
+    onVoiceActivationChanged: (Boolean) -> Unit,
+    onRequestAssistantRole: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -234,6 +257,86 @@ private fun GeneralTabContent(
 
         HorizontalDivider()
 
+        SectionHeader(
+            title = stringResource(id = R.string.ui_voice_activation_title),
+            subtitle = stringResource(id = R.string.ui_voice_activation_subtitle, voiceState.settings.wakePhrase),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = voiceState.settings.enabled,
+                    role = Role.Switch,
+                    onValueChange = { checked ->
+                        haptic.tickLight()
+                        onVoiceActivationChanged(checked)
+                    },
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.Switch(
+                checked = voiceState.settings.enabled,
+                onCheckedChange = null,
+            )
+            Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
+            Column {
+                Text(stringResource(id = R.string.ui_voice_activation_toggle))
+                Text(
+                    text = stringResource(
+                        id = if (voiceState.modelsReady) {
+                            R.string.ui_voice_activation_models_ready
+                        } else {
+                            R.string.ui_voice_activation_models_missing
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(
+                        id = R.string.ui_voice_activation_status_line,
+                        voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                voiceState.settings.lastError?.takeIf { it.isNotBlank() }?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
+        ) {
+            if (voiceState.assistantRoleSupported && !voiceState.assistantRoleHeld) {
+                TextButton(onClick = { haptic.tickLightThen(onRequestAssistantRole) }) {
+                    Text(stringResource(id = R.string.ui_voice_activation_set_assistant))
+                }
+            }
+            if (!voiceState.batteryOptimizationIgnored) {
+                TextButton(onClick = { haptic.tickLightThen(onOpenBatteryOptimizationSettings) }) {
+                    Text(stringResource(id = R.string.ui_voice_activation_battery_settings))
+                }
+            }
+            if (!voiceState.modelsReady) {
+                TextButton(onClick = { haptic.tickLightThen(onOpenAppSettings) }) {
+                    Text(stringResource(id = R.string.ui_voice_activation_open_app_settings))
+                }
+            }
+        }
+        Text(
+            text = voiceState.oemGuide?.summary.orEmpty(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        HorizontalDivider()
+
         SectionHeader(title = stringResource(id = R.string.ui_reasoning_title))
         Row(
             modifier = Modifier
@@ -275,7 +378,9 @@ private fun ModelTabContent(
     state: ChatUiState,
     gpuToggleEnabled: Boolean,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
-    onRoutingModeSelected: (RoutingMode) -> Unit,
+    presetBackingStore: PresetBackingStore,
+    onModelPresetSelected: (ModelPreset) -> Unit,
+    onOpenPresetCustomization: () -> Unit,
     onGpuAccelerationEnabledChanged: (Boolean) -> Unit,
 ) {
     Column(
@@ -290,22 +395,28 @@ private fun ModelTabContent(
             subtitle = stringResource(id = R.string.ui_model_selection_subtitle),
         )
 
-        supportedRoutingModes().forEach { mode ->
-            val (label, description) = routingModeLabels(mode)
-            val routingDescription = stringResource(id = R.string.a11y_routing_mode, label)
+        val matchedPreset = presetBackingStore.presetMatchingRoutingMode(state.runtime.routingMode)
+        ModelPreset.selectablePresets.forEach { preset ->
+            val (label, description) = modelPresetLabels(preset)
+            val backingId = PresetRoutingResolver.effectiveBackingModelId(
+                preset,
+                presetBackingStore.customBackingModelId(preset),
+            )
+            val backingName = backingId?.let { ModelDisplayNames.displayNameFor(it) }.orEmpty()
+            val routingDescription = stringResource(id = R.string.a11y_model_preset, label)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .selectable(
-                        selected = state.runtime.routingMode == mode,
-                        onClick = { haptic.tickLightThen { onRoutingModeSelected(mode) } },
+                        selected = matchedPreset == preset,
+                        onClick = { haptic.tickLightThen { onModelPresetSelected(preset) } },
                         role = Role.RadioButton,
                     )
                     .semantics { contentDescription = routingDescription },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(
-                    selected = state.runtime.routingMode == mode,
+                    selected = matchedPreset == preset,
                     onClick = null,
                 )
                 Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
@@ -318,8 +429,21 @@ private fun ModelTabContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (backingName.isNotBlank()) {
+                        Text(
+                            text = stringResource(id = R.string.ui_preset_using_model, backingName),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
+        }
+
+        HorizontalDivider()
+
+        TextButton(onClick = { haptic.tickLightThen(onOpenPresetCustomization) }) {
+            Text(stringResource(id = R.string.ui_preset_customize_assignments))
         }
 
         HorizontalDivider()
@@ -590,13 +714,24 @@ private fun performanceProfileLabels(profile: RuntimePerformanceProfile): Pair<S
 }
 
 @Composable
-private fun routingModeLabels(mode: RoutingMode): Pair<String, String> {
-    return when (mode) {
-        RoutingMode.AUTO -> Pair(
-            stringResource(id = R.string.ui_routing_mode_auto),
-            stringResource(id = R.string.ui_routing_mode_auto_desc),
+private fun modelPresetLabels(preset: ModelPreset): Pair<String, String> {
+    return when (preset) {
+        ModelPreset.AUTO -> Pair(
+            stringResource(id = R.string.ui_preset_auto),
+            stringResource(id = R.string.ui_preset_auto_desc),
         )
-        else -> Pair(mode.name, "")
+        ModelPreset.QUICK -> Pair(
+            stringResource(id = R.string.ui_preset_quick),
+            stringResource(id = R.string.ui_preset_quick_desc),
+        )
+        ModelPreset.BALANCED -> Pair(
+            stringResource(id = R.string.ui_preset_balanced_chat),
+            stringResource(id = R.string.ui_preset_balanced_chat_desc),
+        )
+        ModelPreset.VISION -> Pair(
+            stringResource(id = R.string.ui_preset_vision),
+            stringResource(id = R.string.ui_preset_vision_desc),
+        )
     }
 }
 

@@ -4,8 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
     <application
         android:allowBackup="true"
@@ -30,10 +34,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".voice.AssistActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.PocketAgent.Splash">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+        <service
+            android:name=".voice.OffasListenerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <service
             android:name=".runtime.LlamaRuntimeService"
             android:exported="false"
@@ -44,6 +65,14 @@
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <receiver
             android:name=".runtime.modelmanager.ModelDownloadCancelReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".voice.OffasWatchdogReceiver"
+            android:enabled="true"
+            android:exported="false" />
+        <receiver
+            android:name=".voice.OffasAlarmReceiver"
+            android:enabled="true"
             android:exported="false" />
     </application>
 </manifest>

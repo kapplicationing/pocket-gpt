@@ -61,8 +61,12 @@ internal fun resolveChatGateState(
         runtime.startupProbeState == StartupProbeState.BLOCKED_TIMEOUT
     val provisioningBlocked = provisioningSnapshot?.readiness == ProvisioningReadiness.BLOCKED
     val missingRequiredModel = provisioningSnapshot?.missingRequiredModelIds?.isNotEmpty() == true
+    val runtimeModelReady = runtime.modelRuntimeStatus == ModelRuntimeStatus.READY
 
-    if (provisioningBlocked || (missingRequiredModel && runtime.modelRuntimeStatus != ModelRuntimeStatus.READY)) {
+    // Disk/catalog "blocked" reflects startup-candidate coverage only. Once the native runtime
+    // reports a loaded model, chat must unblock — users may run non-candidate or dynamically
+    // admitted models that do not satisfy verifiedActiveModelCount.
+    if ((provisioningBlocked || missingRequiredModel) && !runtimeModelReady) {
         return ChatGateState(
             status = ChatGateStatus.BLOCKED_MODEL_MISSING,
             primaryAction = if (advancedUnlocked) {

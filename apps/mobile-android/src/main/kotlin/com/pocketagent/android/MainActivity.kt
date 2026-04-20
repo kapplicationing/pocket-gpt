@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,6 +21,7 @@ import com.pocketagent.android.runtime.DefaultProvisioningGateway
 import com.pocketagent.android.runtime.MvpRuntimeGateway
 import com.pocketagent.android.runtime.RuntimeBootstrapper
 import com.pocketagent.android.runtime.AndroidRuntimeProvisioningStore
+import com.pocketagent.android.runtime.PresetModelMappingStore
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
 import com.pocketagent.android.ui.ModelProvisioningViewModel
@@ -28,6 +30,7 @@ import com.pocketagent.android.ui.PocketAgentApp
 import com.pocketagent.android.ui.PocketAgentTheme
 import com.pocketagent.android.ui.controllers.AndroidTelemetryDeviceStateProvider
 import com.pocketagent.android.data.chat.AndroidSessionPersistence
+import com.pocketagent.android.voice.OffasListenerService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,10 +72,13 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val presetBackingStore by lazy { PresetModelMappingStore(applicationContext) }
+
     private val viewModel: ChatViewModel by viewModels {
         ChatViewModelFactory(
             runtimeFacade = runtimeGateway,
             sessionPersistence = AndroidSessionPersistence(applicationContext),
+            presetBackingStore = presetBackingStore,
             provisioningGateway = DefaultProvisioningGateway(applicationContext),
             deviceStateProvider = AndroidTelemetryDeviceStateProvider(applicationContext),
             runtimeTuning = runtimeTuning,
@@ -87,6 +93,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectDiskReads()
+                    .detectDiskWrites()
+                    .detectNetwork()
+                    .penaltyLog()
+                    .build(),
+            )
+        }
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -129,7 +145,14 @@ class MainActivity : ComponentActivity() {
             ).apply {
                 description = "Model loading and runtime status updates"
             }
-            manager.createNotificationChannels(listOf(downloadChannel, runtimeChannel))
+            val voiceChannel = NotificationChannel(
+                OffasListenerService.CHANNEL_VOICE_STATUS,
+                "Offas Voice",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "Background voice activation and command status"
+            }
+            manager.createNotificationChannels(listOf(downloadChannel, runtimeChannel, voiceChannel))
         }
     }
 

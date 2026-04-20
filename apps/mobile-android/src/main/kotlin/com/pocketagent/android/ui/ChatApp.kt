@@ -2,6 +2,7 @@ package com.pocketagent.android.ui
 
 import android.content.Context
 import android.Manifest
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.webkit.MimeTypeMap
@@ -22,6 +23,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,11 +41,16 @@ import com.pocketagent.android.R
 import com.pocketagent.android.runtime.MODEL_OFFLOAD_REASON_MANUAL
 import com.pocketagent.android.runtime.modelSpecProviderForContext
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
+import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
+import com.pocketagent.android.ui.state.ChatGateState
+import com.pocketagent.android.ui.state.ChatGateStatus
+import com.pocketagent.android.ui.state.ComposerUiState
 import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.ui.state.activeOrRequestedModel
 import com.pocketagent.android.ui.state.resolveChatGateState
+import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.runtime.ModelInteractionRegistry
@@ -66,15 +73,33 @@ fun PocketAgentApp(
     val provisioningState by provisioningViewModel.uiState.collectAsState()
     val context = LocalContext.current
     val downloads = provisioningState.downloads
-    val provisioningSnapshot = provisioningState.snapshot ?: return
-    val chatGateState = resolveChatGateState(
-        runtime = state.runtime,
-        provisioningSnapshot = provisioningSnapshot,
-        advancedUnlocked = state.advancedUnlocked,
-    )
-    val headerUiState = deriveChatHeaderUiState(modelLoadingState)
+    if (provisioningState.snapshot == null) {
+        return
+    }
+    val chatGateState by derivedStateOf {
+        val snap = provisioningState.snapshot ?: return@derivedStateOf ChatGateState(
+            status = ChatGateStatus.BLOCKED_MODEL_MISSING,
+            primaryAction = ChatGatePrimaryAction.OPEN_MODEL_SETUP,
+        )
+        resolveChatGateState(
+            runtime = state.runtime,
+            provisioningSnapshot = snap,
+            advancedUnlocked = state.advancedUnlocked,
+        )
+    }
+    val presetRevision by viewModel.presetBackingStore.revisionFlow().collectAsState(initial = 0L)
+    val headerUiState by derivedStateOf {
+        presetRevision
+        deriveChatHeaderUiState(
+            modelLoadingState = modelLoadingState,
+            routingMode = state.runtime.routingMode,
+            presetBackingStore = viewModel.presetBackingStore,
+        )
+    }
     val activeRuntimeModelLabel = headerUiState.activeRuntimeModelLabel
-    val activeModelId = modelLoadingState.loadedModel?.modelId ?: state.runtime.activeModelId
+    val activeModelId by derivedStateOf {
+        modelLoadingState.loadedModel?.modelId ?: state.runtime.activeModelId
+    }
     val canAttachImages = canAttachImagesForModel(activeModelId)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val currentActiveSurface by rememberUpdatedState(state.activeSurface)
@@ -83,17 +108,23 @@ fun PocketAgentApp(
             specProvider = modelSpecProviderForContext(context),
         )
     }
-    val thinkingToggleModelId = modelLoadingState.loadedModel?.modelId ?: state.runtime.activeModelId
-    val showThinkingToggle = thinkingToggleModelId?.let { modelId ->
-        runCatching {
-            interactionRegistry.interactionProfileForModel(modelId).thinkingSupport == ThinkingSupport.THINK_TAGS
-        }.getOrDefault(false)
-    } == true
+    val thinkingToggleModelId by derivedStateOf {
+        modelLoadingState.loadedModel?.modelId ?: state.runtime.activeModelId
+    }
+    val showThinkingToggle by derivedStateOf {
+        thinkingToggleModelId?.let { modelId ->
+            runCatching {
+                interactionRegistry.interactionProfileForModel(modelId).thinkingSupport == ThinkingSupport.THINK_TAGS
+            }.getOrDefault(false)
+        } == true
+    }
     val canLoadLastUsedModel = headerUiState.canLoadLastUsedModel
     val lastUsedModelLabel = headerUiState.lastUsedModelLabel
     val appViewModel: ChatAppViewModel = viewModel()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val voiceController = remember(context) { VoiceActivationController(context.applicationContext) }
+    val voiceState by voiceController.observe().collectAsState()
     val sessionDeleteUndoState = rememberSessionDeleteUndoState(
         snackbarHostState = snackbarHostState,
         onCommitDelete = viewModel::deleteSession,
@@ -107,8 +138,12 @@ fun PocketAgentApp(
     val lastDownloadTransitionRefreshKey by appViewModel.lastDownloadTransitionRefreshKey.collectAsState()
     val readinessRefreshSequence by appViewModel.readinessRefreshSequence.collectAsState()
     val defaultGetReadyModelId = remember { resolveDefaultGetReadyModelId(isDebugBuild = BuildConfig.DEBUG) }
-    val modelLibraryState = provisioningState.toModelLibraryUiState(defaultGetReadyModelId) ?: return
-    val runtimeModelState = provisioningState.toRuntimeModelUiState() ?: return
+    val modelLibraryState = remember(provisioningState, defaultGetReadyModelId) {
+        provisioningState.toModelLibraryUiState(defaultGetReadyModelId)
+    } ?: return
+    val runtimeModelState = remember(provisioningState) {
+        provisioningState.toRuntimeModelUiState()
+    } ?: return
     val modelRemoveUndoState = rememberModelRemoveUndoState(
         snackbarHostState = snackbarHostState,
         onCommitRemove = { modelId, version ->
@@ -191,8 +226,60 @@ fun PocketAgentApp(
             else -> beginDownload(version)
         }
     }
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            voiceController.setEnabled(true)
+            if (!voiceState.batteryOptimizationIgnored) {
+                runCatching {
+                    context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar(context.getString(R.string.ui_voice_activation_microphone_required))
+            }
+        }
+    }
+    val assistantRoleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        voiceController.refresh()
+    }
     val openModelSheet: () -> Unit = {
         viewModel.showSurface(ModalSurface.ModelLibrary)
+    }
+    val toggleVoiceActivation: (Boolean) -> Unit = { enabled ->
+        when {
+            !enabled -> voiceController.setEnabled(false)
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
+                microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            else -> {
+                voiceController.setEnabled(true)
+                if (!voiceState.batteryOptimizationIgnored) {
+                    runCatching {
+                        context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+            }
+        }
+    }
+    val requestAssistantRole: () -> Unit = {
+        val roleIntent = voiceController.requestAssistantRoleIntent()
+        if (roleIntent != null) {
+            assistantRoleLauncher.launch(roleIntent)
+        }
+    }
+    val openBatteryOptimizationSettings: () -> Unit = {
+        runCatching {
+            context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            context.startActivity(voiceController.openAppSettingsIntent())
+        }
+    }
+    val openAppSettings: () -> Unit = {
+        context.startActivity(voiceController.openAppSettingsIntent())
     }
     val showBusyModelOperationFeedback: () -> Unit = {
         scope.launch {
@@ -324,9 +411,11 @@ fun PocketAgentApp(
             ChatGatePrimaryAction.NONE -> Unit
         }
     }
-    val handleRoutingModeSelected: (RoutingMode) -> Unit = { mode ->
-        viewModel.setRoutingMode(mode)
-        val targetModelId = com.pocketagent.inference.ModelCatalog.modelIdForRoutingMode(mode)
+    LaunchedEffect(Unit) {
+        voiceController.refresh()
+    }
+    val queueLoadForRoutingMode: (RoutingMode) -> Unit = { mode ->
+        val targetModelId = ModelCatalog.modelIdForRoutingMode(mode)
         val targetVersion = modelLibraryState.snapshot.models
             .firstOrNull { model -> model.modelId == targetModelId }
             ?.installedVersions
@@ -344,6 +433,28 @@ fun PocketAgentApp(
             modelLoadingState.loadedModel?.modelId != targetModelId
         ) {
             appViewModel.setPendingRoutingModeSwitch(targetModelId to targetVersion)
+        }
+    }
+    val handleRoutingModeSelected: (RoutingMode) -> Unit = { mode ->
+        viewModel.setRoutingMode(mode)
+        queueLoadForRoutingMode(mode)
+    }
+    val handlePresetSelected: (ModelPreset) -> Unit = { preset ->
+        viewModel.setModelPreset(preset)
+        queueLoadForRoutingMode(viewModel.presetBackingStore.routingModeForPreset(preset))
+    }
+    val onPresetBackingChanged: (ModelPreset, String) -> Unit = { preset, modelId ->
+        val matchedBefore = viewModel.presetBackingStore.presetMatchingRoutingMode(state.runtime.routingMode)
+        viewModel.setCustomPresetBacking(preset, modelId)
+        if (matchedBefore == preset) {
+            handleRoutingModeSelected(viewModel.presetBackingStore.routingModeForPreset(preset))
+        }
+    }
+    val onResetPresetMappings: () -> Unit = {
+        val matched = viewModel.presetBackingStore.presetMatchingRoutingMode(state.runtime.routingMode)
+        viewModel.resetPresetMappingsToDefaults()
+        if (matched != null && matched != ModelPreset.AUTO) {
+            handleRoutingModeSelected(viewModel.presetBackingStore.routingModeForPreset(matched))
         }
     }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -485,37 +596,21 @@ fun PocketAgentApp(
                     lastUsedModelLabel = lastUsedModelLabel,
                     modelLibraryState = modelLibraryState,
                     onOpenSessionDrawer = { viewModel.showSurface(ModalSurface.SessionDrawer) },
-                    onLoadModelVersion = { modelId, version ->
-                        loadModelVersionAction(modelId, version, true)
-                    },
+                    onModelPresetSelected = handlePresetSelected,
                     onOpenModelLibrary = openModelSheet,
                     onOpenAdvancedSettings = { viewModel.showSurface(ModalSurface.AdvancedSettings) },
                 )
             },
             bottomBar = {
-                ComposerBar(
-                    text = state.composer.text,
-                    isSending = state.composer.isSending,
-                    isCancelling = state.composer.isCancelling,
+                ChatComposerDock(
+                    viewModel = viewModel,
                     chatGateState = chatGateState,
-                    editingMessageId = state.composer.editingMessageId,
-                    attachedImages = state.composer.attachedImages,
+                    composer = state.composer,
                     activeSessionId = state.activeSessionId,
-                    onTextChanged = viewModel::onComposerChanged,
-                    onSend = viewModel::sendMessage,
-                    onCancelSend = viewModel::cancelActiveSend,
-                    onSubmitEdit = viewModel::submitEdit,
-                    onCancelEdit = viewModel::cancelEdit,
-                    onAttachImage = {
-                        imagePicker.launch("image/*")
-                    },
                     canAttachImages = canAttachImages,
-                    onRemoveImage = viewModel::removeAttachedImage,
-                    onOpenToolDialog = { viewModel.showSurface(ModalSurface.ToolSuggestions) },
                     showThinkingToggle = showThinkingToggle,
                     thinkingEnabled = state.activeSession?.completionSettings?.showThinking == true,
-                    onToggleThinking = viewModel::toggleSessionThinking,
-                    onOpenCompletionSettings = { viewModel.showSurface(ModalSurface.CompletionSettings) },
+                    onAttachImage = { imagePicker.launch("image/*") },
                     onBlockedAction = onBlockedAction,
                 )
             },
@@ -550,6 +645,7 @@ fun PocketAgentApp(
         runtimeModelState = runtimeModelState,
         modelLoadingState = modelLoadingState,
         routingMode = state.runtime.routingMode,
+        presetBackingStore = viewModel.presetBackingStore,
         modelRemoveUndoState = modelRemoveUndoState,
         viewModel = viewModel,
         provisioningViewModel = provisioningViewModel,
@@ -565,16 +661,26 @@ fun PocketAgentApp(
 
     ModalOrchestrator(
         state = state,
+        voiceState = voiceState,
         provisioningState = provisioningState,
+        modelLibraryState = modelLibraryState,
+        presetBackingStore = viewModel.presetBackingStore,
         pendingRoutingModeSwitch = pendingRoutingModeSwitch,
         pendingMeteredWarningVersion = pendingMeteredWarningVersion,
         downloads = downloads,
         onDismissSurface = viewModel::dismissSurface,
         onUseToolPrompt = viewModel::prefillComposer,
         onDefaultThinkingEnabledChanged = viewModel::setDefaultThinkingEnabled,
-        onRoutingModeSelected = handleRoutingModeSelected,
+        onModelPresetSelected = handlePresetSelected,
+        onOpenPresetCustomization = { viewModel.showSurface(ModalSurface.PresetCustomization) },
+        onPresetBackingChanged = onPresetBackingChanged,
+        onResetPresetMappings = onResetPresetMappings,
         onPerformanceProfileSelected = viewModel::setPerformanceProfile,
         onKeepAlivePreferenceSelected = viewModel::setKeepAlivePreference,
+        onVoiceActivationChanged = toggleVoiceActivation,
+        onRequestAssistantRole = requestAssistantRole,
+        onOpenBatteryOptimizationSettings = openBatteryOptimizationSettings,
+        onOpenAppSettings = openAppSettings,
         onWifiOnlyDownloadsChanged = provisioningViewModel::setDownloadWifiOnlyEnabled,
         onGpuAccelerationEnabledChanged = viewModel::setGpuAccelerationEnabled,
         onExportDiagnostics = viewModel::exportDiagnostics,
@@ -596,6 +702,44 @@ fun PocketAgentApp(
         onSkipOnboarding = viewModel::skipOnboarding,
         onFinishOnboarding = viewModel::completeOnboarding,
         onStartOnboardingDownload = runGetReadyFlow,
+    )
+}
+
+@Composable
+private fun ChatComposerDock(
+    viewModel: ChatViewModel,
+    chatGateState: ChatGateState,
+    composer: ComposerUiState,
+    activeSessionId: String?,
+    canAttachImages: Boolean,
+    showThinkingToggle: Boolean,
+    thinkingEnabled: Boolean,
+    onAttachImage: () -> Unit,
+    onBlockedAction: (ChatGatePrimaryAction) -> Unit,
+) {
+    val draftText by viewModel.composerDraftText.collectAsState()
+    ComposerBar(
+        text = draftText,
+        isSending = composer.isSending,
+        isCancelling = composer.isCancelling,
+        chatGateState = chatGateState,
+        editingMessageId = composer.editingMessageId,
+        attachedImages = composer.attachedImages,
+        activeSessionId = activeSessionId,
+        onTextChanged = viewModel::onComposerChanged,
+        onSend = viewModel::sendMessage,
+        onCancelSend = viewModel::cancelActiveSend,
+        onSubmitEdit = viewModel::submitEdit,
+        onCancelEdit = viewModel::cancelEdit,
+        onAttachImage = onAttachImage,
+        canAttachImages = canAttachImages,
+        onRemoveImage = viewModel::removeAttachedImage,
+        onOpenToolDialog = { viewModel.showSurface(ModalSurface.ToolSuggestions) },
+        showThinkingToggle = showThinkingToggle,
+        thinkingEnabled = thinkingEnabled,
+        onToggleThinking = viewModel::toggleSessionThinking,
+        onOpenCompletionSettings = { viewModel.showSurface(ModalSurface.CompletionSettings) },
+        onBlockedAction = onBlockedAction,
     )
 }
 

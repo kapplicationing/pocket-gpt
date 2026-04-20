@@ -238,6 +238,10 @@ object ModelCatalog : ModelSpecProvider {
 
     fun modelIdForRoutingMode(mode: RoutingMode): String? = modelIdByRoutingMode[mode]
 
+    fun primaryExplicitRoutingMode(modelId: String): RoutingMode? {
+        return routingModesForModel(modelId).firstOrNull { mode -> mode != RoutingMode.AUTO }
+    }
+
     fun routingModesForModel(modelId: String): Set<RoutingMode> {
         val descriptor = descriptorFor(modelId) ?: return emptySet()
         return buildSet {

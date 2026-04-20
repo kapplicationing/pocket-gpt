@@ -24,6 +24,9 @@ import com.pocketagent.inference.ModelCatalog
 
 interface NormalizedModelCatalogRegistry : ModelSpecProvider {
     override fun allSpecs(): List<NormalizedModelSpec>
+
+    /** Drop cached [allSpecs] after provisioning or manifest mutations (tests may call directly). */
+    fun invalidateModelSpecCache() = Unit
 }
 
 class DefaultNormalizedModelCatalogRegistry(
@@ -32,7 +35,26 @@ class DefaultNormalizedModelCatalogRegistry(
     private val installedVersionsProvider: (String) -> List<ModelVersionDescriptor> = { emptyList() },
     private val knownModelIdsProvider: () -> Set<String> = { emptySet() },
 ) : NormalizedModelCatalogRegistry {
+    private val cacheLock = Any()
+    @Volatile
+    private var cachedKey: String? = null
+    @Volatile
+    private var cachedSpecs: List<NormalizedModelSpec>? = null
+
+    override fun invalidateModelSpecCache() {
+        synchronized(cacheLock) {
+            cachedKey = null
+            cachedSpecs = null
+        }
+    }
+
     override fun allSpecs(): List<NormalizedModelSpec> {
+        val key = computeCacheKey()
+        synchronized(cacheLock) {
+            if (key == cachedKey && cachedSpecs != null) {
+                return cachedSpecs!!
+            }
+        }
         val bundled = bundledCatalogProvider().associateBy { spec -> spec.modelId }.toMutableMap()
         ManifestSourceAdapter().adapt(manifestProvider()?.models.orEmpty()).forEach { incoming ->
             bundled[incoming.modelId] = bundled[incoming.modelId]?.mergeWith(incoming) ?: incoming
@@ -45,7 +67,32 @@ class DefaultNormalizedModelCatalogRegistry(
                 merged[modelId] = merged[modelId]?.mergeWith(imported) ?: imported
             }
         }
-        return merged.values.sortedBy { spec -> spec.productPolicy.fallbackPriority }
+        val built = merged.values.sortedBy { spec -> spec.productPolicy.fallbackPriority }
+        synchronized(cacheLock) {
+            cachedKey = key
+            cachedSpecs = built
+        }
+        return built
+    }
+
+    private fun computeCacheKey(): String {
+        val manifest = manifestProvider()
+        val manifestKey = manifest?.models.orEmpty()
+            .sortedBy { it.modelId }
+            .joinToString("|") { model ->
+                model.modelId + ":" + model.versions.joinToString(",") { v ->
+                    v.version + ":" + v.expectedSha256
+                }
+            }
+        val knownSorted = knownModelIdsProvider().sorted()
+        val installedKey = knownSorted.joinToString(";") { modelId ->
+            modelId + "=" + installedVersionsProvider(modelId)
+                .sortedBy { it.version }
+                .joinToString(",") { d ->
+                    "${d.version}:${d.isActive}:${d.absolutePath}:${d.sha256}"
+                }
+        }
+        return "$manifestKey###$installedKey"
     }
 }
 

@@ -15,11 +15,13 @@ import kotlinx.coroutines.launch
 internal fun ChatViewModel.editMessageInternal(messageId: String) {
     conversationService.startEditing(_uiState.value, messageId)?.let { nextState ->
         _uiState.value = nextState
+        applyComposerDraft(nextState.composer.text)
     }
 }
 
 internal fun ChatViewModel.cancelEditInternal() {
     _uiState.value = conversationService.cancelEditing(_uiState.value)
+    applyComposerDraft("")
 }
 
 internal fun ChatViewModel.submitEditInternal() {
@@ -34,6 +36,7 @@ internal fun ChatViewModel.submitEditInternal() {
 internal fun ChatViewModel.regenerateResponseInternal(messageId: String) {
     val update = conversationService.regenerateResponse(_uiState.value, messageId) ?: return
     _uiState.value = update.state
+    applyComposerDraft(update.state.composer.text)
     if (update.shouldPersist) {
         persistState()
     }

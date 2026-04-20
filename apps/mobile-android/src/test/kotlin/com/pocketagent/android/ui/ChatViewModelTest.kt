@@ -26,11 +26,16 @@ import com.pocketagent.android.ui.state.MessageRole
 import com.pocketagent.android.ui.state.MessageUiModel
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateStatus
+import com.pocketagent.android.ui.state.ModelRuntimeStatus
+import com.pocketagent.android.ui.state.StartupProbeState
+import com.pocketagent.android.ui.state.resolveChatGateState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
+import com.pocketagent.android.runtime.ProvisioningReadiness
 import com.pocketagent.inference.DeviceState
+import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.runtime.ChatStreamEvent
 import com.pocketagent.runtime.ChatStreamDelta
 import com.pocketagent.runtime.ImageAnalysisResult
@@ -97,6 +102,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -121,6 +127,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -144,6 +151,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -164,6 +172,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -184,6 +193,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -200,6 +210,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -225,6 +236,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -249,6 +261,7 @@ class ChatViewModelTest {
                     advancedUnlocked = true,
                 ),
             ),
+            presetBackingStore = FakePresetBackingStore(),
             provisioningGateway = provisioning,
             ioDispatcher = dispatcher,
         )
@@ -343,6 +356,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -364,6 +378,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -396,6 +411,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -418,6 +434,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -445,6 +462,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             sendFlow = sendFlow,
         )
@@ -501,6 +519,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -518,6 +537,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = CorruptLoadPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -541,6 +561,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -572,6 +593,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -594,6 +616,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -612,6 +635,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -630,6 +654,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -648,6 +673,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -678,6 +704,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
 
@@ -694,6 +721,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -740,6 +768,33 @@ class ChatViewModelTest {
         )
         assertEquals(ChatGateStatus.BLOCKED_MODEL_MISSING, advancedGate.status)
         assertEquals(ChatGatePrimaryAction.OPEN_MODEL_SETUP, advancedGate.primaryAction)
+    }
+
+    @Test
+    fun `chat gate ready when runtime model loaded despite provisioning blocked for startup candidates`() {
+        val snapshot = RuntimeProvisioningSnapshot(
+            models = emptyList(),
+            storageSummary = StorageSummary(
+                totalBytes = 0L,
+                freeBytes = 0L,
+                usedByModelsBytes = 0L,
+                tempDownloadBytes = 0L,
+            ),
+            requiredModelIds = setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M, ModelCatalog.QWEN3_1_7B_Q4_K_M),
+        )
+        assertEquals(ProvisioningReadiness.BLOCKED, snapshot.readiness)
+
+        val gate = resolveChatGateState(
+            runtime = RuntimeUiState(
+                startupProbeState = StartupProbeState.READY,
+                modelRuntimeStatus = ModelRuntimeStatus.READY,
+                activeModelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
+            ),
+            provisioningSnapshot = snapshot,
+            advancedUnlocked = true,
+        )
+        assertEquals(ChatGateStatus.READY, gate.status)
+        assertEquals(ChatGatePrimaryAction.NONE, gate.primaryAction)
     }
 
     @Test
@@ -794,6 +849,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -822,6 +878,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             runtimeGenerationTimeoutMs = 2_000L,
         )
@@ -851,6 +908,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             runtimeGenerationTimeoutMs = 50L,
         )
@@ -876,6 +934,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -905,6 +964,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -932,6 +992,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             runtimeStartupProbeTimeoutMs = 50L,
             startupProbeController = startupProbeController,
@@ -958,6 +1019,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             runtimeStartupProbeTimeoutMs = 50L,
             runtimeGenerationTimeoutMs = 500L,
@@ -983,6 +1045,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             runtimeStartupProbeTimeoutMs = 50L,
             runtimeGenerationTimeoutMs = 500L,
@@ -1007,6 +1070,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1027,6 +1091,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1046,6 +1111,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1067,6 +1133,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             runtimeGenerationTimeoutMs = 1_000L,
         )
@@ -1091,6 +1158,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1109,6 +1177,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
 
@@ -1129,6 +1198,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1147,6 +1217,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1165,6 +1236,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             startupProbeController = ThrowingOnSecondStartupProbeController(),
         )
@@ -1184,6 +1256,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             startupProbeController = NonCooperativeStartupProbeController(),
         )
@@ -1206,6 +1279,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
             startupProbeController = startupProbeController,
         )
@@ -1235,6 +1309,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             provisioningGateway = provisioningGateway,
             ioDispatcher = dispatcher,
             startupProbeController = startupProbeController,
@@ -1259,6 +1334,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1309,6 +1385,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             provisioningGateway = gateway,
             ioDispatcher = dispatcher,
         )
@@ -1343,6 +1420,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             provisioningGateway = gateway,
             ioDispatcher = dispatcher,
         )
@@ -1372,6 +1450,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
 
@@ -1390,6 +1469,7 @@ class ChatViewModelTest {
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
@@ -1441,79 +1521,6 @@ private fun MessageUiModel.toStoredMessage(clearStreaming: Boolean = false): Sto
         tokensPerSec = tokensPerSec,
         totalLatencyMs = totalLatencyMs,
     )
-}
-
-private fun resolveChatGateState(
-    runtime: RuntimeUiState,
-    provisioningSnapshot: RuntimeProvisioningSnapshot?,
-    advancedUnlocked: Boolean,
-): com.pocketagent.android.ui.state.ChatGateState {
-    val recoverySignal = provisioningSnapshot
-        ?.recoverableCorruptions
-        ?.firstOrNull { signal ->
-            signal.code == "MODEL_LOCAL_FILE_MISSING" || signal.code == "MODEL_PATH_ALIAS_STALE"
-        }
-    if (recoverySignal != null) {
-        return com.pocketagent.android.ui.state.ChatGateState(
-            status = ChatGateStatus.ERROR_RECOVERABLE,
-            primaryAction = ChatGatePrimaryAction.REFRESH_RUNTIME_CHECKS,
-            detail = recoverySignal.message,
-        )
-    }
-    val missingRequiredModel = provisioningSnapshot?.missingRequiredModelIds?.isNotEmpty() == true
-
-    return when {
-        runtime.modelRuntimeStatus == com.pocketagent.android.ui.state.ModelRuntimeStatus.LOADING ||
-            runtime.startupProbeState == com.pocketagent.android.ui.state.StartupProbeState.RUNNING -> {
-            com.pocketagent.android.ui.state.ChatGateState(
-                status = ChatGateStatus.LOADING_MODEL,
-                primaryAction = ChatGatePrimaryAction.NONE,
-                detail = runtime.modelStatusDetail,
-            )
-        }
-
-        missingRequiredModel && runtime.modelRuntimeStatus != com.pocketagent.android.ui.state.ModelRuntimeStatus.READY -> {
-            com.pocketagent.android.ui.state.ChatGateState(
-                status = ChatGateStatus.BLOCKED_MODEL_MISSING,
-                primaryAction = if (advancedUnlocked) {
-                    ChatGatePrimaryAction.OPEN_MODEL_SETUP
-                } else {
-                    ChatGatePrimaryAction.GET_READY
-                },
-                detail = runtime.modelStatusDetail,
-            )
-        }
-
-        runtime.startupProbeState == com.pocketagent.android.ui.state.StartupProbeState.BLOCKED ||
-            runtime.startupProbeState == com.pocketagent.android.ui.state.StartupProbeState.BLOCKED_TIMEOUT ||
-            runtime.modelRuntimeStatus == com.pocketagent.android.ui.state.ModelRuntimeStatus.NOT_READY -> {
-            com.pocketagent.android.ui.state.ChatGateState(
-                status = ChatGateStatus.BLOCKED_RUNTIME_CHECK,
-                primaryAction = ChatGatePrimaryAction.REFRESH_RUNTIME_CHECKS,
-                detail = runtime.modelStatusDetail,
-            )
-        }
-
-        runtime.lastErrorCode != null ||
-            runtime.modelRuntimeStatus == com.pocketagent.android.ui.state.ModelRuntimeStatus.ERROR -> {
-            com.pocketagent.android.ui.state.ChatGateState(
-                status = ChatGateStatus.ERROR_RECOVERABLE,
-                primaryAction = if (advancedUnlocked) {
-                    ChatGatePrimaryAction.OPEN_MODEL_SETUP
-                } else {
-                    ChatGatePrimaryAction.GET_READY
-                },
-                detail = runtime.lastErrorUserMessage ?: runtime.modelStatusDetail,
-            )
-        }
-
-        else -> {
-            com.pocketagent.android.ui.state.ChatGateState(
-                status = ChatGateStatus.READY,
-                primaryAction = ChatGatePrimaryAction.NONE,
-            )
-        }
-    }
 }
 
 private fun shouldRenderInThreadLoadingPlaceholder(message: MessageUiModel): Boolean {

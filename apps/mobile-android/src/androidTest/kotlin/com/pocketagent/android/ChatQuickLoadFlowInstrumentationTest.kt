@@ -36,6 +36,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
+import com.pocketagent.android.runtime.PresetModelMappingStore
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.RoutingMode
@@ -78,6 +79,7 @@ class ChatQuickLoadFlowInstrumentationTest {
                     advancedUnlocked = true,
                 ),
             ),
+            presetBackingStore = PresetModelMappingStore(composeRule.activity.applicationContext),
             provisioningGateway = provisioningGateway,
         )
         composeRule.setContent {
@@ -117,6 +119,7 @@ class ChatQuickLoadFlowInstrumentationTest {
                     advancedUnlocked = true,
                 ),
             ),
+            presetBackingStore = PresetModelMappingStore(composeRule.activity.applicationContext),
             provisioningGateway = provisioningGateway,
         )
         composeRule.setContent {
@@ -173,6 +176,7 @@ class ChatQuickLoadFlowInstrumentationTest {
 @Composable
 private fun QuickLoadTestApp(viewModel: ChatViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val composerDraft by viewModel.composerDraftText.collectAsState()
     val modelLoadingState by viewModel.modelLoadingState.collectAsState()
     val scope = rememberCoroutineScope()
     val runtimeLabel = when {
@@ -193,7 +197,7 @@ private fun QuickLoadTestApp(viewModel: ChatViewModel) {
             Text("Unload")
         }
         OutlinedTextField(
-            value = state.composer.text,
+            value = composerDraft,
             onValueChange = viewModel::onComposerChanged,
             modifier = Modifier.testTag("composer_input"),
             label = { Text("Message") },

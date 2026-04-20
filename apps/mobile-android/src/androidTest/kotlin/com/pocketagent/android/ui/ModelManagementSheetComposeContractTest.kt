@@ -49,6 +49,8 @@ class ModelManagementSheetComposeContractTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    private val presetBackingStore = FakePresetBackingStore()
+
     @Test
     fun productionModelSheetRendersAndDispatchesRefreshEvent() {
         val events = mutableListOf<ModelSheetEvent>()
@@ -60,6 +62,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = { events += it },
                 )
             }
@@ -161,6 +164,7 @@ class ModelManagementSheetComposeContractTest {
                     ),
                     modelLoadingState = ModelLoadingState.Idle(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }
@@ -184,6 +188,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }
@@ -203,6 +208,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }
@@ -234,6 +240,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = errorState,
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }
@@ -253,6 +260,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }
@@ -274,6 +282,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = { events += it },
                 )
             }
@@ -298,6 +307,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     hiddenVersionKeys = hiddenKeys,
                     onEvent = {},
                 )
@@ -316,6 +326,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }
@@ -338,6 +349,7 @@ class ModelManagementSheetComposeContractTest {
                     runtimeState = sampleRuntimeState(),
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
                     onEvent = {},
                 )
             }

@@ -14,7 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.pocketagent.android.R
-import com.pocketagent.android.runtime.MODEL_OFFLOAD_REASON_MANUAL
+import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.ui.components.AppBottomSheet
 import com.pocketagent.android.ui.state.ModalSurface
@@ -30,6 +30,7 @@ internal fun ModelLibrarySheetHost(
     runtimeModelState: RuntimeModelUiState,
     modelLoadingState: ModelLoadingState,
     routingMode: RoutingMode,
+    presetBackingStore: PresetBackingStore,
     modelRemoveUndoState: ModelRemoveUndoState,
     viewModel: ChatViewModel,
     provisioningViewModel: ModelProvisioningViewModel,
@@ -59,6 +60,7 @@ internal fun ModelLibrarySheetHost(
             runtimeState = runtimeModelState,
             modelLoadingState = modelLoadingState,
             routingMode = routingMode,
+            presetBackingStore = presetBackingStore,
             hiddenVersionKeys = modelRemoveUndoState.hiddenVersionKeys,
             onEvent = { event ->
                 when (event) {

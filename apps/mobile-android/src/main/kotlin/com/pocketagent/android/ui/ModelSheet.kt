@@ -44,6 +44,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.ModelEligibilityReason
 import com.pocketagent.android.runtime.ModelSupportLevel
 import com.pocketagent.android.runtime.ModelVersionEligibility
@@ -78,7 +80,10 @@ import com.pocketagent.android.ui.theme.LocalReduceMotion
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.rememberHaptic
 import com.pocketagent.android.ui.theme.rememberLongPressHaptic
+import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
+import com.pocketagent.inference.ModelDisplayNames
+import com.pocketagent.inference.PresetRoutingResolver
 import kotlinx.coroutines.launch
 
 @Composable
@@ -87,6 +92,7 @@ internal fun ModelSheet(
     runtimeState: RuntimeModelUiState,
     modelLoadingState: ModelLoadingState,
     routingMode: RoutingMode,
+    presetBackingStore: PresetBackingStore,
     hiddenVersionKeys: Set<String> = emptySet(),
     onEvent: (ModelSheetEvent) -> Unit,
 ) {
@@ -184,6 +190,7 @@ internal fun ModelSheet(
             ActiveModelSection(
                 modelLoadingState = modelLoadingState,
                 routingMode = routingMode,
+                presetBackingStore = presetBackingStore,
                 onRetryLoad = { model -> onEvent(ModelSheetEvent.RetryLoad(model.modelId, model.modelVersion)) },
                 onLoadLastUsedModel = { onEvent(ModelSheetEvent.LoadLastUsedModel) },
                 onOffloadModel = { onEvent(ModelSheetEvent.OffloadModel) },
@@ -322,11 +329,52 @@ private fun StatusMessageCard(message: String) {
 private fun ActiveModelSection(
     modelLoadingState: ModelLoadingState,
     routingMode: RoutingMode,
+    presetBackingStore: PresetBackingStore,
     onRetryLoad: (com.pocketagent.runtime.RuntimeLoadedModel) -> Unit,
     onLoadLastUsedModel: () -> Unit,
     onOffloadModel: () -> Unit,
     onChooseAnother: () -> Unit,
 ) {
+    val revision by presetBackingStore.revisionFlow().collectAsState()
+    val preset = remember(revision, routingMode) {
+        presetBackingStore.presetMatchingRoutingMode(routingMode)
+    }
+    val preferenceHeadline = when {
+        routingMode == RoutingMode.AUTO || preset == ModelPreset.AUTO ->
+            stringResource(
+                id = R.string.ui_routing_mode_label,
+                stringResource(id = R.string.ui_preset_auto),
+            )
+        preset == ModelPreset.QUICK ->
+            stringResource(
+                id = R.string.ui_routing_mode_label,
+                stringResource(id = R.string.ui_preset_quick),
+            )
+        preset == ModelPreset.BALANCED ->
+            stringResource(
+                id = R.string.ui_routing_mode_label,
+                stringResource(id = R.string.ui_preset_balanced_chat),
+            )
+        preset == ModelPreset.VISION ->
+            stringResource(
+                id = R.string.ui_routing_mode_label,
+                stringResource(id = R.string.ui_preset_vision),
+            )
+        else ->
+            stringResource(id = R.string.ui_routing_mode_label, routingMode.name)
+    }
+    val backingDisplayName = remember(revision, preset) {
+        when (preset) {
+            ModelPreset.QUICK, ModelPreset.BALANCED, ModelPreset.VISION -> {
+                val backingId = PresetRoutingResolver.effectiveBackingModelId(
+                    preset,
+                    presetBackingStore.customBackingModelId(preset),
+                )
+                backingId?.takeIf { it.isNotBlank() }?.let { id -> ModelDisplayNames.displayNameFor(id) }
+            }
+            else -> null
+        }
+    }
     val currentModel = modelLoadingState.activeOrRequestedModel()
     val canLoadLastUsed = modelLoadingState.loadedModel == null &&
         modelLoadingState.lastUsedModel != null &&
@@ -357,10 +405,17 @@ private fun ActiveModelSection(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = stringResource(id = R.string.ui_routing_mode_label, routingMode.name),
+                text = preferenceHeadline,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            backingDisplayName?.let { label ->
+                Text(
+                    text = stringResource(id = R.string.ui_preset_using_model, label),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             when (modelLoadingState) {
                 is ModelLoadingState.Loading -> {
                     val progress = modelLoadingState.progress

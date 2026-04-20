@@ -13,23 +13,35 @@ import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.CompletionSettings
 import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
-import com.pocketagent.core.RoutingMode
+import com.pocketagent.android.runtime.PresetBackingStore
+import com.pocketagent.android.voice.VoiceActivationUiState
+import com.pocketagent.core.ModelPreset
 import com.pocketagent.runtime.RuntimePerformanceProfile
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModalOrchestrator(
     state: ChatUiState,
+    voiceState: VoiceActivationUiState,
     provisioningState: ModelProvisioningUiState,
+    modelLibraryState: ModelLibraryUiState,
+    presetBackingStore: PresetBackingStore,
     pendingRoutingModeSwitch: Pair<String, String>?,
     pendingMeteredWarningVersion: ModelDistributionVersion?,
     downloads: List<DownloadTaskState>,
     onDismissSurface: () -> Unit,
     onUseToolPrompt: (String) -> Unit,
     onDefaultThinkingEnabledChanged: (Boolean) -> Unit,
-    onRoutingModeSelected: (RoutingMode) -> Unit,
+    onModelPresetSelected: (ModelPreset) -> Unit,
+    onOpenPresetCustomization: () -> Unit,
+    onPresetBackingChanged: (ModelPreset, String) -> Unit,
+    onResetPresetMappings: () -> Unit,
     onPerformanceProfileSelected: (RuntimePerformanceProfile) -> Unit,
     onKeepAlivePreferenceSelected: (RuntimeKeepAlivePreference) -> Unit,
+    onVoiceActivationChanged: (Boolean) -> Unit,
+    onRequestAssistantRole: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
     onWifiOnlyDownloadsChanged: (Boolean) -> Unit,
     onGpuAccelerationEnabledChanged: (Boolean) -> Unit,
     onExportDiagnostics: () -> Unit,
@@ -61,14 +73,37 @@ internal fun ModalOrchestrator(
         ) {
             AdvancedSettingsSheet(
                 state = state,
+                voiceState = voiceState,
                 wifiOnlyDownloadsEnabled = provisioningState.downloadPreferences.wifiOnlyEnabled,
                 onDefaultThinkingEnabledChanged = onDefaultThinkingEnabledChanged,
-                onRoutingModeSelected = onRoutingModeSelected,
+                presetBackingStore = presetBackingStore,
+                onModelPresetSelected = onModelPresetSelected,
+                onOpenPresetCustomization = onOpenPresetCustomization,
                 onPerformanceProfileSelected = onPerformanceProfileSelected,
                 onKeepAlivePreferenceSelected = onKeepAlivePreferenceSelected,
+                onVoiceActivationChanged = onVoiceActivationChanged,
+                onRequestAssistantRole = onRequestAssistantRole,
+                onOpenBatteryOptimizationSettings = onOpenBatteryOptimizationSettings,
+                onOpenAppSettings = onOpenAppSettings,
                 onWifiOnlyDownloadsChanged = onWifiOnlyDownloadsChanged,
                 onGpuAccelerationEnabledChanged = onGpuAccelerationEnabledChanged,
                 onExportDiagnostics = onExportDiagnostics,
+            )
+        }
+    }
+
+    if (state.activeSurface is ModalSurface.PresetCustomization) {
+        val presetSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        AppBottomSheet(
+            title = stringResource(id = R.string.ui_preset_customize_title),
+            sheetState = presetSheetState,
+            onDismiss = onDismissSurface,
+        ) {
+            PresetCustomizationSheetContent(
+                libraryState = modelLibraryState,
+                presetBackingStore = presetBackingStore,
+                onBackingModelSelected = onPresetBackingChanged,
+                onResetToDefaults = onResetPresetMappings,
             )
         }
     }

@@ -18,16 +18,12 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 class AndroidLocalToolRuntime(
     context: Context,
     private val base: ToolModule = SafeLocalToolRuntime(),
 ) : ToolModule {
     private val appContext = context.applicationContext
-    private val parser = Json { ignoreUnknownKeys = false }
     private val customTools = setOf(
         TOOL_ALARM_SET,
         TOOL_TIMER_SET,
@@ -42,7 +38,7 @@ class AndroidLocalToolRuntime(
 
     override fun validateToolCall(call: ToolCall): Boolean {
         return when (call.name) {
-            in customTools -> parseArgs(call.jsonArgs) != null
+            in customTools -> parseToolStringArguments(call.jsonArgs) != null
             else -> base.validateToolCall(call)
         }
     }
@@ -51,7 +47,7 @@ class AndroidLocalToolRuntime(
         if (call.name !in customTools) {
             return base.executeToolCall(call)
         }
-        val args = parseArgs(call.jsonArgs) ?: return ToolResult(false, "Invalid tool JSON.")
+        val args = parseToolStringArguments(call.jsonArgs) ?: return ToolResult(false, "Invalid tool JSON.")
         return when (call.name) {
             TOOL_ALARM_SET -> setAlarm(
                 title = args["title"].orEmpty().ifBlank { "Offas alarm" },
@@ -66,14 +62,6 @@ class AndroidLocalToolRuntime(
             TOOL_FLASHLIGHT_TOGGLE -> setFlashlight(mode = args["enabled"].orEmpty())
             else -> ToolResult(false, "Unknown tool.")
         }
-    }
-
-    private fun parseArgs(jsonArgs: String): Map<String, String>? {
-        return runCatching {
-            parser.parseToJsonElement(jsonArgs).jsonObject.mapValues { (_, value) ->
-                value.jsonPrimitive.content
-            }
-        }.getOrNull()
     }
 
     private fun setAlarm(title: String, timeIso: String): ToolResult {

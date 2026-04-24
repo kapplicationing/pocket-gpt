@@ -158,6 +158,27 @@ internal interface OffasVoiceEngine {
     fun release()
 }
 
+internal data class OffasTranscriptOutcome(
+    val spokenResponse: String,
+    val nextServiceState: VoiceServiceState,
+)
+
+internal fun resolveOffasTranscriptOutcome(
+    toolOutputs: List<String>,
+    assistantText: String,
+    voiceActivationEnabled: Boolean,
+): OffasTranscriptOutcome {
+    val spokenResponse = when {
+        toolOutputs.isNotEmpty() -> toolOutputs.joinToString(separator = " ")
+        assistantText.isNotBlank() -> assistantText
+        else -> "Done."
+    }
+    return OffasTranscriptOutcome(
+        spokenResponse = spokenResponse,
+        nextServiceState = if (voiceActivationEnabled) VoiceServiceState.LISTENING else VoiceServiceState.DISABLED,
+    )
+}
+
 internal class SherpaOnnxOffasVoiceEngine(
     private val appContext: Context,
 ) : OffasVoiceEngine {
@@ -548,7 +569,7 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     private suspend fun handleTranscript(transcript: String, directCapture: Boolean) {
         settingsStore.updateServiceState(VoiceServiceState.PROCESSING)
         updateNotification("Processing: $transcript")
-        val response = withContext(Dispatchers.IO) {
+        val outcome = withContext(Dispatchers.IO) {
             val container = AndroidMvpContainer(appContext = applicationContext)
             val sessionId = container.createSession()
             val deviceState = AndroidTelemetryDeviceStateProvider(applicationContext).current()
@@ -573,17 +594,17 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
             val toolOutputs = assistantResponse.toolCalls.map { toolCall ->
                 container.runTool(toolCall.name, toolCall.argumentsJson)
             }
-            when {
-                toolOutputs.isNotEmpty() -> toolOutputs.joinToString(separator = " ") { it }
-                assistantResponse.text.isNotBlank() -> assistantResponse.text
-                else -> "Done."
-            }
+            resolveOffasTranscriptOutcome(
+                toolOutputs = toolOutputs,
+                assistantText = assistantResponse.text,
+                voiceActivationEnabled = settingsStore.state().enabled,
+            )
         }
-        settingsStore.updateServiceState(if (settingsStore.state().enabled) VoiceServiceState.LISTENING else VoiceServiceState.DISABLED)
+        settingsStore.updateServiceState(outcome.nextServiceState)
         settingsStore.setLastError(null)
-        speak(response)
-        updateNotification(response)
-        if (settingsStore.state().enabled && !directCapture) {
+        speak(outcome.spokenResponse)
+        updateNotification(outcome.spokenResponse)
+        if (outcome.nextServiceState == VoiceServiceState.LISTENING && !directCapture) {
             startServiceLoop(directCapture = false)
         } else {
             stopForeground(STOP_FOREGROUND_DETACH)

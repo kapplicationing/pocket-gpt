@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +14,13 @@ import androidx.activity.ComponentActivity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
+private const val VOICE_ACTIVATION_PREFS_NAME = "pocketagent_voice_activation"
+private const val KEY_ENABLED = "enabled"
+private const val KEY_WAKE_PHRASE = "wake_phrase"
+private const val KEY_SILENCE_TIMEOUT_SECONDS = "silence_timeout_seconds"
+private const val KEY_SERVICE_STATE = "service_state"
+private const val KEY_LAST_ERROR = "last_error"
 
 enum class VoiceServiceState {
     DISABLED,
@@ -83,11 +91,47 @@ enum class OemBatteryGuide(
     }
 }
 
-class VoiceActivationSettingsStore(
-    context: Context,
+internal interface VoiceActivationSettingsStorage {
+    fun getBoolean(key: String, defaultValue: Boolean): Boolean
+
+    fun getString(key: String, defaultValue: String?): String?
+
+    fun getInt(key: String, defaultValue: Int): Int
+
+    fun save(settings: VoiceActivationSettings)
+}
+
+private class SharedPreferencesVoiceActivationSettingsStorage(
+    private val prefs: SharedPreferences,
+) : VoiceActivationSettingsStorage {
+    override fun getBoolean(key: String, defaultValue: Boolean): Boolean = prefs.getBoolean(key, defaultValue)
+
+    override fun getString(key: String, defaultValue: String?): String? = prefs.getString(key, defaultValue)
+
+    override fun getInt(key: String, defaultValue: Int): Int = prefs.getInt(key, defaultValue)
+
+    override fun save(settings: VoiceActivationSettings) {
+        prefs.edit()
+            .putBoolean(KEY_ENABLED, settings.enabled)
+            .putString(KEY_WAKE_PHRASE, settings.wakePhrase)
+            .putInt(KEY_SILENCE_TIMEOUT_SECONDS, settings.silenceTimeoutSeconds)
+            .putString(KEY_SERVICE_STATE, settings.voiceServiceState.name)
+            .putString(KEY_LAST_ERROR, settings.lastError)
+            .apply()
+    }
+}
+
+class VoiceActivationSettingsStore private constructor(
+    private val storage: VoiceActivationSettingsStorage,
+    private val stateFlow: MutableStateFlow<VoiceActivationSettings>,
 ) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val stateFlow = MutableStateFlow(read())
+    constructor(
+        context: Context,
+    ) : this(createStorage(context.applicationContext))
+
+    internal constructor(
+        storage: VoiceActivationSettingsStorage,
+    ) : this(storage, MutableStateFlow(readSettings(storage)))
 
     fun state(): VoiceActivationSettings = stateFlow.value
 
@@ -106,35 +150,32 @@ class VoiceActivationSettingsStore(
     }
 
     private fun save(settings: VoiceActivationSettings) {
-        prefs.edit()
-            .putBoolean(KEY_ENABLED, settings.enabled)
-            .putString(KEY_WAKE_PHRASE, settings.wakePhrase)
-            .putInt(KEY_SILENCE_TIMEOUT_SECONDS, settings.silenceTimeoutSeconds)
-            .putString(KEY_SERVICE_STATE, settings.voiceServiceState.name)
-            .putString(KEY_LAST_ERROR, settings.lastError)
-            .apply()
+        storage.save(settings)
         stateFlow.value = settings
     }
 
     private fun read(): VoiceActivationSettings {
-        val storedState = prefs.getString(KEY_SERVICE_STATE, VoiceServiceState.DISABLED.name)
-        return VoiceActivationSettings(
-            enabled = prefs.getBoolean(KEY_ENABLED, false),
-            wakePhrase = prefs.getString(KEY_WAKE_PHRASE, DEFAULT_WAKE_PHRASE) ?: DEFAULT_WAKE_PHRASE,
-            silenceTimeoutSeconds = prefs.getInt(KEY_SILENCE_TIMEOUT_SECONDS, DEFAULT_SILENCE_TIMEOUT_SECONDS)
-                .coerceIn(3, 10),
-            voiceServiceState = VoiceServiceState.entries.firstOrNull { it.name == storedState } ?: VoiceServiceState.DISABLED,
-            lastError = prefs.getString(KEY_LAST_ERROR, null),
-        )
+        return readSettings(storage)
     }
 
     companion object {
-        private const val PREFS_NAME = "pocketagent_voice_activation"
-        private const val KEY_ENABLED = "enabled"
-        private const val KEY_WAKE_PHRASE = "wake_phrase"
-        private const val KEY_SILENCE_TIMEOUT_SECONDS = "silence_timeout_seconds"
-        private const val KEY_SERVICE_STATE = "service_state"
-        private const val KEY_LAST_ERROR = "last_error"
+        private fun createStorage(context: Context): VoiceActivationSettingsStorage {
+            return SharedPreferencesVoiceActivationSettingsStorage(
+                context.getSharedPreferences(VOICE_ACTIVATION_PREFS_NAME, Context.MODE_PRIVATE),
+            )
+        }
+
+        private fun readSettings(storage: VoiceActivationSettingsStorage): VoiceActivationSettings {
+            val storedState = storage.getString(KEY_SERVICE_STATE, VoiceServiceState.DISABLED.name)
+            return VoiceActivationSettings(
+                enabled = storage.getBoolean(KEY_ENABLED, false),
+                wakePhrase = storage.getString(KEY_WAKE_PHRASE, DEFAULT_WAKE_PHRASE) ?: DEFAULT_WAKE_PHRASE,
+                silenceTimeoutSeconds = storage.getInt(KEY_SILENCE_TIMEOUT_SECONDS, DEFAULT_SILENCE_TIMEOUT_SECONDS)
+                    .coerceIn(3, 10),
+                voiceServiceState = VoiceServiceState.entries.firstOrNull { it.name == storedState } ?: VoiceServiceState.DISABLED,
+                lastError = storage.getString(KEY_LAST_ERROR, null),
+            )
+        }
     }
 }
 

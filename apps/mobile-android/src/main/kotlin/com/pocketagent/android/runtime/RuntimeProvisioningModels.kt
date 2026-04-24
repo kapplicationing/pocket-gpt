@@ -39,6 +39,19 @@ data class RuntimeProvisioningSnapshot(
     val storageRootLabel: String? = null,
     val recoverableCorruptions: List<ProvisioningRecoverySignal> = emptyList(),
 ) {
+    companion object {
+        fun empty(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
+            models = emptyList(),
+            storageSummary = StorageSummary(
+                totalBytes = 0L,
+                freeBytes = 0L,
+                usedByModelsBytes = 0L,
+                tempDownloadBytes = 0L,
+            ),
+            requiredModelIds = emptySet(),
+        )
+    }
+
     val verifiedActiveModelCount: Int
         get() = models.count { it.modelId in requiredModelIds && it.isProvisioned && !it.activeVersion.isNullOrBlank() }
 

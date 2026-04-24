@@ -1,7 +1,6 @@
 package com.pocketagent.android.runtime
 
 import android.net.Uri
-import com.pocketagent.android.AppRuntimeDependencies
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
@@ -10,9 +9,34 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.core.model.ModelSpecProvider
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 interface ProvisioningGateway {
+    fun currentProvisioningAggregateState(): ProvisioningAggregateState {
+        return ProvisioningAggregateState(
+            snapshot = currentSnapshot(),
+            downloads = observeDownloads().value,
+            downloadPreferences = currentDownloadPreferences(),
+            lifecycle = currentModelLifecycle(),
+        )
+    }
+
+    fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> {
+        return MutableStateFlow(currentProvisioningAggregateState())
+    }
+
+    suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState {
+        val manifest = loadModelDistributionManifest()
+        return currentProvisioningAggregateState().copy(
+            manifest = manifest,
+            manifestLoaded = true,
+        )
+    }
+
     fun currentSnapshot(): RuntimeProvisioningSnapshot
     fun observeDownloads(): StateFlow<List<DownloadTaskState>>
     fun observeDownloadPreferences(): StateFlow<DownloadPreferencesState>
@@ -42,34 +66,61 @@ interface ProvisioningGateway {
 class DefaultProvisioningGateway(
     private val dependencies: ProvisioningDependencyAccess,
     private val admissionPolicy: ModelAdmissionPolicy? = null,
+    coroutineScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : ProvisioningGateway {
+    private val aggregateStore = DefaultProvisioningAggregateStore(
+        dependencies = dependencies,
+        coroutineScope = coroutineScope,
+    )
+    private val aggregateState = aggregateStore.observeState()
+    private val downloadState = AggregateProjectionStateFlow(aggregateState) { state -> state.downloads }
+    private val downloadPreferenceState = AggregateProjectionStateFlow(aggregateState) { state ->
+        state.downloadPreferences
+    }
+    private val lifecycleState = AggregateProjectionStateFlow(aggregateState) { state -> state.lifecycle }
+
     constructor(appContext: android.content.Context) : this(
-        dependencies = AppProvisioningDependencyAccess(appContext.applicationContext),
-        admissionPolicy = AppRuntimeDependencies.modelAdmissionPolicy(appContext.applicationContext),
+        dependencies = AppProvisioningDependencyAccess(
+            context = appContext.applicationContext,
+            runtimeAccess = AppRuntimeProvisioningBridge,
+        ),
+        admissionPolicy = AppRuntimeProvisioningBridge.modelAdmissionPolicy(appContext.applicationContext),
     )
 
+    override fun currentProvisioningAggregateState(): ProvisioningAggregateState {
+        return aggregateStore.currentState()
+    }
+
+    override fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> {
+        return aggregateState
+    }
+
+    override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState {
+        return aggregateStore.seed()
+    }
+
     override fun currentSnapshot(): RuntimeProvisioningSnapshot {
-        return dependencies.currentProvisioningSnapshot()
+        return aggregateStore.refreshSnapshot().snapshot
     }
 
     override fun observeDownloads(): StateFlow<List<DownloadTaskState>> {
-        return dependencies.observeDownloads()
+        return downloadState
     }
 
     override fun observeDownloadPreferences(): StateFlow<DownloadPreferencesState> {
-        return dependencies.observeDownloadPreferences()
+        return downloadPreferenceState
     }
 
     override fun currentDownloadPreferences(): DownloadPreferencesState {
-        return dependencies.currentDownloadPreferences()
+        return aggregateStore.refreshDownloadPreferences().downloadPreferences
     }
 
     override fun observeModelLifecycle(): StateFlow<RuntimeModelLifecycleSnapshot> {
-        return dependencies.observeModelLifecycle()
+        return lifecycleState
     }
 
     override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot {
-        return dependencies.currentModelLifecycle()
+        return aggregateStore.refreshLifecycle().lifecycle
     }
 
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
@@ -80,11 +131,13 @@ class DefaultProvisioningGateway(
         return dependencies.importModelFromUri(
             modelId = modelId,
             sourceUri = sourceUri,
-        )
+        ).also {
+            aggregateStore.refreshSnapshot()
+        }
     }
 
     override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
-        return dependencies.loadModelDistributionManifest()
+        return seedProvisioningAggregateState().manifest
     }
 
     override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
@@ -104,15 +157,27 @@ class DefaultProvisioningGateway(
                 return false
             }
         }
-        return dependencies.setActiveVersion(modelId = modelId, version = version)
+        return dependencies.setActiveVersion(modelId = modelId, version = version).also { changed ->
+            if (changed) {
+                aggregateStore.refreshSnapshot()
+            }
+        }
     }
 
     override fun clearActiveVersion(modelId: String): Boolean {
-        return dependencies.clearActiveVersion(modelId = modelId)
+        return dependencies.clearActiveVersion(modelId = modelId).also { changed ->
+            if (changed) {
+                aggregateStore.refreshSnapshot()
+            }
+        }
     }
 
     override fun removeVersion(modelId: String, version: String): Boolean {
-        return dependencies.removeVersion(modelId = modelId, version = version)
+        return dependencies.removeVersion(modelId = modelId, version = version).also { removed ->
+            if (removed) {
+                aggregateStore.refreshSnapshot()
+            }
+        }
     }
 
     override suspend fun loadInstalledModel(modelId: String, version: String): RuntimeModelLifecycleCommandResult {
@@ -127,15 +192,21 @@ class DefaultProvisioningGateway(
         if (decision != null && !decision.allowed) {
             return decision.asLifecycleRejectedResult()
         }
-        return dependencies.loadInstalledModel(modelId = modelId, version = version)
+        return dependencies.loadInstalledModel(modelId = modelId, version = version).also {
+            aggregateStore.refreshLifecycle()
+        }
     }
 
     override suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult {
-        return dependencies.loadLastUsedModel()
+        return dependencies.loadLastUsedModel().also {
+            aggregateStore.refreshLifecycle()
+        }
     }
 
     override suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult {
-        return dependencies.offloadModel(reason = reason)
+        return dependencies.offloadModel(reason = reason).also {
+            aggregateStore.refreshLifecycle()
+        }
     }
 
     override suspend fun enqueueDownload(version: ModelDistributionVersion, options: DownloadRequestOptions): String {
@@ -152,10 +223,12 @@ class DefaultProvisioningGateway(
 
     override fun setDownloadWifiOnlyEnabled(enabled: Boolean) {
         dependencies.setDownloadWifiOnlyEnabled(enabled)
+        aggregateStore.refreshDownloadPreferences()
     }
 
     override fun acknowledgeLargeDownloadCellularWarning() {
         dependencies.acknowledgeLargeDownloadCellularWarning()
+        aggregateStore.refreshDownloadPreferences()
     }
 
     override fun pauseDownload(taskId: String) {
@@ -211,64 +284,65 @@ interface ProvisioningDependencyAccess {
     fun syncDownloadsFromScheduler()
 }
 
-class AppProvisioningDependencyAccess(
+internal class AppProvisioningDependencyAccess(
     private val context: android.content.Context,
+    private val runtimeAccess: AppRuntimeProvisioningAccess = AppRuntimeProvisioningBridge,
 ) : ProvisioningDependencyAccess {
     override fun currentProvisioningSnapshot(): RuntimeProvisioningSnapshot {
-        return AppRuntimeDependencies.currentProvisioningSnapshot(context)
+        return runtimeAccess.currentProvisioningSnapshot(context)
     }
 
     override fun observeDownloads(): StateFlow<List<DownloadTaskState>> {
-        return AppRuntimeDependencies.observeDownloads(context)
+        return runtimeAccess.observeDownloads(context)
     }
 
     override fun observeDownloadPreferences(): StateFlow<DownloadPreferencesState> {
-        return AppRuntimeDependencies.observeDownloadPreferences(context)
+        return runtimeAccess.observeDownloadPreferences(context)
     }
 
     override fun currentDownloadPreferences(): DownloadPreferencesState {
-        return AppRuntimeDependencies.currentDownloadPreferences(context)
+        return runtimeAccess.currentDownloadPreferences(context)
     }
 
     override fun observeModelLifecycle(): StateFlow<RuntimeModelLifecycleSnapshot> {
-        return AppRuntimeDependencies.observeModelLifecycle(context)
+        return runtimeAccess.observeModelLifecycle(context)
     }
 
     override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot {
-        return AppRuntimeDependencies.currentModelLifecycle(context)
+        return runtimeAccess.currentModelLifecycle(context)
     }
 
     override suspend fun importModelFromUri(
         modelId: String,
         sourceUri: Uri,
     ): RuntimeModelImportResult {
-        return AppRuntimeDependencies.importModelFromUri(context = context, modelId = modelId, sourceUri = sourceUri)
+        return runtimeAccess.importModelFromUri(context = context, modelId = modelId, sourceUri = sourceUri)
     }
 
     override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
-        return AppRuntimeDependencies.loadModelDistributionManifest(context)
+        return runtimeAccess.loadModelDistributionManifest(context)
     }
 
     override fun listInstalledVersions(
         modelId: String,
     ): List<ModelVersionDescriptor> {
-        return AppRuntimeDependencies.listInstalledVersions(context = context, modelId = modelId)
+        return runtimeAccess.listInstalledVersions(context = context, modelId = modelId)
     }
 
     override fun setActiveVersion(modelId: String, version: String): Boolean {
-        return AppRuntimeDependencies.setActiveVersion(context = context, modelId = modelId, version = version)
+        return runtimeAccess.setActiveVersion(context = context, modelId = modelId, version = version)
     }
 
     override fun clearActiveVersion(modelId: String): Boolean {
-        return AppRuntimeDependencies.clearActiveVersion(context = context, modelId = modelId)
+        return runtimeAccess.clearActiveVersion(context = context, modelId = modelId)
     }
 
     override fun removeVersion(modelId: String, version: String): Boolean {
-        return AppRuntimeDependencies.removeVersion(context = context, modelId = modelId, version = version)
+        return runtimeAccess.removeVersion(context = context, modelId = modelId, version = version)
     }
 
     override suspend fun loadInstalledModel(modelId: String, version: String): RuntimeModelLifecycleCommandResult {
-        return AppRuntimeDependencies.loadInstalledModel(
+        return runtimeAccess.loadInstalledModel(
             context = context,
             modelId = modelId,
             version = version,
@@ -276,50 +350,50 @@ class AppProvisioningDependencyAccess(
     }
 
     override suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult {
-        return AppRuntimeDependencies.loadLastUsedModel(context = context)
+        return runtimeAccess.loadLastUsedModel(context = context)
     }
 
     override suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult {
-        return AppRuntimeDependencies.offloadModel(context = context, reason = reason)
+        return runtimeAccess.offloadModel(context = context, reason = reason)
     }
 
     override suspend fun enqueueDownload(version: ModelDistributionVersion, options: DownloadRequestOptions): String {
-        return AppRuntimeDependencies.enqueueDownload(context = context, version = version, options = options)
+        return runtimeAccess.enqueueDownload(context = context, version = version, options = options)
     }
 
     override fun shouldWarnForMeteredLargeDownload(version: ModelDistributionVersion): Boolean {
-        return AppRuntimeDependencies.shouldWarnForMeteredLargeDownload(context = context, version = version)
+        return runtimeAccess.shouldWarnForMeteredLargeDownload(context = context, version = version)
     }
 
     override fun setDownloadWifiOnlyEnabled(enabled: Boolean) {
-        AppRuntimeDependencies.setDownloadWifiOnlyEnabled(context, enabled)
+        runtimeAccess.setDownloadWifiOnlyEnabled(context, enabled)
     }
 
     override fun acknowledgeLargeDownloadCellularWarning() {
-        AppRuntimeDependencies.acknowledgeLargeDownloadCellularWarning(context)
+        runtimeAccess.acknowledgeLargeDownloadCellularWarning(context)
     }
 
     override fun pauseDownload(taskId: String) {
-        AppRuntimeDependencies.pauseDownload(context, taskId)
+        runtimeAccess.pauseDownload(context, taskId)
     }
 
     override fun resumeDownload(taskId: String) {
-        AppRuntimeDependencies.resumeDownload(context, taskId)
+        runtimeAccess.resumeDownload(context, taskId)
     }
 
     override fun retryDownload(taskId: String) {
-        AppRuntimeDependencies.retryDownload(context, taskId)
+        runtimeAccess.retryDownload(context, taskId)
     }
 
     override fun cancelDownload(taskId: String) {
-        AppRuntimeDependencies.cancelDownload(context, taskId)
+        runtimeAccess.cancelDownload(context, taskId)
     }
 
     override fun syncDownloadsFromScheduler() {
-        AppRuntimeDependencies.syncDownloadsFromScheduler(context)
+        runtimeAccess.syncDownloadsFromScheduler(context)
     }
 }
 
 fun modelSpecProviderForContext(context: android.content.Context): ModelSpecProvider {
-    return AppRuntimeDependencies.modelSpecProvider(context.applicationContext)
+    return AppRuntimeProvisioningBridge.modelSpecProvider(context.applicationContext)
 }

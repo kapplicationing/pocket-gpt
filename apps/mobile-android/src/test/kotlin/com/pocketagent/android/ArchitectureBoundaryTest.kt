@@ -36,6 +36,7 @@ class ArchitectureBoundaryTest {
         )
         val allowedSuffixes = setOf(
             "com/pocketagent/android/AppRuntimeDependencies.kt",
+            "com/pocketagent/android/runtime/AppRuntimeAccess.kt",
             "com/pocketagent/android/runtime/ProvisioningGateway.kt",
             "com/pocketagent/android/runtime/RuntimeBootstrapper.kt",
             "com/pocketagent/android/runtime/modelmanager/ModelDownloadCancelReceiver.kt",

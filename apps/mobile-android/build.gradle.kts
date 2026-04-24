@@ -220,6 +220,7 @@ val verifyAndroidArchitecture by tasks.registering {
                 forbiddenPatterns = listOf("AppRuntimeDependencies"),
                 allowSuffixes = setOf(
                     "com/pocketagent/android/AppDependencies.kt",
+                    "com/pocketagent/android/runtime/AppRuntimeAccess.kt",
                     "com/pocketagent/android/runtime/ProvisioningGateway.kt",
                     "com/pocketagent/android/runtime/RuntimeBootstrapper.kt",
                     "com/pocketagent/android/runtime/modelmanager/ModelDownloadCancelReceiver.kt",

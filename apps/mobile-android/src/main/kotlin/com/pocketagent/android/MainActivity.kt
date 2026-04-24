@@ -11,17 +11,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.material3.Surface
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import androidx.compose.material3.Surface
-import com.pocketagent.android.runtime.AndroidModelEligibilitySignalsProvider
-import com.pocketagent.android.runtime.AndroidGpuOffloadQualifier
-import com.pocketagent.android.runtime.AndroidGpuOffloadSupport
-import com.pocketagent.android.runtime.DefaultProvisioningGateway
-import com.pocketagent.android.runtime.MvpRuntimeGateway
 import com.pocketagent.android.runtime.RuntimeBootstrapper
-import com.pocketagent.android.runtime.AndroidRuntimeProvisioningStore
-import com.pocketagent.android.runtime.PresetModelMappingStore
+import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
 import com.pocketagent.android.ui.ModelProvisioningViewModel
@@ -41,45 +35,24 @@ import kotlinx.coroutines.withContext
 // import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 
 class MainActivity : ComponentActivity() {
-    private val runtimeTuning by lazy {
-        RuntimeBootstrapper.runtimeTuning(applicationContext)
+    private val foregroundRuntimeServices by lazy(LazyThreadSafetyMode.NONE) {
+        resolveAppForegroundRuntimeServices(applicationContext)
     }
 
-    private val deviceGpuOffloadSupport by lazy {
-        AndroidGpuOffloadSupport(applicationContext)
+    private val runtimeTuning by lazy(LazyThreadSafetyMode.NONE) {
+        foregroundRuntimeServices.runtimeTuning
     }
 
-    private val gpuOffloadQualifier by lazy {
-        AndroidGpuOffloadQualifier(applicationContext)
+    private val runtimeGateway by lazy(LazyThreadSafetyMode.NONE) {
+        foregroundRuntimeServices.runtimeGateway
     }
-
-    private val runtimeGateway by lazy {
-        MvpRuntimeGateway(
-            facade = RuntimeBootstrapper.runtimeFacade(),
-            deviceGpuOffloadSupport = deviceGpuOffloadSupport,
-            gpuOffloadQualifier = gpuOffloadQualifier,
-            runtimeTuning = runtimeTuning,
-        )
-    }
-
-    private val modelEligibilitySignalsProvider by lazy {
-        AndroidModelEligibilitySignalsProvider(
-            runtimeCompatibilityTag = AndroidRuntimeProvisioningStore(applicationContext).expectedRuntimeCompatibilityTag(),
-            deviceGpuOffloadSupport = deviceGpuOffloadSupport,
-            gpuOffloadQualifier = gpuOffloadQualifier,
-            runtimeSupportProvider = { runtimeGateway.supportsGpuOffload() },
-            runtimeDiagnosticsProvider = { runtimeGateway.runtimeDiagnosticsSnapshot() },
-        )
-    }
-
-    private val presetBackingStore by lazy { PresetModelMappingStore(applicationContext) }
 
     private val viewModel: ChatViewModel by viewModels {
         ChatViewModelFactory(
             runtimeFacade = runtimeGateway,
             sessionPersistence = AndroidSessionPersistence(applicationContext),
-            presetBackingStore = presetBackingStore,
-            provisioningGateway = DefaultProvisioningGateway(applicationContext),
+            presetBackingStore = foregroundRuntimeServices.presetBackingStore,
+            provisioningGateway = foregroundRuntimeServices.provisioningGateway,
             deviceStateProvider = AndroidTelemetryDeviceStateProvider(applicationContext),
             runtimeTuning = runtimeTuning,
         )
@@ -87,8 +60,8 @@ class MainActivity : ComponentActivity() {
 
     private val provisioningViewModel: ModelProvisioningViewModel by viewModels {
         ModelProvisioningViewModelFactory(
-            gateway = DefaultProvisioningGateway(applicationContext),
-            eligibilitySignalsProvider = modelEligibilitySignalsProvider,
+            gateway = foregroundRuntimeServices.provisioningGateway,
+            eligibilitySignalsProvider = foregroundRuntimeServices.eligibilitySignalsProvider,
         )
     }
 

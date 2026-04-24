@@ -100,7 +100,10 @@ class GatewayAdaptersTest {
     @Test
     fun `default provisioning gateway delegates to dependency access seam`() = runTest {
         val dependency = RecordingProvisioningDependencyAccess()
-        val gateway = DefaultProvisioningGateway(dependency)
+        val gateway = DefaultProvisioningGateway(
+            dependencies = dependency,
+            coroutineScope = backgroundScope,
+        )
         val version = ModelDistributionVersion(
             modelId = "qwen3.5-0.8b-q4",
             version = "1",
@@ -140,7 +143,10 @@ class GatewayAdaptersTest {
         val dependency = RecordingProvisioningDependencyAccess().apply {
             meteredWarningResult = true
         }
-        val gateway = DefaultProvisioningGateway(dependency)
+        val gateway = DefaultProvisioningGateway(
+            dependencies = dependency,
+            coroutineScope = backgroundScope,
+        )
         val version = ModelDistributionVersion(
             modelId = "qwen3.5-0.8b-q4",
             version = "2",
@@ -176,6 +182,7 @@ class GatewayAdaptersTest {
             admissionPolicy = blockedAdmissionPolicy(
                 reason = ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE,
             ),
+            coroutineScope = backgroundScope,
         )
         val version = ModelDistributionVersion(
             modelId = "qwen3-1.7b-q4_k_m",

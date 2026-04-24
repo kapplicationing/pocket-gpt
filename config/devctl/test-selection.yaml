@@ -38,6 +38,59 @@ rules:
     recommended_lanes:
       - android-instrumented
 
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/**
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppRuntimeDependencies.kt
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+      - "journey --repeats 1 --mode strict --steps instrumentation,send-capture"
+
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppRuntimeGraphManager.kt
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+      - "journey --repeats 1 --mode strict --steps instrumentation,send-capture"
+
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/AndroidMvpContainer.kt
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+      - "journey --repeats 1 --mode strict --steps instrumentation,send-capture"
+
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/HotSwappableRuntimeFacade.kt
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+      - "journey --repeats 1 --mode strict --steps instrumentation,send-capture"
+
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/PocketAgentApplication.kt
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+
+  - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/**
+    include_android_unit: true
+    gradle_tasks:
+      - :apps:mobile-android:testDebugUnitTest
+    recommended_lanes:
+      - android-instrumented
+
   - pattern: apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/controllers/**
     include_android_unit: true
     gradle_tasks:

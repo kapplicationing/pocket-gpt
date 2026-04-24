@@ -154,6 +154,7 @@ class LanesTest(unittest.TestCase):
             "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/contracts/ChatContracts.kt",
             "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ModelProvisioningViewModel.kt",
             "apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppDependencies.kt",
+            "apps/mobile-android/src/main/kotlin/com/pocketagent/android/PocketAgentApplication.kt",
             "apps/mobile-android/src/main/kotlin/com/pocketagent/android/MainActivity.kt",
         ]
         for changed_path in changed_paths:
@@ -165,6 +166,43 @@ class LanesTest(unittest.TestCase):
                 self.assertIn(":apps:mobile-android:testDebugUnitTest", tasks)
                 self.assertIn("android-instrumented", lanes)
                 self.assertTrue(include_android)
+
+    def test_changed_file_selection_covers_runtime_composition_and_voice_paths(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+        context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=lambda *_a, **_k: None)
+        runtime_composition_paths = [
+            "apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppRuntimeDependencies.kt",
+            "apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppRuntimeGraphManager.kt",
+            "apps/mobile-android/src/main/kotlin/com/pocketagent/android/AndroidMvpContainer.kt",
+            "apps/mobile-android/src/main/kotlin/com/pocketagent/android/HotSwappableRuntimeFacade.kt",
+        ]
+
+        for changed_path in runtime_composition_paths:
+            with self.subTest(changed_path=changed_path):
+                tasks, lanes, include_android = _select_gradle_tasks_for_changed_files(
+                    [changed_path],
+                    context,
+                )
+                self.assertIn(":apps:mobile-android:testDebugUnitTest", tasks)
+                self.assertIn("android-instrumented", lanes)
+                self.assertIn(
+                    "journey --repeats 1 --mode strict --steps instrumentation,send-capture",
+                    lanes,
+                )
+                self.assertTrue(include_android)
+
+        voice_path = "apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/OffasVoiceStack.kt"
+        tasks, lanes, include_android = _select_gradle_tasks_for_changed_files(
+            [voice_path],
+            context,
+        )
+        self.assertIn(":apps:mobile-android:testDebugUnitTest", tasks)
+        self.assertIn("android-instrumented", lanes)
+        self.assertNotIn(
+            "journey --repeats 1 --mode strict --steps instrumentation,send-capture",
+            lanes,
+        )
+        self.assertTrue(include_android)
 
     def test_stage2_parser_supports_profiles_and_resume(self) -> None:
         parsed = _parse_stage2_args(

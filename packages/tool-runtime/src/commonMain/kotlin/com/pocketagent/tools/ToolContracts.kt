@@ -16,4 +16,8 @@ interface ToolModule {
     fun listEnabledTools(): List<String>
     fun validateToolCall(call: ToolCall): Boolean
     fun executeToolCall(call: ToolCall): ToolResult
+
+    fun validateToolRequest(request: ToolCallRequest): Boolean = validateToolCall(request.toLegacyCall())
+
+    fun executeToolRequest(request: ToolCallRequest): ToolResult = executeToolCall(request.toLegacyCall())
 }

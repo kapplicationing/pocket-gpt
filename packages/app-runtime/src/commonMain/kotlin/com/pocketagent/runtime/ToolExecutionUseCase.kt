@@ -1,6 +1,7 @@
 package com.pocketagent.runtime
 
 import com.pocketagent.core.PolicyModule
+import com.pocketagent.tools.ToolCallRequest
 
 internal class ToolExecutionUseCase(
     private val policyModule: PolicyModule,
@@ -18,6 +19,22 @@ internal class ToolExecutionUseCase(
             )
         }
         val result = toolLoopCoordinator.executeToolCall(toolName = toolName, jsonArgs = jsonArgs)
+        return mapToolResult(result)
+    }
+
+    fun execute(request: ToolCallRequest): ToolExecutionResult {
+        if (!policyModule.enforceDataBoundary("tool.execute")) {
+            return ToolExecutionResult.Failure(
+                failure = ToolFailure.PolicyDenied(
+                    technicalDetail = "Policy module rejected tool event type.",
+                ),
+            )
+        }
+        val result = toolLoopCoordinator.executeToolCall(request)
+        return mapToolResult(result)
+    }
+
+    private fun mapToolResult(result: InteractionToolExecutionResult): ToolExecutionResult {
         if (result.success) {
             return ToolExecutionResult.Success(result.content)
         }

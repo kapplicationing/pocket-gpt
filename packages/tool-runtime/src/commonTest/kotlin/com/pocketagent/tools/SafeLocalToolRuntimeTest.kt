@@ -1,5 +1,7 @@
 package com.pocketagent.tools
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -113,6 +115,44 @@ class SafeLocalToolRuntimeTest {
     @Test
     fun `validate tool call is true for schema-valid payload`() {
         assertTrue(runtime.validateToolCall(ToolCall("local_search", "{\"query\":\"hello\"}")))
+    }
+
+    @Test
+    fun `typed request path preserves successful execution behavior`() {
+        val result = runtime.executeToolRequest(
+            ToolCallRequest(
+                name = "calculator",
+                arguments = ToolArguments(mapOf("expression" to JsonPrimitive("4+5"))),
+            ),
+        )
+
+        assertTrue(result.success)
+        assertEquals("9.0", result.content)
+    }
+
+    @Test
+    fun `typed request path preserves schema validation semantics`() {
+        val result = runtime.executeToolRequest(
+            ToolCallRequest(
+                name = "local_search",
+                arguments = ToolArguments(
+                    mapOf(
+                        "query" to JsonObject(
+                            mapOf(
+                                "operator" to JsonPrimitive("equals"),
+                                "value" to JsonPrimitive("hello"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertValidationError(
+            result = result,
+            expectedCode = "INVALID_FIELD_TYPE",
+            expectedDetail = "Field 'query' must be a string.",
+        )
     }
 
     @Test

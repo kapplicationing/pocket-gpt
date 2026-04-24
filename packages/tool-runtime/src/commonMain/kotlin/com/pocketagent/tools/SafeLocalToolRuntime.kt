@@ -4,11 +4,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToLong
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 
 class SafeLocalToolRuntime(
     private val notesStore: NotesStore = InMemoryNotesStore(),
@@ -22,11 +18,6 @@ class SafeLocalToolRuntime(
         "local_search",
         "reminder_create",
     )
-    private val parser = Json {
-        isLenient = false
-        ignoreUnknownKeys = false
-        allowSpecialFloatingPointValues = false
-    }
     private val toolSchemas: Map<String, ToolSchema> = mapOf(
         "calculator" to ToolSchema(
             fields = mapOf(
@@ -80,18 +71,31 @@ class SafeLocalToolRuntime(
 
     override fun validateToolCall(call: ToolCall): Boolean = validateToolCallDetailed(call).valid
 
+    override fun validateToolRequest(request: ToolCallRequest): Boolean = validateToolRequestDetailed(request).valid
+
     override fun executeToolCall(call: ToolCall): ToolResult {
         val validated = validateToolCallDetailed(call)
         if (!validated.valid) {
             return validationFailure(validated)
         }
-        val args = validated.args
-        return when (call.name) {
-            "calculator" -> runCalculator(args.getValue("expression"))
+        return executeValidatedToolCall(requestName = call.name, args = validated.args)
+    }
+
+    override fun executeToolRequest(request: ToolCallRequest): ToolResult {
+        val validated = validateToolRequestDetailed(request)
+        if (!validated.valid) {
+            return validationFailure(validated)
+        }
+        return executeValidatedToolCall(requestName = request.name, args = validated.args)
+    }
+
+    private fun executeValidatedToolCall(requestName: String, args: ToolArguments): ToolResult {
+        return when (requestName) {
+            "calculator" -> runCalculator(args.getStringValue("expression"))
             "date_time" -> currentDateTime()
-            "notes_lookup" -> runNotesLookup(args.getValue("query"))
-            "local_search" -> runLocalSearch(args.getValue("query"))
-            "reminder_create" -> runReminderCreate(args.getValue("title"))
+            "notes_lookup" -> runNotesLookup(args.getStringValue("query"))
+            "local_search" -> runLocalSearch(args.getStringValue("query"))
+            "reminder_create" -> runReminderCreate(args.getStringValue("title"))
             else -> ToolResult(false, "Unknown tool.")
         }
     }
@@ -159,17 +163,29 @@ class SafeLocalToolRuntime(
                 detail = "Tool '${call.name}' is not allowlisted.",
             )
         }
-        val schema = toolSchemas[call.name]
-            ?: return ToolValidationResult.invalid(
-                code = ToolValidationErrorCode.INVALID_SCHEMA,
-                detail = "No validation schema is configured for tool '${call.name}'.",
-            )
-
-        val payload = parseJsonObject(call.jsonArgs)
-            ?: return ToolValidationResult.invalid(
+        return when (val request = ToolCallRequest.fromLegacy(call)) {
+            is ToolCallRequestParseResult.Success -> validateToolRequestDetailed(request.request)
+            is ToolCallRequestParseResult.InvalidJson -> ToolValidationResult.invalid(
                 code = ToolValidationErrorCode.INVALID_JSON,
                 detail = "Payload must be valid JSON object text.",
             )
+        }
+    }
+
+    private fun validateToolRequestDetailed(request: ToolCallRequest): ToolValidationResult {
+        if (!allowlistedTools.contains(request.name)) {
+            return ToolValidationResult.invalid(
+                code = ToolValidationErrorCode.NOT_ALLOWLISTED,
+                detail = "Tool '${request.name}' is not allowlisted.",
+            )
+        }
+        val schema = toolSchemas[request.name]
+            ?: return ToolValidationResult.invalid(
+                code = ToolValidationErrorCode.INVALID_SCHEMA,
+                detail = "No validation schema is configured for tool '${request.name}'.",
+            )
+
+        val payload = request.arguments
 
         val unknownFields = payload.keys.filterNot { schema.fields.containsKey(it) }.sorted()
         if (unknownFields.isNotEmpty()) {
@@ -190,7 +206,7 @@ class SafeLocalToolRuntime(
             )
         }
 
-        val normalizedArgs = mutableMapOf<String, String>()
+        val normalizedArgs = mutableMapOf<String, JsonPrimitive>()
         payload.entries.sortedBy { it.key }.forEach { (fieldName, rawValue) ->
             val fieldSchema = schema.fields.getValue(fieldName)
             when (fieldSchema.type) {
@@ -236,18 +252,11 @@ class SafeLocalToolRuntime(
                             detail = "Field '$fieldName' contains denied fragment '$denied'.",
                         )
                     }
-                    normalizedArgs[fieldName] = value
+                    normalizedArgs[fieldName] = JsonPrimitive(value)
                 }
             }
         }
-        return ToolValidationResult.valid(args = normalizedArgs)
-    }
-
-    private fun parseJsonObject(json: String): JsonObject? {
-        return runCatching {
-            val parsed: JsonElement = parser.parseToJsonElement(json)
-            parsed.jsonObject
-        }.getOrNull()
+        return ToolValidationResult.valid(args = ToolArguments(normalizedArgs))
     }
 
     private fun validationFailure(result: ToolValidationResult): ToolResult {
@@ -290,12 +299,12 @@ class SafeLocalToolRuntime(
 
     private data class ToolValidationResult(
         val valid: Boolean,
-        val args: Map<String, String>,
+        val args: ToolArguments,
         val errorCode: ToolValidationErrorCode?,
         val errorDetail: String?,
     ) {
         companion object {
-            fun valid(args: Map<String, String>): ToolValidationResult {
+            fun valid(args: ToolArguments): ToolValidationResult {
                 return ToolValidationResult(
                     valid = true,
                     args = args,
@@ -307,12 +316,16 @@ class SafeLocalToolRuntime(
             fun invalid(code: ToolValidationErrorCode, detail: String): ToolValidationResult {
                 return ToolValidationResult(
                     valid = false,
-                    args = emptyMap(),
+                    args = ToolArguments.Empty,
                     errorCode = code,
                     errorDetail = detail,
                 )
             }
         }
+    }
+
+    private fun ToolArguments.getStringValue(name: String): String {
+        return requireNotNull(getString(name)) { "Validated tool arguments must contain string field '$name'." }
     }
 
     data class NoteRecord(

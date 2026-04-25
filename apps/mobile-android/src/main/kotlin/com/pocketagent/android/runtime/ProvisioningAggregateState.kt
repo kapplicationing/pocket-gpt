@@ -1,15 +1,15 @@
 package com.pocketagent.android.runtime
 
+import android.content.Context
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 
 data class ProvisioningAggregateState(
     val snapshot: RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot.empty(),
@@ -21,18 +21,19 @@ data class ProvisioningAggregateState(
 )
 
 internal class DefaultProvisioningAggregateStore(
-    private val dependencies: ProvisioningDependencyAccess,
+    context: Context,
     coroutineScope: CoroutineScope,
+    private val runtimeBindings: ProvisioningRuntimeBindings = appRuntimeProvisioningBindings(context),
 ) {
-    private val downloads = dependencies.observeDownloads()
-    private val downloadPreferences = dependencies.observeDownloadPreferences()
-    private val lifecycle = dependencies.observeModelLifecycle()
+    private val downloads = runtimeBindings.observeDownloads()
+    private val downloadPreferences = runtimeBindings.observeDownloadPreferences()
+    private val lifecycle = runtimeBindings.observeModelLifecycle()
     private val _state = MutableStateFlow(
         ProvisioningAggregateState(
-            snapshot = dependencies.currentProvisioningSnapshot(),
+            snapshot = runtimeBindings.currentProvisioningSnapshot(),
             downloads = downloads.value,
-            downloadPreferences = dependencies.currentDownloadPreferences(),
-            lifecycle = dependencies.currentModelLifecycle(),
+            downloadPreferences = runtimeBindings.currentDownloadPreferences(),
+            lifecycle = runtimeBindings.currentModelLifecycle(),
         ),
     )
 
@@ -41,7 +42,6 @@ internal class DefaultProvisioningAggregateStore(
             downloads.collect { tasks ->
                 mutate { current ->
                     current.copy(
-                        snapshot = dependencies.currentProvisioningSnapshot(),
                         downloads = tasks,
                     )
                 }
@@ -64,13 +64,13 @@ internal class DefaultProvisioningAggregateStore(
     fun observeState(): StateFlow<ProvisioningAggregateState> = _state.asStateFlow()
 
     suspend fun seed(): ProvisioningAggregateState {
-        val manifest = dependencies.loadModelDistributionManifest()
+        val manifest = runtimeBindings.loadModelDistributionManifest()
         return mutate { current ->
             current.copy(
-                snapshot = dependencies.currentProvisioningSnapshot(),
+                snapshot = runtimeBindings.currentProvisioningSnapshot(),
                 downloads = downloads.value,
-                downloadPreferences = dependencies.currentDownloadPreferences(),
-                lifecycle = dependencies.currentModelLifecycle(),
+                downloadPreferences = runtimeBindings.currentDownloadPreferences(),
+                lifecycle = runtimeBindings.currentModelLifecycle(),
                 manifest = manifest,
                 manifestLoaded = true,
             )
@@ -80,8 +80,8 @@ internal class DefaultProvisioningAggregateStore(
     fun refreshSnapshot(): ProvisioningAggregateState {
         return mutate { current ->
             current.copy(
-                snapshot = dependencies.currentProvisioningSnapshot(),
-                lifecycle = dependencies.currentModelLifecycle(),
+                snapshot = runtimeBindings.currentProvisioningSnapshot(),
+                lifecycle = runtimeBindings.currentModelLifecycle(),
             )
         }
     }
@@ -89,7 +89,7 @@ internal class DefaultProvisioningAggregateStore(
     fun refreshDownloadPreferences(): ProvisioningAggregateState {
         return mutate { current ->
             current.copy(
-                downloadPreferences = dependencies.currentDownloadPreferences(),
+                downloadPreferences = runtimeBindings.currentDownloadPreferences(),
             )
         }
     }
@@ -97,7 +97,7 @@ internal class DefaultProvisioningAggregateStore(
     fun refreshLifecycle(): ProvisioningAggregateState {
         return mutate { current ->
             current.copy(
-                lifecycle = dependencies.currentModelLifecycle(),
+                lifecycle = runtimeBindings.currentModelLifecycle(),
             )
         }
     }
@@ -105,29 +105,6 @@ internal class DefaultProvisioningAggregateStore(
     private inline fun mutate(
         block: (ProvisioningAggregateState) -> ProvisioningAggregateState,
     ): ProvisioningAggregateState {
-        var nextState: ProvisioningAggregateState? = null
-        _state.update { current ->
-            block(current).also { updated ->
-                nextState = updated
-            }
-        }
-        return checkNotNull(nextState)
-    }
-}
-
-internal class AggregateProjectionStateFlow<T>(
-    private val source: StateFlow<ProvisioningAggregateState>,
-    private val project: (ProvisioningAggregateState) -> T,
-) : StateFlow<T> {
-    override val replayCache: List<T>
-        get() = listOf(value)
-
-    override val value: T
-        get() = project(source.value)
-
-    override suspend fun collect(collector: FlowCollector<T>): Nothing {
-        source.collect { aggregate ->
-            collector.emit(project(aggregate))
-        }
+        return _state.updateAndGet(block)
     }
 }

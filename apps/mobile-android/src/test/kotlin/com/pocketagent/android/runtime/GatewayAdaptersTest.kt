@@ -1,5 +1,7 @@
 package com.pocketagent.android.runtime
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadNetworkPreference
@@ -99,10 +101,11 @@ class GatewayAdaptersTest {
 
     @Test
     fun `default provisioning gateway delegates to dependency access seam`() = runTest {
-        val dependency = RecordingProvisioningDependencyAccess()
+        val dependency = RecordingProvisioningRuntime()
         val gateway = DefaultProvisioningGateway(
-            dependencies = dependency,
+            context = GatewayTestContext(),
             coroutineScope = backgroundScope,
+            runtimeBindings = dependency.bindings,
         )
         val version = ModelDistributionVersion(
             modelId = "qwen3.5-0.8b-q4",
@@ -120,18 +123,18 @@ class GatewayAdaptersTest {
         gateway.resumeDownload("task-1")
         gateway.retryDownload("task-1")
         gateway.cancelDownload("task-1")
-        assertTrue(gateway.setActiveVersion(version.modelId, version.version))
-        assertTrue(gateway.removeVersion(version.modelId, version.version))
+        assertTrue(gateway.setActiveVersion(version.modelId, version.version).changed)
+        assertTrue(gateway.removeVersion(version.modelId, version.version).changed)
         val imported = gateway.importModelFromUri(version.modelId, fakeUri())
-        val manifest = gateway.loadModelDistributionManifest()
+        val manifest = gateway.seedProvisioningAggregateState().manifest
         val installed = gateway.listInstalledVersions(version.modelId)
-        val snapshot = gateway.currentSnapshot()
+        val aggregate = gateway.observeProvisioningAggregateState().value
 
         assertEquals(version.modelId, imported.modelId)
         assertEquals(1, manifest.models.size)
         assertEquals(1, installed.size)
-        assertEquals(1, snapshot.models.size)
-        assertEquals(1, gateway.observeDownloads().value.size)
+        assertEquals(1, aggregate.snapshot.models.size)
+        assertEquals(1, aggregate.downloads.size)
         assertEquals("task-1", dependency.lastPausedTaskId)
         assertEquals("task-1", dependency.lastResumedTaskId)
         assertEquals("task-1", dependency.lastRetriedTaskId)
@@ -140,12 +143,13 @@ class GatewayAdaptersTest {
 
     @Test
     fun `default provisioning gateway delegates download preference controls and request options`() = runTest {
-        val dependency = RecordingProvisioningDependencyAccess().apply {
+        val dependency = RecordingProvisioningRuntime().apply {
             meteredWarningResult = true
         }
         val gateway = DefaultProvisioningGateway(
-            dependencies = dependency,
+            context = GatewayTestContext(),
             coroutineScope = backgroundScope,
+            runtimeBindings = dependency.bindings,
         )
         val version = ModelDistributionVersion(
             modelId = "qwen3.5-0.8b-q4",
@@ -170,19 +174,18 @@ class GatewayAdaptersTest {
         gateway.setDownloadWifiOnlyEnabled(true)
         gateway.acknowledgeLargeDownloadCellularWarning()
 
-        assertTrue(gateway.currentDownloadPreferences().wifiOnlyEnabled)
-        assertTrue(gateway.currentDownloadPreferences().largeDownloadCellularWarningAcknowledged)
+        val aggregate = gateway.observeProvisioningAggregateState().value
+        assertTrue(aggregate.downloadPreferences.wifiOnlyEnabled)
+        assertTrue(aggregate.downloadPreferences.largeDownloadCellularWarningAcknowledged)
     }
 
     @Test
-    fun `default provisioning gateway blocks disallowed admission actions`() = runTest {
-        val dependency = RecordingProvisioningDependencyAccess()
+    fun `default provisioning gateway delegates without re-running admission policy`() = runTest {
+        val dependency = RecordingProvisioningRuntime()
         val gateway = DefaultProvisioningGateway(
-            dependencies = dependency,
-            admissionPolicy = blockedAdmissionPolicy(
-                reason = ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE,
-            ),
+            context = GatewayTestContext(),
             coroutineScope = backgroundScope,
+            runtimeBindings = dependency.bindings,
         )
         val version = ModelDistributionVersion(
             modelId = "qwen3-1.7b-q4_k_m",
@@ -195,14 +198,15 @@ class GatewayAdaptersTest {
             fileSizeBytes = 123L,
         )
 
-        val downloadError = assertFailsWith<RuntimeDomainException> {
-            gateway.enqueueDownload(version)
-        }
+        val imported = gateway.importModelFromUri(version.modelId, fakeUri())
+        val taskId = gateway.enqueueDownload(version)
+        val activation = gateway.setActiveVersion("qwen3.5-0.8b-q4", "1")
         val loadResult = gateway.loadInstalledModel("qwen3.5-0.8b-q4", "1")
 
-        assertEquals(RuntimeErrorCodes.MODEL_ADMISSION_BLOCKED, downloadError.domainError.code)
-        assertEquals(ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE, loadResult.errorCode)
-        assertTrue(loadResult.detail.orEmpty().contains("action=load"))
+        assertEquals(version.modelId, imported.modelId)
+        assertEquals("task-1", taskId)
+        assertTrue(activation.changed)
+        assertTrue(loadResult.success)
     }
 
     @Test
@@ -504,7 +508,7 @@ private class RecordingMvpRuntimeFacade(
     }
 }
 
-private class RecordingProvisioningDependencyAccess : ProvisioningDependencyAccess {
+private class RecordingProvisioningRuntime {
     private val downloads = MutableStateFlow(
         listOf(
             DownloadTaskState(
@@ -535,7 +539,7 @@ private class RecordingProvisioningDependencyAccess : ProvisioningDependencyAcce
     var meteredWarningResult: Boolean = false
     var lastWarningVersion: ModelDistributionVersion? = null
 
-    override fun currentProvisioningSnapshot(): RuntimeProvisioningSnapshot {
+    private fun currentSnapshot(): RuntimeProvisioningSnapshot {
         return RuntimeProvisioningSnapshot(
             models = listOf(
                 ProvisionedModelState(
@@ -573,125 +577,76 @@ private class RecordingProvisioningDependencyAccess : ProvisioningDependencyAcce
         )
     }
 
-    override fun observeDownloads() = downloads
-
-    override fun observeDownloadPreferences() = downloadPreferences
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = downloadPreferences.value
-
-    override fun observeModelLifecycle() = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
-
-    override suspend fun importModelFromUri(
-        modelId: String,
-        sourceUri: Uri,
-    ): RuntimeModelImportResult {
-        return RuntimeModelImportResult(
-            modelId = modelId,
-            version = "1",
-            absolutePath = "/tmp/model.gguf",
-            sha256 = "a".repeat(64),
-            copiedBytes = 123L,
-            isActive = true,
-        )
-    }
-
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
-        return ModelDistributionManifest(
-            models = listOf(
-                com.pocketagent.android.runtime.modelmanager.ModelDistributionModel(
-                    modelId = "qwen3.5-0.8b-q4",
-                    displayName = "Qwen",
-                    versions = emptyList(),
-                ),
-            ),
-        )
-    }
-
-    override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
-        return currentProvisioningSnapshot().models.first().installedVersions
-    }
-
-    override fun setActiveVersion(modelId: String, version: String): Boolean = true
-
-    override fun clearActiveVersion(modelId: String): Boolean = true
-
-    override fun removeVersion(modelId: String, version: String): Boolean = true
-
-    override suspend fun loadInstalledModel(
-        modelId: String,
-        version: String,
-    ): RuntimeModelLifecycleCommandResult {
-        return RuntimeModelLifecycleCommandResult.applied(
-            loadedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version),
-        )
-    }
-
-    override suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult {
-        return RuntimeModelLifecycleCommandResult.rejected(
-            code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
-            detail = "last_loaded_model_missing",
-        )
-    }
-
-    override suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult {
-        return RuntimeModelLifecycleCommandResult.applied()
-    }
-
-    override suspend fun enqueueDownload(version: ModelDistributionVersion, options: DownloadRequestOptions): String {
-        lastEnqueuedOptions = options
-        return "task-1"
-    }
-
-    override fun shouldWarnForMeteredLargeDownload(version: ModelDistributionVersion): Boolean {
-        lastWarningVersion = version
-        return meteredWarningResult
-    }
-
-    override fun setDownloadWifiOnlyEnabled(enabled: Boolean) {
-        downloadPreferences.value = downloadPreferences.value.copy(wifiOnlyEnabled = enabled)
-    }
-
-    override fun acknowledgeLargeDownloadCellularWarning() {
-        downloadPreferences.value = downloadPreferences.value.copy(
-            largeDownloadCellularWarningAcknowledged = true,
-        )
-    }
-
-    override fun pauseDownload(taskId: String) {
-        lastPausedTaskId = taskId
-    }
-
-    override fun resumeDownload(taskId: String) {
-        lastResumedTaskId = taskId
-    }
-
-    override fun retryDownload(taskId: String) {
-        lastRetriedTaskId = taskId
-    }
-
-    override fun cancelDownload(taskId: String) {
-        lastCancelledTaskId = taskId
-    }
-
-    override fun syncDownloadsFromScheduler() = Unit
-}
-
-private fun blockedAdmissionPolicy(reason: ModelEligibilityReason): ModelAdmissionPolicy {
-    return object : ModelAdmissionPolicy {
-        override fun evaluate(
-            action: ModelAdmissionAction,
-            subject: ModelAdmissionSubject,
-        ): ModelAdmissionDecision {
-            return ModelAdmissionDecision(
-                action = action,
-                subject = subject,
-                eligibility = ModelVersionEligibility.unsupported(
-                    reason = reason,
-                    technicalDetail = "blocked_for_test",
+    val bindings = ProvisioningRuntimeBindings(
+        currentProvisioningSnapshot = { currentSnapshot() },
+        observeDownloads = { downloads },
+        observeDownloadPreferences = { downloadPreferences },
+        currentDownloadPreferences = { downloadPreferences.value },
+        observeModelLifecycle = { lifecycle },
+        currentModelLifecycle = { lifecycle.value },
+        importModelFromUri = { modelId, _ ->
+            RuntimeModelImportResult(
+                modelId = modelId,
+                version = "1",
+                absolutePath = "/tmp/model.gguf",
+                sha256 = "a".repeat(64),
+                copiedBytes = 123L,
+                isActive = true,
+            )
+        },
+        loadModelDistributionManifest = {
+            ModelDistributionManifest(
+                models = listOf(
+                    com.pocketagent.android.runtime.modelmanager.ModelDistributionModel(
+                        modelId = "qwen3.5-0.8b-q4",
+                        displayName = "Qwen",
+                        versions = emptyList(),
+                    ),
                 ),
             )
-        }
-    }
+        },
+        listInstalledVersions = { _: String ->
+            currentSnapshot().models.firstOrNull()?.installedVersions.orEmpty()
+        },
+        setActiveVersion = { _, _ -> ProvisioningMutationResult.Applied },
+        clearActiveVersion = { _ -> ProvisioningMutationResult.Applied },
+        removeVersion = { _, _ -> ProvisioningMutationResult.Applied },
+        loadInstalledModel = { modelId, version ->
+            RuntimeModelLifecycleCommandResult.applied(
+                loadedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version),
+            )
+        },
+        loadLastUsedModel = {
+            RuntimeModelLifecycleCommandResult.rejected(
+                code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
+                detail = "last_loaded_model_missing",
+            )
+        },
+        offloadModel = { _ -> RuntimeModelLifecycleCommandResult.applied() },
+        enqueueDownload = { _, options ->
+            lastEnqueuedOptions = options
+            "task-1"
+        },
+        shouldWarnForMeteredLargeDownload = { version ->
+            lastWarningVersion = version
+            meteredWarningResult
+        },
+        setDownloadWifiOnlyEnabled = { enabled ->
+            downloadPreferences.value = downloadPreferences.value.copy(wifiOnlyEnabled = enabled)
+        },
+        acknowledgeLargeDownloadCellularWarning = {
+            downloadPreferences.value = downloadPreferences.value.copy(
+                largeDownloadCellularWarningAcknowledged = true,
+            )
+        },
+        pauseDownload = { taskId -> lastPausedTaskId = taskId },
+        resumeDownload = { taskId -> lastResumedTaskId = taskId },
+        retryDownload = { taskId -> lastRetriedTaskId = taskId },
+        cancelDownload = { taskId -> lastCancelledTaskId = taskId },
+        syncDownloadsFromScheduler = { },
+    )
+}
+
+private class GatewayTestContext : ContextWrapper(null) {
+    override fun getApplicationContext(): Context = this
 }

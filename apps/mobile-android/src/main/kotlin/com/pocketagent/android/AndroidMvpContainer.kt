@@ -2,6 +2,7 @@ package com.pocketagent.android
 
 import android.content.Context
 import com.pocketagent.android.runtime.createDefaultAndroidInferenceModule
+import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.ConversationModule
 import com.pocketagent.core.DefaultPolicyModule
@@ -22,7 +23,6 @@ import com.pocketagent.memory.MemoryModule
 import com.pocketagent.nativebridge.LlamaCppInferenceModule
 import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
 import com.pocketagent.nativebridge.RuntimeBackend
-import com.pocketagent.android.runtime.RuntimeBootstrapper
 import com.pocketagent.runtime.PolicyAwareNetworkClient
 import com.pocketagent.runtime.ModelResidencyPolicy
 import com.pocketagent.runtime.PerformanceRuntimeConfig
@@ -89,11 +89,11 @@ class AndroidMvpContainer(
         runtimeConfig = runtimeConfig,
         networkPolicyClient = networkPolicyClient,
         memoryBudgetTracker = appContext?.let { context ->
-            RuntimeBootstrapper.runtimeTuning(context.applicationContext).memoryBudgetTracker
+            resolveAppForegroundRuntimeServices(context.applicationContext).runtimeTuning.memoryBudgetTracker
         },
         recommendedGpuLayers = { modelId, config ->
             appContext?.let { context ->
-                val runtimeTuning = RuntimeBootstrapper.runtimeTuning(context.applicationContext)
+                val runtimeTuning = resolveAppForegroundRuntimeServices(context.applicationContext).runtimeTuning
                 runtimeTuning
                     .applyRecommendedConfig(
                         modelIdHint = modelId,

@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,7 +27,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.pocketagent.android.data.chat.SessionPersistence
 import com.pocketagent.android.data.chat.StoredChatState
 import com.pocketagent.android.runtime.ProvisionedModelState
+import com.pocketagent.android.runtime.ProvisioningAggregateState
 import com.pocketagent.android.runtime.ProvisioningGateway
+import com.pocketagent.android.runtime.ProvisioningMutationResult
 import com.pocketagent.android.runtime.RuntimeModelImportResult
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
@@ -38,6 +41,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
 import com.pocketagent.android.runtime.PresetModelMappingStore
 import com.pocketagent.android.ui.ChatViewModel
+import com.pocketagent.android.ui.ModelProvisioningViewModel
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
@@ -71,6 +75,7 @@ class ChatQuickLoadFlowInstrumentationTest {
         val harness = QuickLoadFlowHarness()
         val runtimeGateway = QuickLoadRuntimeGateway(harness)
         val provisioningGateway = QuickLoadProvisioningGateway(harness)
+        val provisioningViewModel = ModelProvisioningViewModel(provisioningGateway)
         val viewModel = ChatViewModel(
             runtimeFacade = runtimeGateway,
             sessionPersistence = InMemorySessionPersistence(
@@ -80,13 +85,13 @@ class ChatQuickLoadFlowInstrumentationTest {
                 ),
             ),
             presetBackingStore = PresetModelMappingStore(composeRule.activity.applicationContext),
-            provisioningGateway = provisioningGateway,
         )
         composeRule.setContent {
             MaterialTheme {
                 Surface {
                     QuickLoadTestApp(
                         viewModel = viewModel,
+                        provisioningViewModel = provisioningViewModel,
                     )
                 }
             }
@@ -111,6 +116,7 @@ class ChatQuickLoadFlowInstrumentationTest {
         val harness = QuickLoadFlowHarness()
         val runtimeGateway = QuickLoadRuntimeGateway(harness)
         val provisioningGateway = QuickLoadProvisioningGateway(harness)
+        val provisioningViewModel = ModelProvisioningViewModel(provisioningGateway)
         val viewModel = ChatViewModel(
             runtimeFacade = runtimeGateway,
             sessionPersistence = InMemorySessionPersistence(
@@ -120,13 +126,13 @@ class ChatQuickLoadFlowInstrumentationTest {
                 ),
             ),
             presetBackingStore = PresetModelMappingStore(composeRule.activity.applicationContext),
-            provisioningGateway = provisioningGateway,
         )
         composeRule.setContent {
             MaterialTheme {
                 Surface {
                     QuickLoadTestApp(
                         viewModel = viewModel,
+                        provisioningViewModel = provisioningViewModel,
                     )
                 }
             }
@@ -174,11 +180,16 @@ class ChatQuickLoadFlowInstrumentationTest {
 }
 
 @Composable
-private fun QuickLoadTestApp(viewModel: ChatViewModel) {
+private fun QuickLoadTestApp(
+    viewModel: ChatViewModel,
+    provisioningViewModel: ModelProvisioningViewModel,
+) {
     val state by viewModel.uiState.collectAsState()
-    val composerDraft by viewModel.composerDraftText.collectAsState()
-    val modelLoadingState by viewModel.modelLoadingState.collectAsState()
+    val modelLoadingState by provisioningViewModel.modelLoadingState.collectAsState()
     val scope = rememberCoroutineScope()
+    LaunchedEffect(modelLoadingState) {
+        viewModel.syncRuntimeModelLoadingState(modelLoadingState)
+    }
     val runtimeLabel = when {
         modelLoadingState is com.pocketagent.android.ui.state.ModelLoadingState.Loaded -> "Runtime: Ready"
         else -> "Runtime: Not ready"
@@ -186,18 +197,28 @@ private fun QuickLoadTestApp(viewModel: ChatViewModel) {
     Column {
         Text(text = runtimeLabel)
         Button(
-            onClick = { scope.launch { viewModel.loadLastUsedModel() } },
+            onClick = {
+                scope.launch {
+                    val result = provisioningViewModel.loadLastUsedModel()
+                    viewModel.handleCompletedModelOperation(result)
+                }
+            },
         ) {
             Text("Load last used")
         }
         Button(
-            onClick = { scope.launch { viewModel.offloadModel(reason = "quick-load-test") } },
+            onClick = {
+                scope.launch {
+                    val result = provisioningViewModel.offloadModel(reason = "quick-load-test")
+                    viewModel.handleCompletedModelOperation(result)
+                }
+            },
             modifier = Modifier.testTag("unload_button"),
         ) {
             Text("Unload")
         }
         OutlinedTextField(
-            value = composerDraft,
+            value = state.composer.text,
             onValueChange = viewModel::onComposerChanged,
             modifier = Modifier.testTag("composer_input"),
             label = { Text("Message") },
@@ -323,18 +344,20 @@ private class QuickLoadProvisioningGateway(
             ),
         ),
     )
+    private val aggregateState = MutableStateFlow(
+        ProvisioningAggregateState(
+            snapshot = currentSnapshot(),
+            downloads = downloads.value,
+            downloadPreferences = preferences.value,
+            lifecycle = lifecycle.value,
+        ),
+    )
 
-    override fun currentSnapshot(): RuntimeProvisioningSnapshot = sampleSnapshot(harness)
+    override fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> = aggregateState
 
-    override fun observeDownloads(): StateFlow<List<com.pocketagent.android.runtime.modelmanager.DownloadTaskState>> = downloads
+    override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState = aggregateState.value
 
-    override fun observeDownloadPreferences(): StateFlow<DownloadPreferencesState> = preferences
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = preferences.value
-
-    override fun observeModelLifecycle(): StateFlow<RuntimeModelLifecycleSnapshot> = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
+    private fun currentSnapshot(): RuntimeProvisioningSnapshot = sampleSnapshot(harness)
 
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
         return RuntimeModelImportResult(
@@ -347,19 +370,21 @@ private class QuickLoadProvisioningGateway(
         )
     }
 
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
-        return ModelDistributionManifest(models = emptyList())
-    }
-
     override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
         return sampleSnapshot(harness).models.firstOrNull { it.modelId == modelId }?.installedVersions.orEmpty()
     }
 
-    override fun setActiveVersion(modelId: String, version: String): Boolean = true
+    override fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.Applied
+    }
 
-    override fun clearActiveVersion(modelId: String): Boolean = true
+    override fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.Applied
+    }
 
-    override fun removeVersion(modelId: String, version: String): Boolean = true
+    override fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.Applied
+    }
 
     override suspend fun loadInstalledModel(modelId: String, version: String): RuntimeModelLifecycleCommandResult {
         val loadedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version)
@@ -372,6 +397,7 @@ private class QuickLoadProvisioningGateway(
             errorCode = null,
             errorDetail = null,
         )
+        syncAggregateState()
         return RuntimeModelLifecycleCommandResult.applied(loadedModel = loadedModel)
     }
 
@@ -396,6 +422,7 @@ private class QuickLoadProvisioningGateway(
             errorDetail = null,
             queuedOffload = false,
         )
+        syncAggregateState()
         return RuntimeModelLifecycleCommandResult.applied()
     }
 
@@ -419,6 +446,15 @@ private class QuickLoadProvisioningGateway(
     override fun cancelDownload(taskId: String) = Unit
 
     override fun syncDownloadsFromScheduler() = Unit
+
+    private fun syncAggregateState() {
+        aggregateState.value = aggregateState.value.copy(
+            snapshot = currentSnapshot(),
+            downloads = downloads.value,
+            downloadPreferences = preferences.value,
+            lifecycle = lifecycle.value,
+        )
+    }
 }
 
 private class InMemorySessionPersistence(

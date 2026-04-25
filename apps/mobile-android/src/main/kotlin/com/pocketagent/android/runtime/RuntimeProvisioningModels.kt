@@ -95,6 +95,26 @@ data class RuntimeModelImportResult(
     val isActive: Boolean,
 )
 
+sealed interface ProvisioningMutationResult {
+    val changed: Boolean
+        get() = this is Applied
+
+    data object Applied : ProvisioningMutationResult
+
+    data class Blocked(
+        val error: RuntimeDomainError,
+    ) : ProvisioningMutationResult
+
+    data class NotFound(
+        val modelId: String,
+        val version: String? = null,
+    ) : ProvisioningMutationResult
+
+    data class NoChange(
+        val detail: String? = null,
+    ) : ProvisioningMutationResult
+}
+
 internal fun ByteArray.toHex(): String = joinToString(separator = "") { byte -> "%02x".format(byte) }
 
 internal fun SharedPreferences.readOptional(key: String): String? {

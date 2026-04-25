@@ -229,7 +229,7 @@ class RuntimeBackendTruthInstrumentationTest {
                     context = appContext,
                     modelId = standardModelId,
                     version = seeded.version,
-                ),
+                ).changed,
             )
             AppRuntimeDependencies.installProductionRuntime(appContext)
             val facade = AppRuntimeDependencies.runtimeFacadeFactory()

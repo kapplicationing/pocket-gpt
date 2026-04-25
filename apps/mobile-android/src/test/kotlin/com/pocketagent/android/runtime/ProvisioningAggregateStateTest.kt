@@ -1,5 +1,7 @@
 package com.pocketagent.android.runtime
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
@@ -32,12 +34,13 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class ProvisioningAggregateStateTest {
     @Test
-    fun `aggregate store seeds manifest and refreshes snapshot from download changes`() = runTest {
-        val dependency = AggregateProvisioningDependencyAccess()
+    fun `aggregate store seeds manifest without refreshing snapshot from download changes`() = runTest {
+        val dependency = AggregateProvisioningRuntime()
         val storeScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val store = DefaultProvisioningAggregateStore(
-            dependencies = dependency,
+            context = AggregateStoreTestContext(),
             coroutineScope = storeScope,
+            runtimeBindings = dependency.bindings,
         )
         runCurrent()
 
@@ -50,7 +53,7 @@ class ProvisioningAggregateStateTest {
 
         val updated = store.observeState().value
         assertEquals(1, updated.downloads.size)
-        assertEquals("snapshot-1", updated.snapshot.storageRootLabel)
+        assertEquals("snapshot-0", updated.snapshot.storageRootLabel)
 
         val seeded = store.seed()
 
@@ -62,15 +65,16 @@ class ProvisioningAggregateStateTest {
 
     @Test
     fun `gateway aggregate observation stays aligned with legacy adapters`() = runTest {
-        val dependency = AggregateProvisioningDependencyAccess()
+        val dependency = AggregateProvisioningRuntime()
         val gatewayScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val gateway = DefaultProvisioningGateway(
-            dependencies = dependency,
+            context = AggregateStoreTestContext(),
             coroutineScope = gatewayScope,
+            runtimeBindings = dependency.bindings,
         )
         runCurrent()
 
-        assertFalse(gateway.currentProvisioningAggregateState().manifestLoaded)
+        assertFalse(gateway.observeProvisioningAggregateState().value.manifestLoaded)
 
         dependency.downloadPreferences.value = DownloadPreferencesState(
             wifiOnlyEnabled = true,
@@ -89,21 +93,21 @@ class ProvisioningAggregateStateTest {
 
         val aggregate = gateway.observeProvisioningAggregateState().value
 
-        assertEquals(gateway.observeDownloads().value, aggregate.downloads)
-        assertEquals(gateway.currentDownloadPreferences(), aggregate.downloadPreferences)
-        assertEquals(gateway.currentModelLifecycle(), aggregate.lifecycle)
-        assertEquals("snapshot-2", gateway.currentSnapshot().storageRootLabel)
+        assertEquals(dependency.downloads.value, aggregate.downloads)
+        assertEquals(dependency.downloadPreferences.value, aggregate.downloadPreferences)
+        assertEquals(dependency.lifecycle.value, aggregate.lifecycle)
+        assertEquals("snapshot-0", aggregate.snapshot.storageRootLabel)
 
         val seeded = gateway.seedProvisioningAggregateState()
 
         assertTrue(seeded.manifestLoaded)
         assertEquals(seeded.manifest, gateway.observeProvisioningAggregateState().value.manifest)
-        assertEquals(seeded.snapshot, gateway.currentSnapshot())
+        assertEquals("snapshot-2", seeded.snapshot.storageRootLabel)
         gatewayScope.cancel()
     }
 }
 
-private class AggregateProvisioningDependencyAccess : ProvisioningDependencyAccess {
+private class AggregateProvisioningRuntime {
     val downloads = MutableStateFlow<List<DownloadTaskState>>(emptyList())
     val downloadPreferences = MutableStateFlow(DownloadPreferencesState())
     val lifecycle = MutableStateFlow(RuntimeModelLifecycleSnapshot.initial())
@@ -118,85 +122,57 @@ private class AggregateProvisioningDependencyAccess : ProvisioningDependencyAcce
         ),
     )
 
-    override fun currentProvisioningSnapshot(): RuntimeProvisioningSnapshot = snapshotResult
-
-    override fun observeDownloads() = downloads
-
-    override fun observeDownloadPreferences() = downloadPreferences
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = downloadPreferences.value
-
-    override fun observeModelLifecycle() = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
-
-    override suspend fun importModelFromUri(
-        modelId: String,
-        sourceUri: Uri,
-    ): RuntimeModelImportResult = RuntimeModelImportResult(
-        modelId = modelId,
-        version = "1",
-        absolutePath = "/tmp/$modelId.gguf",
-        sha256 = "a".repeat(64),
-        copiedBytes = 123L,
-        isActive = true,
+    val bindings = ProvisioningRuntimeBindings(
+        currentProvisioningSnapshot = { snapshotResult },
+        observeDownloads = { downloads },
+        observeDownloadPreferences = { downloadPreferences },
+        currentDownloadPreferences = { downloadPreferences.value },
+        observeModelLifecycle = { lifecycle },
+        currentModelLifecycle = { lifecycle.value },
+        importModelFromUri = { modelId, _ ->
+            RuntimeModelImportResult(
+                modelId = modelId,
+                version = "1",
+                absolutePath = "/tmp/$modelId.gguf",
+                sha256 = "a".repeat(64),
+                copiedBytes = 123L,
+                isActive = true,
+            )
+        },
+        loadModelDistributionManifest = { manifestResult },
+        listInstalledVersions = { modelId ->
+            snapshotResult.models.firstOrNull { model -> model.modelId == modelId }?.installedVersions.orEmpty()
+        },
+        setActiveVersion = { _, _ -> ProvisioningMutationResult.Applied },
+        clearActiveVersion = { _: String -> ProvisioningMutationResult.Applied },
+        removeVersion = { _, _ -> ProvisioningMutationResult.Applied },
+        loadInstalledModel = { modelId, version ->
+            RuntimeModelLifecycleCommandResult.applied(
+                loadedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version),
+            )
+        },
+        loadLastUsedModel = { RuntimeModelLifecycleCommandResult.applied() },
+        offloadModel = { _: String -> RuntimeModelLifecycleCommandResult.applied() },
+        enqueueDownload = { _, _ -> "task-1" },
+        shouldWarnForMeteredLargeDownload = { _: ModelDistributionVersion -> false },
+        setDownloadWifiOnlyEnabled = { enabled ->
+            downloadPreferences.value = downloadPreferences.value.copy(wifiOnlyEnabled = enabled)
+        },
+        acknowledgeLargeDownloadCellularWarning = {
+            downloadPreferences.value = downloadPreferences.value.copy(
+                largeDownloadCellularWarningAcknowledged = true,
+            )
+        },
+        pauseDownload = { _: String -> },
+        resumeDownload = { _: String -> },
+        retryDownload = { _: String -> },
+        cancelDownload = { _: String -> },
+        syncDownloadsFromScheduler = { },
     )
+}
 
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest = manifestResult
-
-    override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
-        return snapshotResult.models.firstOrNull { model -> model.modelId == modelId }?.installedVersions.orEmpty()
-    }
-
-    override fun setActiveVersion(modelId: String, version: String): Boolean = true
-
-    override fun clearActiveVersion(modelId: String): Boolean = true
-
-    override fun removeVersion(modelId: String, version: String): Boolean = true
-
-    override suspend fun loadInstalledModel(
-        modelId: String,
-        version: String,
-    ): RuntimeModelLifecycleCommandResult {
-        return RuntimeModelLifecycleCommandResult.applied(
-            loadedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version),
-        )
-    }
-
-    override suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult {
-        return RuntimeModelLifecycleCommandResult.applied()
-    }
-
-    override suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult {
-        return RuntimeModelLifecycleCommandResult.applied()
-    }
-
-    override suspend fun enqueueDownload(
-        version: ModelDistributionVersion,
-        options: DownloadRequestOptions,
-    ): String = "task-1"
-
-    override fun shouldWarnForMeteredLargeDownload(version: ModelDistributionVersion): Boolean = false
-
-    override fun setDownloadWifiOnlyEnabled(enabled: Boolean) {
-        downloadPreferences.value = downloadPreferences.value.copy(wifiOnlyEnabled = enabled)
-    }
-
-    override fun acknowledgeLargeDownloadCellularWarning() {
-        downloadPreferences.value = downloadPreferences.value.copy(
-            largeDownloadCellularWarningAcknowledged = true,
-        )
-    }
-
-    override fun pauseDownload(taskId: String) = Unit
-
-    override fun resumeDownload(taskId: String) = Unit
-
-    override fun retryDownload(taskId: String) = Unit
-
-    override fun cancelDownload(taskId: String) = Unit
-
-    override fun syncDownloadsFromScheduler() = Unit
+private class AggregateStoreTestContext : ContextWrapper(null) {
+    override fun getApplicationContext(): Context = this
 }
 
 private fun sampleSnapshot(storageRootLabel: String): RuntimeProvisioningSnapshot {

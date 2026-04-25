@@ -36,9 +36,10 @@ class ArchitectureBoundaryTest {
         )
         val allowedSuffixes = setOf(
             "com/pocketagent/android/AppRuntimeDependencies.kt",
-            "com/pocketagent/android/runtime/AppRuntimeAccess.kt",
+            "com/pocketagent/android/PocketAgentApplication.kt",
+            "com/pocketagent/android/runtime/AppForegroundRuntimeServices.kt",
             "com/pocketagent/android/runtime/ProvisioningGateway.kt",
-            "com/pocketagent/android/runtime/RuntimeBootstrapper.kt",
+            "com/pocketagent/android/runtime/ProvisioningRuntimeBindings.kt",
             "com/pocketagent/android/runtime/modelmanager/ModelDownloadCancelReceiver.kt",
         )
         val offenders = Files.walk(appDir).use { stream ->

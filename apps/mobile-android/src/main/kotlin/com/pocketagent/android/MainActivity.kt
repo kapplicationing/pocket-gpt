@@ -14,7 +14,6 @@ import androidx.activity.viewModels
 import androidx.compose.material3.Surface
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import com.pocketagent.android.runtime.RuntimeBootstrapper
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
@@ -27,7 +26,6 @@ import com.pocketagent.android.data.chat.AndroidSessionPersistence
 import com.pocketagent.android.voice.OffasListenerService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 // TODO: Add material3-window-size-class dependency to build.gradle.kts:
 //   implementation("androidx.compose.material3:material3-window-size-class:<version>")
@@ -52,7 +50,6 @@ class MainActivity : ComponentActivity() {
             runtimeFacade = runtimeGateway,
             sessionPersistence = AndroidSessionPersistence(applicationContext),
             presetBackingStore = foregroundRuntimeServices.presetBackingStore,
-            provisioningGateway = foregroundRuntimeServices.provisioningGateway,
             deviceStateProvider = AndroidTelemetryDeviceStateProvider(applicationContext),
             runtimeTuning = runtimeTuning,
         )
@@ -94,9 +91,6 @@ class MainActivity : ComponentActivity() {
         }
         createNotificationChannels()
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                RuntimeBootstrapper.installProductionRuntime(applicationContext)
-            }
             viewModel.refreshRuntimeReadiness()
         }
     }

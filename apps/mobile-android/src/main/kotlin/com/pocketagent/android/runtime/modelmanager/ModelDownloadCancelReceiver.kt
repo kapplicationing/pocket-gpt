@@ -3,7 +3,7 @@ package com.pocketagent.android.runtime.modelmanager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.pocketagent.android.runtime.AppRuntimeProvisioningBridge
+import com.pocketagent.android.AppRuntimeDependencies
 
 class ModelDownloadCancelReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -11,7 +11,7 @@ class ModelDownloadCancelReceiver : BroadcastReceiver() {
             action = intent?.action,
             rawTaskId = intent?.getStringExtra(EXTRA_TASK_ID),
         ) ?: return
-        AppRuntimeProvisioningBridge.cancelDownload(context.applicationContext, taskId)
+        cancelDownloadFromRuntimeHost(context, taskId)
     }
 
     companion object {
@@ -29,4 +29,8 @@ internal fun resolveDownloadCancellationTaskId(
     }
     val taskId = rawTaskId.orEmpty().trim()
     return taskId.takeIf { it.isNotEmpty() }
+}
+
+internal fun cancelDownloadFromRuntimeHost(context: Context, taskId: String) {
+    AppRuntimeDependencies.cancelDownload(context.applicationContext, taskId)
 }

@@ -6,7 +6,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.util.Log
 import com.pocketagent.android.runtime.AndroidRuntimeProvisioningStore
-import com.pocketagent.android.runtime.RuntimeBootstrapper
 import com.pocketagent.core.model.ModelArtifactRole
 import java.io.BufferedOutputStream
 import java.io.File
@@ -479,14 +478,6 @@ internal class ModelDownloadExecutor(
                 throw error
             }
 
-            runCatching {
-                RuntimeBootstrapper.installProductionRuntime(appContext)
-            }.onFailure { error ->
-                Log.w(
-                    LOG_TAG,
-                    "Runtime refresh failed after installing ${task.modelId}@${task.version}: ${error.message}",
-                )
-            }
             cleanupWorkspace(workspaceDir)
             val installedSize = installedArtifacts.sumOf { artifact -> artifact.fileSizeBytes?.coerceAtLeast(0L) ?: 0L }
             updateState(

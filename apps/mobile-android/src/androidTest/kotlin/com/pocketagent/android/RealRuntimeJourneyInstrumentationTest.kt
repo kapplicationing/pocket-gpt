@@ -73,7 +73,7 @@ class RealRuntimeJourneyInstrumentationTest {
                     context = appContext,
                     modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
                     version = seeded0.version,
-                ),
+                ).changed,
             )
             assertTrue(
                 "Failed to activate seeded 1.7B version ${seeded2.version}.",
@@ -81,7 +81,7 @@ class RealRuntimeJourneyInstrumentationTest {
                     context = appContext,
                     modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
                     version = seeded2.version,
-                ),
+                ).changed,
             )
             val snapshot = AppRuntimeDependencies.currentProvisioningSnapshot(appContext)
             val state0 = snapshot.models.first { it.modelId == ModelCatalog.QWEN_3_5_0_8B_Q4 }

@@ -2,29 +2,16 @@ package com.pocketagent.android.runtime
 
 import android.content.Context
 import android.content.ContextWrapper
+import com.pocketagent.core.model.ModelSpecProvider
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 
 class AppRuntimeHostTest {
     @Test
-    fun `resolve app runtime access uses application-owned host when available`() {
-        val context = TestHostOwnerContext(
-            appRuntimeHost = TestAppRuntimeHost(
-                runtimeAccess = HostOwnedAppRuntimeAccess,
-                foregroundRuntimeServices = HostOwnedForegroundRuntimeServices,
-            ),
-        )
-
-        val resolved = resolveAppRuntimeAccess(context)
-
-        assertSame(HostOwnedAppRuntimeAccess, resolved)
-    }
-
-    @Test
     fun `resolve foreground runtime services uses application-owned host when available`() {
         val context = TestHostOwnerContext(
             appRuntimeHost = TestAppRuntimeHost(
-                runtimeAccess = HostOwnedAppRuntimeAccess,
                 foregroundRuntimeServices = HostOwnedForegroundRuntimeServices,
             ),
         )
@@ -35,24 +22,27 @@ class AppRuntimeHostTest {
     }
 
     @Test
-    fun `resolve app runtime access falls back to singleton compatibility host`() {
-        val resolved = resolveAppRuntimeAccess(TestPlainContext())
+    fun `resolve foreground runtime services exposes host-owned model spec provider`() {
+        val context = TestHostOwnerContext(
+            appRuntimeHost = TestAppRuntimeHost(
+                foregroundRuntimeServices = HostOwnedForegroundRuntimeServices,
+            ),
+        )
 
-        assertSame(CompatibilityAppRuntimeAccess, resolved)
+        val resolved = resolveAppForegroundRuntimeServices(context)
+
+        assertSame(HostOwnedModelSpecProvider, resolved.modelSpecProvider)
     }
 
     @Test
-    fun `resolve foreground runtime services falls back to cached compatibility host`() {
-        val context = TestPlainContext()
+    fun `resolve foreground runtime services requires an application-owned host`() {
+        val error = assertFailsWith<IllegalStateException> {
+            resolveAppForegroundRuntimeServices(TestPlainContext())
+        }
 
-        val first = resolveAppForegroundRuntimeServices(context)
-        val second = resolveAppForegroundRuntimeServices(context)
-
-        assertSame(first, second)
+        kotlin.test.assertTrue(error.message.orEmpty().contains("AppRuntimeHostOwner"))
     }
 }
-
-private object HostOwnedAppRuntimeAccess : AppRuntimeAccess by CompatibilityAppRuntimeAccess
 
 private object HostOwnedForegroundRuntimeServices : AppForegroundRuntimeServices {
     override val runtimeTuning: AndroidRuntimeTuningStore
@@ -65,10 +55,15 @@ private object HostOwnedForegroundRuntimeServices : AppForegroundRuntimeServices
         get() = throw AssertionError("Not used in host resolution tests")
     override val presetBackingStore: PresetBackingStore
         get() = throw AssertionError("Not used in host resolution tests")
+    override val modelSpecProvider: ModelSpecProvider
+        get() = HostOwnedModelSpecProvider
+}
+
+private object HostOwnedModelSpecProvider : ModelSpecProvider {
+    override fun allSpecs() = emptyList<com.pocketagent.core.model.NormalizedModelSpec>()
 }
 
 private class TestAppRuntimeHost(
-    override val runtimeAccess: AppRuntimeAccess,
     override val foregroundRuntimeServices: AppForegroundRuntimeServices,
 ) : AppRuntimeHost
 

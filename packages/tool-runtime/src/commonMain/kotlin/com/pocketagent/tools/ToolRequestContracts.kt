@@ -72,6 +72,15 @@ data class ToolArguments(
     }
 }
 
+fun ToolArguments.toPrimitiveStringMapOrNull(): Map<String, String>? {
+    return buildMap(entries.size) {
+        this@toPrimitiveStringMapOrNull.entries.forEach { (name, value) ->
+            val primitive = value as? JsonPrimitive ?: return null
+            put(name, primitive.content)
+        }
+    }
+}
+
 sealed interface ToolCallRequestParseResult {
     data class Success(val request: ToolCallRequest) : ToolCallRequestParseResult
 

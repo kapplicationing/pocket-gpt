@@ -31,13 +31,8 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
-import com.pocketagent.android.AndroidMvpContainer
 import com.pocketagent.android.MainActivity
 import com.pocketagent.android.R
-import com.pocketagent.android.runtime.DefaultProvisioningGateway
-import com.pocketagent.android.runtime.RuntimeBootstrapper
-import com.pocketagent.android.ui.controllers.AndroidTelemetryDeviceStateProvider
-import com.pocketagent.runtime.SamplingOverrides
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
@@ -449,6 +444,9 @@ class OffasAlarmReceiver : BroadcastReceiver() {
 
 class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val offscreenRuntimeClient by lazy(LazyThreadSafetyMode.NONE) {
+        createOffscreenRuntimeClient(applicationContext)
+    }
     private val settingsStore by lazy { VoiceActivationSettingsStore(applicationContext) }
     private var serviceJob: Job? = null
     private var speaker: TextToSpeech? = null
@@ -506,9 +504,6 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
         startForeground(NOTIFICATION_ID, buildNotification("Offas is starting"))
         serviceJob?.cancel()
         serviceJob = scope.launch {
-            withContext(Dispatchers.IO) {
-                RuntimeBootstrapper.installProductionRuntime(applicationContext)
-            }
             val modelStatus = VoiceModelCatalog.status(applicationContext)
             if (!modelStatus.ready) {
                 settingsStore.updateServiceState(
@@ -521,7 +516,6 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
             engine = engine ?: SherpaOnnxOffasVoiceEngine(applicationContext)
             OffasRuntime.scheduleRestartAlarm(applicationContext)
             settingsStore.updateServiceState(VoiceServiceState.STARTING)
-            val preloadJob = async(Dispatchers.IO) { }
             val transcript = engine?.awaitWakeAndCommand(
                 wakePhrase = settingsStore.state().wakePhrase,
                 silenceTimeoutSeconds = settingsStore.state().silenceTimeoutSeconds,
@@ -531,7 +525,7 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
                     settingsStore.updateServiceState(VoiceServiceState.CAPTURING)
                     scope.launch(Dispatchers.IO) {
                         runCatching {
-                            val lastUsed = DefaultProvisioningGateway(applicationContext).loadLastUsedModel()
+                            val lastUsed = offscreenRuntimeClient.warmLastUsedModel()
                             if (!lastUsed.success) {
                                 Unit
                             }
@@ -550,7 +544,6 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
                     }
                 },
             )
-            preloadJob.await()
             if (transcript.isNullOrBlank()) {
                 settingsStore.updateServiceState(if (settingsStore.state().enabled) VoiceServiceState.LISTENING else VoiceServiceState.DISABLED)
                 updateNotification("Offas is listening")
@@ -570,33 +563,13 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
         settingsStore.updateServiceState(VoiceServiceState.PROCESSING)
         updateNotification("Processing: $transcript")
         val outcome = withContext(Dispatchers.IO) {
-            val container = AndroidMvpContainer(appContext = applicationContext)
-            val sessionId = container.createSession()
-            val deviceState = AndroidTelemetryDeviceStateProvider(applicationContext).current()
-            val systemPrompt = buildVoiceSystemPrompt()
-            val assistantResponse = container.sendUserMessage(
-                sessionId = sessionId,
-                userText = transcript,
-                taskType = "short_text",
-                deviceState = deviceState,
-                maxTokens = 160,
-                keepModelLoaded = true,
-                requestId = "voice-${System.currentTimeMillis()}",
-                samplingOverrides = SamplingOverrides(
-                    systemPrompt = systemPrompt,
-                    temperature = 0.2f,
-                    topP = 0.9f,
-                    topK = 30,
-                    maxTokens = 160,
-                ),
-                onToken = {},
+            val turnResult = offscreenRuntimeClient.runVoiceTurn(
+                transcript = transcript,
+                systemPrompt = buildVoiceSystemPrompt(),
             )
-            val toolOutputs = assistantResponse.toolCalls.map { toolCall ->
-                container.runTool(toolCall.name, toolCall.argumentsJson)
-            }
             resolveOffasTranscriptOutcome(
-                toolOutputs = toolOutputs,
-                assistantText = assistantResponse.text,
+                toolOutputs = turnResult.toolOutputs,
+                assistantText = turnResult.assistantText,
                 voiceActivationEnabled = settingsStore.state().enabled,
             )
         }

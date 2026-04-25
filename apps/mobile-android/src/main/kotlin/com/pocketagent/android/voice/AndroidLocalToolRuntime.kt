@@ -9,12 +9,13 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.Build
-import android.os.Bundle
 import com.pocketagent.tools.SafeLocalToolRuntime
 import com.pocketagent.tools.ToolCall
+import com.pocketagent.tools.ToolCallRequest
+import com.pocketagent.tools.ToolCallRequestParseResult
 import com.pocketagent.tools.ToolModule
 import com.pocketagent.tools.ToolResult
-import java.time.Instant
+import com.pocketagent.tools.toPrimitiveStringMapOrNull
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
@@ -37,9 +38,19 @@ class AndroidLocalToolRuntime(
     }
 
     override fun validateToolCall(call: ToolCall): Boolean {
-        return when (call.name) {
-            in customTools -> parseToolStringArguments(call.jsonArgs) != null
-            else -> base.validateToolCall(call)
+        if (call.name !in customTools) {
+            return base.validateToolCall(call)
+        }
+        return when (val request = ToolCallRequest.fromLegacy(call)) {
+            is ToolCallRequestParseResult.Success -> validateToolRequest(request.request)
+            is ToolCallRequestParseResult.InvalidJson -> false
+        }
+    }
+
+    override fun validateToolRequest(request: ToolCallRequest): Boolean {
+        return when (request.name) {
+            in customTools -> request.arguments.toPrimitiveStringMapOrNull() != null
+            else -> base.validateToolRequest(request)
         }
     }
 
@@ -47,8 +58,19 @@ class AndroidLocalToolRuntime(
         if (call.name !in customTools) {
             return base.executeToolCall(call)
         }
-        val args = parseToolStringArguments(call.jsonArgs) ?: return ToolResult(false, "Invalid tool JSON.")
-        return when (call.name) {
+        return when (val request = ToolCallRequest.fromLegacy(call)) {
+            is ToolCallRequestParseResult.Success -> executeToolRequest(request.request)
+            is ToolCallRequestParseResult.InvalidJson -> ToolResult(false, "Invalid tool JSON.")
+        }
+    }
+
+    override fun executeToolRequest(request: ToolCallRequest): ToolResult {
+        if (request.name !in customTools) {
+            return base.executeToolRequest(request)
+        }
+        val args = request.arguments.toPrimitiveStringMapOrNull()
+            ?: return ToolResult(false, "Invalid tool JSON.")
+        return when (request.name) {
             TOOL_ALARM_SET -> setAlarm(
                 title = args["title"].orEmpty().ifBlank { "Offas alarm" },
                 timeIso = args["time_iso"].orEmpty(),

@@ -4,26 +4,32 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.pocketagent.android.ui.resolveDefaultGetReadyVersion
 import com.pocketagent.android.runtime.DefaultModelCatalogEligibilityEvaluator
 import com.pocketagent.android.runtime.ModelCatalogEligibilityEvaluator
 import com.pocketagent.android.runtime.ModelCatalogEligibilitySnapshot
 import com.pocketagent.android.runtime.ModelEligibilitySignalsProvider
+import com.pocketagent.android.runtime.ProvisioningAggregateState
 import com.pocketagent.android.runtime.ProvisioningGateway
+import com.pocketagent.android.runtime.ProvisioningMutationResult
 import com.pocketagent.android.runtime.RuntimeDomainException
 import com.pocketagent.android.runtime.RuntimeModelImportResult
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
+import com.pocketagent.android.runtime.errorCodeName
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
+import com.pocketagent.android.ui.state.ModelLoadingState
+import com.pocketagent.android.ui.state.toModelLoadingState
+import com.pocketagent.runtime.ModelLifecycleErrorCode
+import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -63,6 +69,12 @@ data class RuntimeModelUiState(
     val statusMessage: String?,
 )
 
+private data class ModelProvisioningLocalUiState(
+    val isImporting: Boolean = false,
+    val statusMessage: String? = null,
+    val enqueuingModelIds: Set<String> = emptySet(),
+)
+
 internal fun ModelProvisioningUiState.toModelLibraryUiState(defaultGetReadyModelId: String?): ModelLibraryUiState? {
     val currentSnapshot = snapshot ?: return null
     return ModelLibraryUiState(
@@ -92,91 +104,57 @@ internal fun ModelProvisioningUiState.toRuntimeModelUiState(): RuntimeModelUiSta
     )
 }
 
-class ModelProvisioningViewModel(
+class ModelProvisioningViewModel internal constructor(
     private val gateway: ProvisioningGateway,
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : ViewModel() {
-    private val _uiState = MutableStateFlow(
-        ModelProvisioningUiState(),
-    )
+) : ViewModel(), ModelOperationHandler {
+    private val aggregateState = MutableStateFlow(gateway.observeProvisioningAggregateState().value)
+    private val localUiState = MutableStateFlow(ModelProvisioningLocalUiState())
+    private val _modelLoadingState = MutableStateFlow(aggregateState.value.lifecycle.toModelLoadingState())
+    private val _uiState = MutableStateFlow(buildUiState())
     val uiState = _uiState.asStateFlow()
-    private var snapshotRefreshJob: Job? = null
+    val modelLoadingState = _modelLoadingState.asStateFlow()
+    private val modelOperationStateLock = Any()
+
     @Volatile
-    private var snapshotRefreshQueued: Boolean = false
+    private var lastModelOperationToken: Long = 0L
+
+    @Volatile
+    private var lastModelOperationAtMs: Long = 0L
+
+    @Volatile
+    private var lastModelOperationKey: String? = null
 
     init {
-        refreshSnapshot()
-        refreshLifecycle()
+        viewModelScope.launch {
+            gateway.observeProvisioningAggregateState().collect { aggregate ->
+                setAggregateState(aggregate)
+            }
+        }
         viewModelScope.launch { refreshManifest() }
-        viewModelScope.launch {
-            gateway.observeDownloads().collect { downloads ->
-                _uiState.update { state -> state.copy(downloads = downloads) }
-                refreshSnapshot()
-            }
-        }
-        viewModelScope.launch {
-            gateway.observeDownloadPreferences().collect { preferences ->
-                _uiState.update { state -> state.copy(downloadPreferences = preferences) }
-            }
-        }
-        viewModelScope.launch {
-            gateway.observeModelLifecycle().collect { lifecycle ->
-                _uiState.update { state -> state.copy(lifecycle = lifecycle) }
-            }
-        }
     }
 
     fun refreshSnapshot() {
-        if (snapshotRefreshJob?.isActive == true) {
-            snapshotRefreshQueued = true
-            return
+        viewModelScope.launch(ioDispatcher) {
+            setAggregateState(gateway.observeProvisioningAggregateState().value)
         }
-        snapshotRefreshJob = viewModelScope.launch(ioDispatcher) {
-            do {
-                snapshotRefreshQueued = false
-                val snapshot = gateway.currentSnapshot()
-                val lifecycle = gateway.currentModelLifecycle()
-                _uiState.update { state ->
-                    val updated = state.copy(snapshot = snapshot, lifecycle = lifecycle)
-                    updated.withEligibility(
-                        evaluator = eligibilityEvaluator,
-                        signalsProvider = eligibilitySignalsProvider,
-                    )
-                }
-            } while (snapshotRefreshQueued && isActive)
-        }.also { job ->
-            job.invokeOnCompletion {
-                snapshotRefreshJob = null
-            }
-        }
-    }
-
-    fun refreshLifecycle() {
-        val lifecycle = gateway.currentModelLifecycle()
-        _uiState.update { state -> state.copy(lifecycle = lifecycle) }
     }
 
     suspend fun refreshManifest() {
-        val manifest = withContext(ioDispatcher) {
-            gateway.loadModelDistributionManifest()
+        val seeded = withContext(ioDispatcher) {
+            gateway.seedProvisioningAggregateState()
         }
-        _uiState.update { state ->
-            val updated = state.copy(manifest = manifest, manifestLoaded = true)
-            updated.withEligibility(
-                evaluator = eligibilityEvaluator,
-                signalsProvider = eligibilitySignalsProvider,
-            )
-        }
+        setAggregateState(seeded)
     }
 
     fun setStatusMessage(message: String?) {
-        _uiState.update { state -> state.copy(statusMessage = message) }
+        updateLocalUiState { state -> state.copy(statusMessage = message) }
     }
 
     suspend fun importModelFromUri(modelId: String, sourceUri: Uri): Result<RuntimeModelImportResult> {
-        _uiState.update { state -> state.copy(isImporting = true) }
+        updateLocalUiState { state -> state.copy(isImporting = true) }
         val result = runCatching {
             withContext(ioDispatcher) {
                 gateway.importModelFromUri(modelId = modelId, sourceUri = sourceUri)
@@ -188,8 +166,7 @@ class ModelProvisioningViewModel(
                 cause = error,
             )
         }
-        refreshSnapshot()
-        _uiState.update { state -> state.copy(isImporting = false) }
+        updateLocalUiState { state -> state.copy(isImporting = false) }
         return result
     }
 
@@ -203,88 +180,126 @@ class ModelProvisioningViewModel(
         }
     }
 
-    fun setActiveVersion(modelId: String, version: String): Boolean {
-        val changed = gateway.setActiveVersion(modelId = modelId, version = version)
-        if (changed) {
-            refreshSnapshot()
-        }
-        refreshLifecycle()
-        return changed
+    fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return gateway.setActiveVersion(modelId = modelId, version = version)
     }
 
-    suspend fun setActiveVersionAsync(modelId: String, version: String): Boolean {
-        val changed = withContext(ioDispatcher) {
+    suspend fun setActiveVersionAsync(modelId: String, version: String): ProvisioningMutationResult {
+        return withContext(ioDispatcher) {
             gateway.setActiveVersion(modelId = modelId, version = version)
         }
-        if (changed) {
-            refreshSnapshot()
-        }
-        refreshLifecycle()
-        return changed
     }
 
-    fun clearActiveVersion(modelId: String): Boolean {
-        val changed = gateway.clearActiveVersion(modelId = modelId)
-        if (changed) {
-            refreshSnapshot()
-        }
-        refreshLifecycle()
-        return changed
+    fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
+        return gateway.clearActiveVersion(modelId = modelId)
     }
 
-    suspend fun clearActiveVersionAsync(modelId: String): Boolean {
-        val changed = withContext(ioDispatcher) {
+    suspend fun clearActiveVersionAsync(modelId: String): ProvisioningMutationResult {
+        return withContext(ioDispatcher) {
             gateway.clearActiveVersion(modelId = modelId)
         }
-        if (changed) {
-            refreshSnapshot()
-        }
-        refreshLifecycle()
-        return changed
     }
 
-    fun removeVersion(modelId: String, version: String): Boolean {
-        val removed = gateway.removeVersion(modelId = modelId, version = version)
-        if (removed) {
-            refreshSnapshot()
-        }
-        refreshLifecycle()
-        return removed
+    fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return gateway.removeVersion(modelId = modelId, version = version)
     }
 
-    suspend fun removeVersionAsync(modelId: String, version: String): Boolean {
-        val removed = withContext(ioDispatcher) {
+    suspend fun removeVersionAsync(modelId: String, version: String): ProvisioningMutationResult {
+        return withContext(ioDispatcher) {
             gateway.removeVersion(modelId = modelId, version = version)
         }
-        if (removed) {
-            refreshSnapshot()
-        }
-        refreshLifecycle()
-        return removed
     }
 
     suspend fun loadInstalledModel(modelId: String, version: String): RuntimeModelLifecycleCommandResult {
-        val result = withContext(ioDispatcher) {
-            gateway.loadInstalledModel(modelId = modelId, version = version)
-        }
-        refreshLifecycle()
-        return result
+        return loadModel(modelId, version)
+            ?: RuntimeModelLifecycleCommandResult.rejected(
+                code = ModelLifecycleErrorCode.CANCELLED_BY_NEWER_REQUEST,
+                detail = "load:$modelId@$version",
+            )
     }
 
-    suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult {
-        val result = withContext(ioDispatcher) {
-            gateway.loadLastUsedModel()
+    override suspend fun loadModel(
+        modelId: String,
+        version: String,
+    ): RuntimeModelLifecycleCommandResult? {
+        val requestKey = "load:$modelId@$version"
+        if (shouldDebounceModelOperation(requestKey)) {
+            return null
         }
-        refreshLifecycle()
-        return result
+        val current = _modelLoadingState.value
+        val requestedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version)
+        val token = nextModelOperationToken()
+        applyImmediateModelLoadingState(
+            ModelLoadingState.Loading(
+                requestedModel = requestedModel,
+                loadedModel = current.loadedModel,
+                lastUsedModel = current.lastUsedModel,
+                progress = 0f,
+                stage = "Starting model load...",
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+        return withContext(ioDispatcher) {
+            finalizeModelOperation(
+                token = token,
+                result = gateway.loadInstalledModel(modelId = modelId, version = version),
+                fallbackModelId = modelId,
+                fallbackVersion = version,
+            )
+        }
     }
 
-    suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult {
-        val result = withContext(ioDispatcher) {
-            gateway.offloadModel(reason = reason)
+    override suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult? {
+        val lastUsed = _modelLoadingState.value.lastUsedModel
+        val requestKey = "load-last-used:${lastUsed?.modelId.orEmpty()}@${lastUsed?.modelVersion.orEmpty()}"
+        if (shouldDebounceModelOperation(requestKey)) {
+            return null
         }
-        refreshLifecycle()
-        return result
+        val token = nextModelOperationToken()
+        applyImmediateModelLoadingState(
+            ModelLoadingState.Loading(
+                requestedModel = lastUsed,
+                loadedModel = _modelLoadingState.value.loadedModel,
+                lastUsedModel = lastUsed,
+                progress = 0f,
+                stage = "Starting model load...",
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+        return withContext(ioDispatcher) {
+            finalizeModelOperation(
+                token = token,
+                result = gateway.loadLastUsedModel(),
+                fallbackModelId = lastUsed?.modelId,
+                fallbackVersion = lastUsed?.modelVersion,
+            )
+        }
+    }
+
+    override suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult? {
+        val currentModel = _modelLoadingState.value.loadedModel ?: _modelLoadingState.value.lastUsedModel
+        val requestKey = "offload:${currentModel?.modelId.orEmpty()}@${currentModel?.modelVersion.orEmpty()}:$reason"
+        if (shouldDebounceModelOperation(requestKey)) {
+            return null
+        }
+        val token = nextModelOperationToken()
+        applyImmediateModelLoadingState(
+            ModelLoadingState.Offloading(
+                loadedModel = _modelLoadingState.value.loadedModel,
+                lastUsedModel = _modelLoadingState.value.lastUsedModel,
+                reason = reason,
+                queued = false,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+        return withContext(ioDispatcher) {
+            finalizeModelOperation(
+                token = token,
+                result = gateway.offloadModel(reason = reason),
+                fallbackModelId = currentModel?.modelId,
+                fallbackVersion = currentModel?.modelVersion,
+            )
+        }
     }
 
     suspend fun enqueueDownload(
@@ -292,13 +307,13 @@ class ModelProvisioningViewModel(
         options: DownloadRequestOptions = DownloadRequestOptions(),
     ): String {
         val key = "${version.modelId}::${version.version}"
-        _uiState.update { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds + key) }
+        updateLocalUiState { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds + key) }
         return try {
             withContext(ioDispatcher) {
                 gateway.enqueueDownload(version = version, options = options)
             }
         } finally {
-            _uiState.update { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds - key) }
+            updateLocalUiState { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds - key) }
         }
     }
 
@@ -338,6 +353,87 @@ class ModelProvisioningViewModel(
         return (error as? RuntimeDomainException)?.domainError?.userMessage
             ?: "Model import failed. Please try again."
     }
+
+    private fun setAggregateState(state: ProvisioningAggregateState) {
+        aggregateState.value = state
+        _modelLoadingState.value = state.lifecycle.toModelLoadingState()
+        _uiState.value = buildUiState()
+    }
+
+    private inline fun updateAggregateState(
+        transform: (ProvisioningAggregateState) -> ProvisioningAggregateState,
+    ) {
+        aggregateState.update(transform)
+        _uiState.value = buildUiState()
+    }
+
+    private inline fun updateLocalUiState(
+        transform: (ModelProvisioningLocalUiState) -> ModelProvisioningLocalUiState,
+    ) {
+        localUiState.update(transform)
+        _uiState.value = buildUiState()
+    }
+
+    private fun buildUiState(): ModelProvisioningUiState {
+        return aggregateState.value.toModelProvisioningUiState(localUiState.value).withEligibility(
+            evaluator = eligibilityEvaluator,
+            signalsProvider = eligibilitySignalsProvider,
+        )
+    }
+
+    private fun applyImmediateModelLoadingState(nextState: ModelLoadingState) {
+        _modelLoadingState.value = nextState
+    }
+
+    private suspend fun finalizeModelOperation(
+        token: Long,
+        result: RuntimeModelLifecycleCommandResult,
+        fallbackModelId: String?,
+        fallbackVersion: String?,
+    ): RuntimeModelLifecycleCommandResult? {
+        val latestToken = synchronized(modelOperationStateLock) { lastModelOperationToken }
+        if (token != latestToken) {
+            return null
+        }
+        if (!result.success) {
+            applyImmediateModelLoadingState(
+                ModelLoadingState.Error(
+                    requestedModel = fallbackModelId?.let { RuntimeLoadedModel(it, fallbackVersion) },
+                    loadedModel = _modelLoadingState.value.loadedModel,
+                    lastUsedModel = _modelLoadingState.value.lastUsedModel,
+                    message = lifecycleErrorMessage(
+                        result = result,
+                        fallbackModelId = fallbackModelId,
+                        fallbackVersion = fallbackVersion,
+                    ),
+                    code = result.errorCodeName(),
+                    detail = result.detail,
+                    timestampMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+        return result
+    }
+
+    private fun shouldDebounceModelOperation(requestKey: String): Boolean {
+        synchronized(modelOperationStateLock) {
+            val now = System.currentTimeMillis()
+            val shouldDebounce = lastModelOperationKey == requestKey &&
+                now - lastModelOperationAtMs < MODEL_OPERATION_DEBOUNCE_MS
+            if (!shouldDebounce) {
+                lastModelOperationKey = requestKey
+                lastModelOperationAtMs = now
+            }
+            return shouldDebounce
+        }
+    }
+
+    private fun nextModelOperationToken(): Long {
+        synchronized(modelOperationStateLock) {
+            lastModelOperationToken += 1L
+            return lastModelOperationToken
+        }
+    }
 }
 
 class ProvisioningUserFacingException(
@@ -346,7 +442,7 @@ class ProvisioningUserFacingException(
     cause: Throwable? = null,
 ) : IllegalStateException(message, cause)
 
-class ModelProvisioningViewModelFactory(
+class ModelProvisioningViewModelFactory internal constructor(
     private val gateway: ProvisioningGateway,
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
@@ -375,4 +471,32 @@ private fun ModelProvisioningUiState.withEligibility(
             signals = signalsProvider.currentSignals(),
         ),
     )
+}
+
+private fun ProvisioningAggregateState.toModelProvisioningUiState(
+    local: ModelProvisioningLocalUiState,
+): ModelProvisioningUiState {
+    return ModelProvisioningUiState(
+        snapshot = snapshot,
+        lifecycle = lifecycle,
+        downloads = downloads,
+        downloadPreferences = downloadPreferences,
+        manifest = manifest,
+        manifestLoaded = manifestLoaded,
+        isImporting = local.isImporting,
+        statusMessage = local.statusMessage,
+        enqueuingModelIds = local.enqueuingModelIds,
+    )
+}
+
+internal fun provisioningMutationFailureMessage(
+    result: ProvisioningMutationResult,
+    fallbackMessage: String,
+): String {
+    return when (result) {
+        ProvisioningMutationResult.Applied -> fallbackMessage
+        is ProvisioningMutationResult.Blocked -> result.error.userMessage
+        is ProvisioningMutationResult.NoChange -> fallbackMessage
+        is ProvisioningMutationResult.NotFound -> fallbackMessage
+    }
 }

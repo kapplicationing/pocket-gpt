@@ -11,11 +11,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.PresetBackingStore
-import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.ui.components.AppBottomSheet
 import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.ui.state.ModelLoadingState
@@ -32,20 +30,12 @@ internal fun ModelLibrarySheetHost(
     routingMode: RoutingMode,
     presetBackingStore: PresetBackingStore,
     modelRemoveUndoState: ModelRemoveUndoState,
-    viewModel: ChatViewModel,
-    provisioningViewModel: ModelProvisioningViewModel,
-    appViewModel: ChatAppViewModel,
-    onLaunchImportPicker: (String) -> Unit,
-    onLaunchDownloadFlow: (ModelDistributionVersion) -> Unit,
-    onLoadModelVersion: (String, String, Boolean) -> Unit,
-    onLoadLastUsedModel: (Boolean) -> Unit,
-    onOffloadModel: (Boolean) -> Unit,
+    actions: ModelLibraryActions,
 ) {
     if (activeSurface !is ModalSurface.ModelLibrary) {
         return
     }
 
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val runtimeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pendingRemoveVersion by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -53,7 +43,7 @@ internal fun ModelLibrarySheetHost(
     AppBottomSheet(
         title = stringResource(id = R.string.ui_model_library_title),
         sheetState = runtimeSheetState,
-        onDismiss = viewModel::dismissSurface,
+        onDismiss = actions::dismissSheet,
     ) {
         ModelSheet(
             libraryState = modelLibraryState,
@@ -65,75 +55,57 @@ internal fun ModelLibrarySheetHost(
             onEvent = { event ->
                 when (event) {
                     is ModelSheetEvent.ImportModel -> {
-                        appViewModel.setSelectedModelIdForImport(event.modelId)
-                        onLaunchImportPicker(event.modelId)
+                        actions.importModel(event.modelId)
                     }
-                    is ModelSheetEvent.DownloadVersion -> onLaunchDownloadFlow(event.version)
+                    is ModelSheetEvent.DownloadVersion -> actions.downloadVersion(event.version)
                     is ModelSheetEvent.PauseDownload -> {
-                        provisioningViewModel.pauseDownload(event.taskId)
-                        provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_paused))
+                        actions.pauseDownload(event.taskId)
                     }
                     is ModelSheetEvent.ResumeDownload -> {
-                        provisioningViewModel.resumeDownload(event.taskId)
-                        provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_resumed))
+                        actions.resumeDownload(event.taskId)
                     }
                     is ModelSheetEvent.RetryDownload -> {
-                        provisioningViewModel.retryDownload(event.taskId)
-                        provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_retried))
+                        actions.retryDownload(event.taskId)
                     }
                     is ModelSheetEvent.CancelDownload -> {
-                        provisioningViewModel.cancelDownload(event.taskId)
-                        provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_cancelled))
+                        actions.cancelDownload(event.taskId)
                     }
                     is ModelSheetEvent.SetDefaultVersion -> {
                         scope.launch {
-                            val activated = provisioningViewModel.setActiveVersionAsync(event.modelId, event.version)
-                            if (activated) {
-                                val nextSequence = appViewModel.incrementReadinessRefreshSequence()
-                                logProvisioningTransition(
-                                    phase = "manual_activation",
-                                    eventId = "refresh-$nextSequence",
-                                    detail = "${event.modelId}@${event.version}",
-                                )
-                                val statusMessage = context.getString(
-                                    R.string.ui_model_version_activated,
-                                    event.modelId,
-                                    event.version,
-                                )
-                                viewModel.refreshRuntimeReadiness(statusDetailOverride = statusMessage)
-                                provisioningViewModel.setStatusMessage(statusMessage)
-                            } else {
-                                provisioningViewModel.setStatusMessage(
-                                    context.getString(R.string.ui_model_version_activation_failed),
-                                )
+                            val changed = actions.activateVersion(
+                                event.modelId,
+                                event.version,
+                            )
+                            if (!changed) return@launch
+                        }
+                    }
+                    is ModelSheetEvent.LoadVersion -> scope.launch {
+                        actions.loadModelVersion(event.modelId, event.version, closeOnSuccess = true)
+                    }
+                    is ModelSheetEvent.RetryLoad -> {
+                        if (event.version.isNullOrBlank()) {
+                            scope.launch { actions.loadLastUsedModel(closeOnSuccess = true) }
+                        } else {
+                            scope.launch {
+                                actions.loadModelVersion(event.modelId, event.version, closeOnSuccess = true)
                             }
                         }
                     }
-                    is ModelSheetEvent.LoadVersion -> onLoadModelVersion(event.modelId, event.version, true)
-                    is ModelSheetEvent.RetryLoad -> {
-                        if (event.version.isNullOrBlank()) {
-                            onLoadLastUsedModel(true)
-                        } else {
-                            onLoadModelVersion(event.modelId, event.version, true)
-                        }
+                    ModelSheetEvent.LoadLastUsedModel -> scope.launch {
+                        actions.loadLastUsedModel(closeOnSuccess = true)
                     }
-                    ModelSheetEvent.LoadLastUsedModel -> onLoadLastUsedModel(true)
-                    ModelSheetEvent.OffloadModel -> onOffloadModel(false)
+                    ModelSheetEvent.OffloadModel -> scope.launch {
+                        actions.offloadModel(closeOnSuccess = false)
+                    }
                     is ModelSheetEvent.RequestRemove -> {
                         pendingRemoveVersion = event.modelId to event.version
                     }
                     ModelSheetEvent.RefreshAll -> {
                         scope.launch {
-                            provisioningViewModel.refreshManifest()
-                            provisioningViewModel.refreshDownloads()
-                            provisioningViewModel.refreshSnapshot()
-                            viewModel.refreshRuntimeReadiness()
-                            provisioningViewModel.setStatusMessage(
-                                context.getString(R.string.ui_model_refresh_runtime_feedback),
-                            )
+                            actions.refreshAll()
                         }
                     }
-                    ModelSheetEvent.Close -> viewModel.dismissSurface()
+                    ModelSheetEvent.Close -> actions.dismissSheet()
                 }
             },
         )

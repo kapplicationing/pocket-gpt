@@ -29,8 +29,7 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pocketagent.android.BuildConfig
 import com.pocketagent.android.R
-import com.pocketagent.android.runtime.MODEL_OFFLOAD_REASON_MANUAL
-import com.pocketagent.android.runtime.modelSpecProviderForContext
+import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
@@ -38,7 +37,6 @@ import com.pocketagent.android.ui.state.ChatGateStatus
 import com.pocketagent.android.ui.state.ComposerUiState
 import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.ui.state.ModelLoadingState
-import com.pocketagent.android.ui.state.activeOrRequestedModel
 import com.pocketagent.android.ui.state.resolveChatGateState
 import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
@@ -59,7 +57,7 @@ fun PocketAgentApp(
     provisioningViewModel: ModelProvisioningViewModel,
 ) {
     val state by viewModel.uiState.collectAsState()
-    val modelLoadingState by viewModel.modelLoadingState.collectAsState()
+    val modelLoadingState by provisioningViewModel.modelLoadingState.collectAsState()
     val provisioningState by provisioningViewModel.uiState.collectAsState()
     val context = LocalContext.current
     val downloads = provisioningState.downloads
@@ -93,9 +91,12 @@ fun PocketAgentApp(
     val canAttachImages = canAttachImagesForModel(activeModelId)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val currentActiveSurface by rememberUpdatedState(state.activeSurface)
+    val foregroundRuntimeServices = remember(context) {
+        resolveAppForegroundRuntimeServices(context)
+    }
     val interactionRegistry = remember(context) {
         ModelInteractionRegistry(
-            specProvider = modelSpecProviderForContext(context),
+            specProvider = foregroundRuntimeServices.modelSpecProvider,
         )
     }
     val thinkingToggleModelId by derivedStateOf {
@@ -132,48 +133,9 @@ fun PocketAgentApp(
     val runtimeModelState = remember(provisioningState) {
         provisioningState.toRuntimeModelUiState()
     } ?: return
-    val modelRemoveUndoState = rememberModelRemoveUndoState(
-        snackbarHostState = snackbarHostState,
-        onCommitRemove = { modelId, version ->
-            scope.launch {
-                val model = modelLibraryState.snapshot.models
-                    .firstOrNull { it.modelId == modelId }
-                val targetVersion = model?.installedVersions
-                    ?.firstOrNull { it.version == version }
-                val removePlan = if (model != null && targetVersion != null) {
-                    resolveRemoveVersionPlan(
-                        model = model,
-                        version = targetVersion,
-                        loadedModel = modelLoadingState.loadedModel,
-                    )
-                } else {
-                    null
-                }
-                if (removePlan?.isBlockedByActiveSelection == true) {
-                    provisioningViewModel.setStatusMessage(
-                        context.getString(R.string.ui_model_version_remove_failed),
-                    )
-                    return@launch
-                }
-                if (removePlan?.requiresOffload == true) {
-                    provisioningViewModel.offloadModel(reason = MODEL_OFFLOAD_REASON_MANUAL)
-                }
-                if (removePlan?.requiresClearingActiveSelection == true) {
-                    provisioningViewModel.clearActiveVersionAsync(modelId)
-                }
-                val removed = provisioningViewModel.removeVersionAsync(modelId, version)
-                val statusMessage = if (removed) {
-                    context.getString(R.string.ui_model_version_removed, modelId, version)
-                } else {
-                    context.getString(R.string.ui_model_version_remove_failed)
-                }
-                if (removed) {
-                    viewModel.refreshRuntimeReadiness(statusDetailOverride = statusMessage)
-                }
-                provisioningViewModel.setStatusMessage(statusMessage)
-            }
-        },
-    )
+    LaunchedEffect(modelLoadingState) {
+        viewModel.syncRuntimeModelLoadingState(modelLoadingState)
+    }
     val chatAppLaunchers = rememberChatAppLaunchers(
         context = context,
         scope = scope,
@@ -187,126 +149,62 @@ fun PocketAgentApp(
     val openModelSheet: () -> Unit = {
         viewModel.showSurface(ModalSurface.ModelLibrary)
     }
-    val showBusyModelOperationFeedback: () -> Unit = {
-        scope.launch {
-            snackbarHostState.showSnackbar(context.getString(R.string.ui_model_operation_already_in_progress))
-        }
+    val currentModelLoadingState = rememberUpdatedState(modelLoadingState)
+    val currentModelLibraryState = rememberUpdatedState(modelLibraryState)
+    val modelLibraryActions = remember(
+        context,
+        viewModel,
+        provisioningViewModel,
+        appViewModel,
+        chatAppLaunchers,
+        defaultGetReadyModelId,
+        snackbarHostState,
+    ) {
+        ModelLibraryActions(
+            context = context,
+            viewModel = viewModel,
+            provisioningViewModel = provisioningViewModel,
+            appViewModel = appViewModel,
+            chatAppLaunchers = chatAppLaunchers,
+            defaultGetReadyModelId = defaultGetReadyModelId,
+            modelLoadingStateProvider = { currentModelLoadingState.value },
+            modelLibraryStateProvider = { currentModelLibraryState.value },
+            showBusyModelOperationFeedback = {
+                snackbarHostState.showSnackbar(context.getString(R.string.ui_model_operation_already_in_progress))
+            },
+        )
     }
+    val modelRemoveUndoState = rememberModelRemoveUndoState(
+        snackbarHostState = snackbarHostState,
+        onCommitRemove = { modelId, version ->
+            scope.launch {
+                modelLibraryActions.removeVersion(modelId, version)
+            }
+        },
+    )
     val loadModelVersionAction: (String, String, Boolean) -> Unit = { modelId, version, closeOnSuccess ->
         scope.launch {
-            val result = viewModel.loadModel(modelId = modelId, version = version)
-            if (result == null) {
-                showBusyModelOperationFeedback()
-                return@launch
-            }
-            provisioningViewModel.setStatusMessage(
-                lifecycleStatusMessage(
-                    context = context,
-                    result = result,
-                    fallbackModelId = modelId,
-                    fallbackVersion = version,
-                ),
-            )
-            if (result.success && closeOnSuccess) {
-                viewModel.dismissSurface()
-            }
+            modelLibraryActions.loadModelVersion(modelId, version, closeOnSuccess)
         }
     }
     val loadLastUsedModelAction: (Boolean) -> Unit = { closeOnSuccess ->
         scope.launch {
-            val result = viewModel.loadLastUsedModel()
-            if (result == null) {
-                showBusyModelOperationFeedback()
-                return@launch
-            }
-            provisioningViewModel.setStatusMessage(
-                lifecycleStatusMessage(
-                    context = context,
-                    result = result,
-                    fallbackModelId = modelLoadingState.lastUsedModel?.modelId,
-                    fallbackVersion = modelLoadingState.lastUsedModel?.modelVersion,
-                ),
-            )
-            if (result.success && closeOnSuccess) {
-                viewModel.dismissSurface()
-            }
+            modelLibraryActions.loadLastUsedModel(closeOnSuccess)
         }
     }
     val offloadModelAction: (Boolean) -> Unit = { closeOnSuccess ->
         scope.launch {
-            val result = viewModel.offloadModel(reason = MODEL_OFFLOAD_REASON_MANUAL)
-            if (result == null) {
-                showBusyModelOperationFeedback()
-                return@launch
-            }
-            provisioningViewModel.setStatusMessage(
-                lifecycleStatusMessage(
-                    context = context,
-                    result = result,
-                    fallbackModelId = modelLoadingState.activeOrRequestedModel()?.modelId,
-                    fallbackVersion = modelLoadingState.activeOrRequestedModel()?.modelVersion,
-                ),
-            )
-            if (result.success && closeOnSuccess) {
-                viewModel.dismissSurface()
-            }
+            modelLibraryActions.offloadModel(closeOnSuccess)
         }
     }
     val refreshAction: () -> Unit = {
-        viewModel.refreshRuntimeReadiness()
-        provisioningViewModel.refreshSnapshot()
-        scope.launch { provisioningViewModel.refreshManifest() }
-        provisioningViewModel.setStatusMessage(
-            context.getString(R.string.ui_model_refresh_runtime_feedback),
-        )
+        scope.launch {
+            modelLibraryActions.refreshAll()
+        }
     }
     val runGetReadyFlow: () -> Unit = {
         scope.launch {
-            viewModel.onGetReadyTapped()
-            provisioningViewModel.setStatusMessage(context.getString(R.string.ui_get_ready_started_status))
-            provisioningViewModel.refreshManifest()
-            val manifest = provisioningViewModel.uiState.value.manifest
-            val defaultVersion = resolveDefaultGetReadyVersion(
-                manifest = manifest,
-                defaultModelId = defaultGetReadyModelId,
-            )
-            if (defaultVersion == null) {
-                provisioningViewModel.setStatusMessage(
-                    context.getString(R.string.ui_model_downloads_manifest_empty),
-                )
-                openModelSheet()
-                return@launch
-            }
-
-            val existingVersion = provisioningViewModel.listInstalledVersionsAsync(
-                modelId = defaultVersion.modelId,
-            ).firstOrNull { it.version == defaultVersion.version }
-
-            if (existingVersion != null) {
-                provisioningViewModel.setActiveVersionAsync(
-                    modelId = defaultVersion.modelId,
-                    version = defaultVersion.version,
-                )
-                val loadResult = viewModel.loadModel(
-                    modelId = defaultVersion.modelId,
-                    version = defaultVersion.version,
-                )
-                loadResult?.let { result ->
-                    provisioningViewModel.setStatusMessage(
-                        lifecycleStatusMessage(
-                            context = context,
-                            result = result,
-                            fallbackModelId = defaultVersion.modelId,
-                            fallbackVersion = defaultVersion.version,
-                        ),
-                    )
-                } ?: showBusyModelOperationFeedback()
-                return@launch
-            }
-
-            appViewModel.setPendingGetReadyActivation(defaultVersion.modelId to defaultVersion.version)
-            chatAppLaunchers.launchDownloadFlow(defaultVersion)
-            openModelSheet()
+            modelLibraryActions.runGetReadyFlow()
         }
     }
     val onBlockedAction: (ChatGatePrimaryAction) -> Unit = { action ->
@@ -383,20 +281,19 @@ fun PocketAgentApp(
         readinessRefreshSequence = readinessRefreshSequence,
         onRefreshSnapshot = provisioningViewModel::refreshSnapshot,
         onSetStatusMessage = provisioningViewModel::setStatusMessage,
-        onActivateVersion = provisioningViewModel::setActiveVersionAsync,
-        onLoadModel = viewModel::loadModel,
-        onShowBusyModelOperationFeedback = showBusyModelOperationFeedback,
+        onActivateVersion = modelLibraryActions::activateVersion,
+        onLoadModel = { modelId, version ->
+            modelLibraryActions.loadModelVersion(modelId, version, closeOnSuccess = false)
+        },
+        onShowBusyModelOperationFeedback = {
+            snackbarHostState.showSnackbar(context.getString(R.string.ui_model_operation_already_in_progress))
+        },
         onClearPendingGetReadyActivation = { appViewModel.setPendingGetReadyActivation(null) },
         onIncrementReadinessRefreshSequence = appViewModel::incrementReadinessRefreshSequence,
         onRefreshRuntimeReadiness = viewModel::refreshRuntimeReadiness,
         onSetLastDownloadTransitionRefreshKey = appViewModel::setLastDownloadTransitionRefreshKey,
         onOpenModelSheet = openModelSheet,
     )
-
-    LaunchedEffect(state.activeSurface) {
-        if (state.activeSurface !is ModalSurface.ModelLibrary) return@LaunchedEffect
-        provisioningViewModel.refreshSnapshot()
-    }
 
     LaunchedEffect(state.activeSurface) {
         if (state.activeSurface is ModalSurface.SessionDrawer) {
@@ -500,16 +397,7 @@ fun PocketAgentApp(
         routingMode = state.runtime.routingMode,
         presetBackingStore = viewModel.presetBackingStore,
         modelRemoveUndoState = modelRemoveUndoState,
-        viewModel = viewModel,
-        provisioningViewModel = provisioningViewModel,
-        appViewModel = appViewModel,
-        onLaunchImportPicker = {
-            chatAppLaunchers.launchModelImportPicker()
-        },
-        onLaunchDownloadFlow = chatAppLaunchers.launchDownloadFlow,
-        onLoadModelVersion = loadModelVersionAction,
-        onLoadLastUsedModel = loadLastUsedModelAction,
-        onOffloadModel = offloadModelAction,
+        actions = modelLibraryActions,
     )
 
     ModalOrchestrator(
@@ -570,9 +458,8 @@ private fun ChatComposerDock(
     onAttachImage: () -> Unit,
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
 ) {
-    val draftText by viewModel.composerDraftText.collectAsState()
     ComposerBar(
-        text = draftText,
+        text = composer.text,
         isSending = composer.isSending,
         isCancelling = composer.isCancelling,
         chatGateState = chatGateState,

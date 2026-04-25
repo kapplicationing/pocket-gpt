@@ -122,11 +122,10 @@ internal fun newToolCallId(): String = "toolcall-${UUID.randomUUID()}"
 
 internal fun newMessageId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
 
-class ChatViewModelFactory(
+class ChatViewModelFactory internal constructor(
     private val runtimeFacade: ChatRuntimeService,
     private val sessionPersistence: SessionPersistence,
     private val presetBackingStore: PresetBackingStore,
-    private val provisioningGateway: ProvisioningGateway? = null,
     private val deviceStateProvider: DeviceStateProvider = DeviceStateProvider.DEFAULT,
     private val runtimeTuning: RuntimeTuning = RuntimeTuning.DISABLED,
 ) : ViewModelProvider.Factory {
@@ -137,7 +136,6 @@ class ChatViewModelFactory(
                 runtimeFacade = runtimeFacade,
                 sessionPersistence = sessionPersistence,
                 presetBackingStore = presetBackingStore,
-                provisioningGateway = provisioningGateway,
                 deviceStateProvider = deviceStateProvider,
                 runtimeTuning = runtimeTuning,
             ) as T

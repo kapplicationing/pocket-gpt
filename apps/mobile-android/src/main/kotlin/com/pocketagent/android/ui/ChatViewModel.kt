@@ -7,7 +7,6 @@ import com.pocketagent.android.runtime.ChatRuntimeService
 import com.pocketagent.android.runtime.GpuProbeFailureReason
 import com.pocketagent.android.runtime.GpuProbeResult
 import com.pocketagent.android.runtime.GpuProbeStatus
-import com.pocketagent.android.runtime.ProvisioningGateway
 import com.pocketagent.android.runtime.RuntimeTuning
 import com.pocketagent.android.runtime.errorCodeName
 import com.pocketagent.android.ui.controllers.ChatPersistenceFlow
@@ -76,11 +75,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class ChatViewModel(
+class ChatViewModel internal constructor(
     internal val runtimeFacade: ChatRuntimeService,
     sessionPersistence: SessionPersistence,
     internal val presetBackingStore: PresetBackingStore,
-    private val provisioningGateway: ProvisioningGateway? = null,
     internal val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     internal val runtimeGenerationTimeoutMs: Long = 0L,
     private val runtimeStartupProbeTimeoutMs: Long = DEFAULT_RUNTIME_STARTUP_PROBE_TIMEOUT_MS,
@@ -114,28 +112,16 @@ class ChatViewModel(
     ),
     internal val sendReducer: SendReducer = SendReducer(),
     internal val toolLoopUseCase: ToolLoopUseCase = ToolLoopUseCase(sendController),
-) : ViewModel(), ModelOperationHandler {
+) : ViewModel() {
     internal val _uiState = MutableStateFlow(ChatUiState())
     val uiState = _uiState.asStateFlow()
-    internal val _composerDraftText = MutableStateFlow("")
-    val composerDraftText: StateFlow<String> = _composerDraftText.asStateFlow()
-    internal val _modelLoadingState = MutableStateFlow<ModelLoadingState>(ModelLoadingState.Idle())
-    val modelLoadingState = _modelLoadingState.asStateFlow()
     internal var gpuProbeRefreshJob: Job? = null
-    internal var modelLifecycleSyncJob: Job? = null
     @Volatile
     internal var activeSendRequestId: String? = null
     @Volatile
     internal var lastKeepAliveTouchAtMs: Long = 0L
-    @Volatile
-    private var lastModelOperationToken: Long = 0L
-    @Volatile
-    private var lastModelOperationAtMs: Long = 0L
-    @Volatile
-    private var lastModelOperationKey: String? = null
     private val userCancellationRequestIds: MutableSet<String> = mutableSetOf()
     private val userCancellationRequestIdsLock = Any()
-    private val modelOperationStateLock = Any()
     internal val persistenceQueue = ChatPersistenceQueue(
         scope = viewModelScope,
         ioDispatcher = ioDispatcher,
@@ -180,11 +166,10 @@ class ChatViewModel(
 
     init {
         bootstrapStateInternal()
-        observeModelLifecycleIfAvailable()
     }
 
     fun onComposerChanged(text: String) {
-        _composerDraftText.value = text
+        updateComposerText(text)
         if (text.isBlank()) {
             return
         }
@@ -195,12 +180,11 @@ class ChatViewModel(
         }
     }
 
-    /**
-     * Keeps [composerDraftText] and [ChatUiState.composer] text aligned for programmatic updates
-     * (edit/regenerate/prefill/bootstrap). Keystrokes use [onComposerChanged] only on the draft flow.
-     */
     internal fun applyComposerDraft(text: String) {
-        _composerDraftText.value = text
+        updateComposerText(text)
+    }
+
+    private fun updateComposerText(text: String) {
         _uiState.update { state ->
             if (state.composer.text == text) {
                 state
@@ -308,6 +292,10 @@ class ChatViewModel(
         setRoutingModeInternal(mode)
     }
 
+    internal fun setCustomPresetBacking(preset: ModelPreset, modelId: String) {
+        presetBackingStore.setCustomBackingModelId(preset, modelId)
+    }
+
     fun resetPresetMappingsToDefaults() {
         presetBackingStore.resetToDefaults()
     }
@@ -354,103 +342,6 @@ class ChatViewModel(
 
     fun refreshRuntimeReadiness(statusDetailOverride: String? = null) {
         refreshRuntimeReadinessInternal(statusDetailOverride)
-    }
-
-    override suspend fun loadModel(
-        modelId: String,
-        version: String,
-    ): RuntimeModelLifecycleCommandResult? {
-        val gateway = provisioningGateway ?: return RuntimeModelLifecycleCommandResult.rejected(
-            code = ModelLifecycleErrorCode.UNKNOWN,
-            detail = "provisioning_gateway_unavailable",
-        )
-        val requestKey = "load:$modelId@$version"
-        if (shouldDebounceModelOperation(requestKey)) {
-            return null
-        }
-        val token = nextModelOperationToken()
-        applyImmediateModelLoadingState(
-            ModelLoadingState.Loading(
-                requestedModel = RuntimeLoadedModel(modelId = modelId, modelVersion = version),
-                loadedModel = _modelLoadingState.value.loadedModel,
-                lastUsedModel = _modelLoadingState.value.lastUsedModel,
-                progress = 0f,
-                stage = "Starting model load...",
-                timestampMs = System.currentTimeMillis(),
-            ),
-        )
-        val result = withContext(ioDispatcher) {
-            gateway.loadInstalledModel(modelId = modelId, version = version)
-        }
-        return finalizeModelOperation(
-            token = token,
-            result = result,
-            fallbackModelId = modelId,
-            fallbackVersion = version,
-        )
-    }
-
-    override suspend fun loadLastUsedModel(): RuntimeModelLifecycleCommandResult? {
-        val gateway = provisioningGateway ?: return RuntimeModelLifecycleCommandResult.rejected(
-            code = ModelLifecycleErrorCode.UNKNOWN,
-            detail = "provisioning_gateway_unavailable",
-        )
-        val lastUsed = _modelLoadingState.value.lastUsedModel
-        val requestKey = "load-last-used:${lastUsed?.modelId.orEmpty()}@${lastUsed?.modelVersion.orEmpty()}"
-        if (shouldDebounceModelOperation(requestKey)) {
-            return null
-        }
-        val token = nextModelOperationToken()
-        applyImmediateModelLoadingState(
-            ModelLoadingState.Loading(
-                requestedModel = lastUsed,
-                loadedModel = _modelLoadingState.value.loadedModel,
-                lastUsedModel = lastUsed,
-                progress = 0f,
-                stage = "Starting model load...",
-                timestampMs = System.currentTimeMillis(),
-            ),
-        )
-        val result = withContext(ioDispatcher) {
-            gateway.loadLastUsedModel()
-        }
-        return finalizeModelOperation(
-            token = token,
-            result = result,
-            fallbackModelId = lastUsed?.modelId,
-            fallbackVersion = lastUsed?.modelVersion,
-        )
-    }
-
-    override suspend fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult? {
-        val gateway = provisioningGateway ?: return RuntimeModelLifecycleCommandResult.rejected(
-            code = ModelLifecycleErrorCode.UNKNOWN,
-            detail = "provisioning_gateway_unavailable",
-        )
-        val currentModel = _modelLoadingState.value.loadedModel ?: _modelLoadingState.value.lastUsedModel
-        val requestKey = "offload:${currentModel?.modelId.orEmpty()}@${currentModel?.modelVersion.orEmpty()}:$reason"
-        if (shouldDebounceModelOperation(requestKey)) {
-            return null
-        }
-        val token = nextModelOperationToken()
-        applyImmediateModelLoadingState(
-            ModelLoadingState.Offloading(
-                loadedModel = _modelLoadingState.value.loadedModel,
-                lastUsedModel = _modelLoadingState.value.lastUsedModel,
-                reason = reason,
-                queued = false,
-                timestampMs = System.currentTimeMillis(),
-            ),
-        )
-        val result = withContext(ioDispatcher) {
-            gateway.offloadModel(reason = reason)
-        }
-        return finalizeModelOperation(
-            token = token,
-            result = result,
-            fallbackModelId = currentModel?.modelId,
-            fallbackVersion = currentModel?.modelVersion,
-        )
     }
 
     fun onGetReadyTapped() {
@@ -615,7 +506,6 @@ class ChatViewModel(
     override fun onCleared() {
         startupProbeOrchestrator.cancel()
         gpuProbeRefreshJob?.cancel()
-        modelLifecycleSyncJob?.cancel()
         persistenceQueue.close()
         super.onCleared()
     }
@@ -706,20 +596,7 @@ class ChatViewModel(
         }
     }
 
-    private fun observeModelLifecycleIfAvailable() {
-        val gateway = provisioningGateway ?: return
-        applyLifecycleSnapshot(gateway.currentModelLifecycle().toModelLoadingState())
-        modelLifecycleSyncJob?.cancel()
-        modelLifecycleSyncJob = viewModelScope.launch {
-            gateway.observeModelLifecycle()
-                .map { snapshot -> snapshot.toModelLoadingState() }
-                .distinctUntilChanged { a, b -> modelLoadingStatesEquivalentForUi(a, b) }
-                .collect { loadingState -> applyLifecycleSnapshot(loadingState) }
-        }
-    }
-
-    private fun applyLifecycleSnapshot(nextState: ModelLoadingState) {
-        _modelLoadingState.value = nextState
+    internal fun syncRuntimeModelLoadingState(nextState: ModelLoadingState) {
         when (nextState) {
             is ModelLoadingState.Idle -> {
                 _uiState.update { state ->
@@ -819,81 +696,33 @@ class ChatViewModel(
         }
     }
 
-    private fun applyImmediateModelLoadingState(nextState: ModelLoadingState) {
-        applyLifecycleSnapshot(nextState)
-    }
-
-    private suspend fun finalizeModelOperation(
-        token: Long,
-        result: RuntimeModelLifecycleCommandResult,
-        fallbackModelId: String?,
-        fallbackVersion: String?,
-    ): RuntimeModelLifecycleCommandResult? {
-        val latestToken = synchronized(modelOperationStateLock) { lastModelOperationToken }
-        if (token != latestToken) {
-            return null
+    internal suspend fun handleCompletedModelOperation(result: RuntimeModelLifecycleCommandResult?) {
+        val resolvedResult = result ?: return
+        if (!resolvedResult.success || resolvedResult.queued) {
+            return
         }
-        if (result.success && !result.queued) {
-            val loadedModel = result.loadedModel
-            if (loadedModel != null) {
-                val pinned = ModelCatalog.routingModesForModel(loadedModel.modelId)
-                    .firstOrNull { it != RoutingMode.AUTO }
-                if (pinned != null) {
-                    setRoutingModeInternal(pinned)
-                }
-                withContext(ioDispatcher) {
-                    runtimeFacade.warmupActiveModel()
-                }
+        val loadedModel = resolvedResult.loadedModel
+        if (loadedModel != null) {
+            val pinned = ModelCatalog.routingModesForModel(loadedModel.modelId)
+                .firstOrNull { it != RoutingMode.AUTO }
+            if (pinned != null) {
+                setRoutingModeInternal(pinned)
             }
-            runCatching { runtimeFacade.gpuOffloadStatus() }
-                .getOrNull()
-                ?.let(::updateRuntimeGpuProbeStateInternal)
-            refreshGpuProbeStatusIfPendingInternal()
-            refreshRuntimeDiagnostics()
-            persistState()
-        } else if (!result.success) {
-            applyLifecycleSnapshot(
-                ModelLoadingState.Error(
-                    requestedModel = fallbackModelId?.let { RuntimeLoadedModel(it, fallbackVersion) },
-                    loadedModel = _modelLoadingState.value.loadedModel,
-                    lastUsedModel = _modelLoadingState.value.lastUsedModel,
-                    message = lifecycleErrorMessage(
-                        result = result,
-                        fallbackModelId = fallbackModelId,
-                        fallbackVersion = fallbackVersion,
-                    ),
-                    code = result.errorCodeName(),
-                    detail = result.detail,
-                    timestampMs = System.currentTimeMillis(),
-                ),
-            )
-        }
-        return result
-    }
-
-    private fun shouldDebounceModelOperation(requestKey: String): Boolean {
-        synchronized(modelOperationStateLock) {
-            val now = System.currentTimeMillis()
-            val shouldDebounce = lastModelOperationKey == requestKey &&
-                now - lastModelOperationAtMs < MODEL_OPERATION_DEBOUNCE_MS
-            if (!shouldDebounce) {
-                lastModelOperationKey = requestKey
-                lastModelOperationAtMs = now
+            withContext(ioDispatcher) {
+                runtimeFacade.warmupActiveModel()
             }
-            return shouldDebounce
         }
-    }
-
-    private fun nextModelOperationToken(): Long {
-        synchronized(modelOperationStateLock) {
-            lastModelOperationToken += 1L
-            return lastModelOperationToken
-        }
+        runCatching { runtimeFacade.gpuOffloadStatus() }
+            .getOrNull()
+            ?.let(::updateRuntimeGpuProbeStateInternal)
+        refreshGpuProbeStatusIfPendingInternal()
+        refreshRuntimeDiagnostics()
+        persistState()
     }
 
 }
 
-private fun lifecycleErrorMessage(
+internal fun lifecycleErrorMessage(
     result: RuntimeModelLifecycleCommandResult,
     fallbackModelId: String?,
     fallbackVersion: String?,
@@ -918,7 +747,7 @@ private fun lifecycleErrorMessage(
     }
 }
 
-private const val MODEL_OPERATION_DEBOUNCE_MS = 500L
+internal const val MODEL_OPERATION_DEBOUNCE_MS = 500L
 
 internal fun modelLoadingStatesEquivalentForUi(a: ModelLoadingState, b: ModelLoadingState): Boolean {
     if (a::class != b::class) {

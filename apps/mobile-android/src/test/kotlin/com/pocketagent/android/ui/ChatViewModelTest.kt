@@ -7,7 +7,9 @@ import com.pocketagent.android.data.chat.StoredChatMessage
 import com.pocketagent.android.data.chat.StoredChatSession
 import com.pocketagent.android.data.chat.StoredChatState
 import com.pocketagent.android.runtime.ChatRuntimeService
+import com.pocketagent.android.runtime.ProvisioningAggregateState
 import com.pocketagent.android.runtime.ProvisioningGateway
+import com.pocketagent.android.runtime.ProvisioningMutationResult
 import com.pocketagent.android.runtime.RuntimeModelImportResult
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.android.runtime.RuntimeDiagnosticsSnapshot
@@ -31,6 +33,7 @@ import com.pocketagent.android.ui.state.StartupProbeState
 import com.pocketagent.android.ui.state.resolveChatGateState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
 import com.pocketagent.android.ui.state.RuntimeUiState
+import com.pocketagent.android.ui.state.toModelLoadingState
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
 import com.pocketagent.android.runtime.ProvisioningReadiness
@@ -108,6 +111,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         viewModel.onComposerChanged("hello ui")
+        assertEquals("hello ui", viewModel.uiState.value.composer.text)
         viewModel.sendMessage()
         advanceUntilIdle()
 
@@ -253,6 +257,7 @@ class ChatViewModelTest {
     fun `load last used send follow up offload reload send remains stable`() = runTest(dispatcher) {
         val provisioning = QuickLoadProvisioningGatewayForTest()
         val runtime = RecordingRuntimeFacade()
+        val provisioningViewModel = ModelProvisioningViewModel(provisioning, ioDispatcher = dispatcher)
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(
@@ -262,15 +267,15 @@ class ChatViewModelTest {
                 ),
             ),
             presetBackingStore = FakePresetBackingStore(),
-            provisioningGateway = provisioning,
             ioDispatcher = dispatcher,
         )
         advanceUntilIdle()
 
-        val initialLoadResult = viewModel.loadLastUsedModel()
+        val initialLoadResult = provisioningViewModel.loadLastUsedModel()
         advanceUntilIdle()
+        viewModel.syncRuntimeModelLoadingState(provisioningViewModel.modelLoadingState.value)
         assertTrue(initialLoadResult?.success == true)
-        assertTrue(viewModel.modelLoadingState.value is com.pocketagent.android.ui.state.ModelLoadingState.Loaded)
+        assertTrue(provisioningViewModel.modelLoadingState.value is com.pocketagent.android.ui.state.ModelLoadingState.Loaded)
 
         viewModel.onComposerChanged("quick load prompt")
         viewModel.sendMessage()
@@ -280,15 +285,17 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val offloadResult = viewModel.offloadModel("quick-load-test")
+        val offloadResult = provisioningViewModel.offloadModel("quick-load-test")
         advanceUntilIdle()
+        viewModel.syncRuntimeModelLoadingState(provisioningViewModel.modelLoadingState.value)
         assertTrue(offloadResult?.success == true)
-        assertTrue(viewModel.modelLoadingState.value is com.pocketagent.android.ui.state.ModelLoadingState.Idle)
+        assertTrue(provisioningViewModel.modelLoadingState.value is com.pocketagent.android.ui.state.ModelLoadingState.Idle)
 
-        val reloadResult = viewModel.loadLastUsedModel()
+        val reloadResult = provisioningViewModel.loadLastUsedModel()
         advanceUntilIdle()
+        viewModel.syncRuntimeModelLoadingState(provisioningViewModel.modelLoadingState.value)
         assertTrue(reloadResult?.success == true)
-        assertTrue(viewModel.modelLoadingState.value is com.pocketagent.android.ui.state.ModelLoadingState.Loaded)
+        assertTrue(provisioningViewModel.modelLoadingState.value is com.pocketagent.android.ui.state.ModelLoadingState.Loaded)
 
         viewModel.onComposerChanged("after reload prompt")
         viewModel.sendMessage()
@@ -1306,19 +1313,21 @@ class ChatViewModelTest {
         )
         val startupProbeController = CountingStartupProbeController()
         val provisioningGateway = LoadingProvisioningGateway()
+        val provisioningViewModel = ModelProvisioningViewModel(provisioningGateway, ioDispatcher = dispatcher)
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
-            provisioningGateway = provisioningGateway,
             ioDispatcher = dispatcher,
             startupProbeController = startupProbeController,
         )
         advanceUntilIdle()
         val baselineCalls = startupProbeController.callCount
 
-        val result = viewModel.loadModel("qwen3.5-0.8b-q4", "1")
+        val result = provisioningViewModel.loadModel("qwen3.5-0.8b-q4", "1")
         advanceUntilIdle()
+        viewModel.syncRuntimeModelLoadingState(provisioningViewModel.modelLoadingState.value)
+        viewModel.handleCompletedModelOperation(result)
 
         assertTrue(result?.success == true)
         assertEquals(1, runtime.warmupCalls)
@@ -1386,11 +1395,11 @@ class ChatViewModelTest {
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
-            provisioningGateway = gateway,
             ioDispatcher = dispatcher,
         )
 
         advanceUntilIdle()
+        viewModel.syncRuntimeModelLoadingState(gateway.observeProvisioningAggregateState().value.lifecycle.toModelLoadingState())
 
         // Routing mode from persistence is preserved — the lifecycle observer
         // no longer auto-syncs routing to the loaded model. Only explicit
@@ -1421,11 +1430,11 @@ class ChatViewModelTest {
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
-            provisioningGateway = gateway,
             ioDispatcher = dispatcher,
         )
 
         advanceUntilIdle()
+        viewModel.syncRuntimeModelLoadingState(gateway.observeProvisioningAggregateState().value.lifecycle.toModelLoadingState())
 
         assertEquals(
             "Model loaded with reduced GPU acceleration.",
@@ -1572,9 +1581,27 @@ private class CorruptLoadPersistence : SessionPersistence {
 private class LifecycleOnlyProvisioningGateway(
     initialLifecycle: RuntimeModelLifecycleSnapshot,
 ) : ProvisioningGateway {
-    private val lifecycle = MutableStateFlow(initialLifecycle)
+    private val aggregateState = MutableStateFlow(
+        ProvisioningAggregateState(
+            snapshot = RuntimeProvisioningSnapshot(
+                models = emptyList(),
+                storageSummary = StorageSummary(
+                    totalBytes = 0L,
+                    freeBytes = 0L,
+                    usedByModelsBytes = 0L,
+                    tempDownloadBytes = 0L,
+                ),
+                requiredModelIds = emptySet(),
+            ),
+            lifecycle = initialLifecycle,
+        ),
+    )
 
-    override fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
+    override fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> = aggregateState
+
+    override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState = aggregateState.value
+
+    private fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
         models = emptyList(),
         storageSummary = StorageSummary(
             totalBytes = 0L,
@@ -1585,32 +1612,23 @@ private class LifecycleOnlyProvisioningGateway(
         requiredModelIds = emptySet(),
     )
 
-    override fun observeDownloads(): MutableStateFlow<List<DownloadTaskState>> = MutableStateFlow(emptyList())
-
-    override fun observeDownloadPreferences(): MutableStateFlow<DownloadPreferencesState> =
-        MutableStateFlow(DownloadPreferencesState())
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = DownloadPreferencesState()
-
-    override fun observeModelLifecycle(): MutableStateFlow<RuntimeModelLifecycleSnapshot> = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
-
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
-        error("not used in ChatViewModelTest")
-    }
-
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
         error("not used in ChatViewModelTest")
     }
 
     override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> = emptyList()
 
-    override fun setActiveVersion(modelId: String, version: String): Boolean = false
+    override fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.NoChange()
+    }
 
-    override fun clearActiveVersion(modelId: String): Boolean = false
+    override fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.NoChange()
+    }
 
-    override fun removeVersion(modelId: String, version: String): Boolean = false
+    override fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.NoChange()
+    }
 
     override suspend fun loadInstalledModel(
         modelId: String,
@@ -1842,9 +1860,29 @@ private class RecordingRuntimeFacade(
 }
 
 private class LoadingProvisioningGateway : ProvisioningGateway {
+    private val aggregateState = MutableStateFlow(
+        ProvisioningAggregateState(
+            snapshot = RuntimeProvisioningSnapshot(
+                models = emptyList(),
+                storageSummary = StorageSummary(
+                    totalBytes = 0L,
+                    freeBytes = 0L,
+                    usedByModelsBytes = 0L,
+                    tempDownloadBytes = 0L,
+                ),
+                requiredModelIds = emptySet(),
+            ),
+            lifecycle = RuntimeModelLifecycleSnapshot.initial(),
+        ),
+    )
+
     val lifecycle = MutableStateFlow(RuntimeModelLifecycleSnapshot.initial())
 
-    override fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
+    override fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> = aggregateState
+
+    override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState = aggregateState.value
+
+    private fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
         models = emptyList(),
         storageSummary = StorageSummary(
             totalBytes = 0L,
@@ -1855,32 +1893,23 @@ private class LoadingProvisioningGateway : ProvisioningGateway {
         requiredModelIds = emptySet(),
     )
 
-    override fun observeDownloads(): MutableStateFlow<List<DownloadTaskState>> = MutableStateFlow(emptyList())
-
-    override fun observeDownloadPreferences(): MutableStateFlow<DownloadPreferencesState> =
-        MutableStateFlow(DownloadPreferencesState())
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = DownloadPreferencesState()
-
-    override fun observeModelLifecycle(): MutableStateFlow<RuntimeModelLifecycleSnapshot> = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
-
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
-        error("not used in ChatViewModelTest")
-    }
-
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
         error("not used in ChatViewModelTest")
     }
 
     override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> = emptyList()
 
-    override fun setActiveVersion(modelId: String, version: String): Boolean = false
+    override fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.NoChange()
+    }
 
-    override fun clearActiveVersion(modelId: String): Boolean = false
+    override fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.NoChange()
+    }
 
-    override fun removeVersion(modelId: String, version: String): Boolean = false
+    override fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.NoChange()
+    }
 
     override suspend fun loadInstalledModel(
         modelId: String,
@@ -1892,6 +1921,7 @@ private class LoadingProvisioningGateway : ProvisioningGateway {
             loadedModel = loadedModel,
             lastUsedModel = loadedModel,
         )
+        aggregateState.value = aggregateState.value.copy(lifecycle = lifecycle.value)
         return com.pocketagent.runtime.RuntimeModelLifecycleCommandResult.applied(loadedModel = loadedModel)
     }
 
@@ -1940,12 +1970,24 @@ private class QuickLoadProvisioningGatewayForTest(
             ),
         ),
     )
+    private val aggregateState = MutableStateFlow(
+        ProvisioningAggregateState(
+            snapshot = currentSnapshot(),
+            downloads = downloads.value,
+            downloadPreferences = preferences.value,
+            lifecycle = lifecycle.value,
+        ),
+    )
 
     var loadLastUsedCalls: Int = 0
         private set
     val offloadReasons = mutableListOf<String>()
 
-    override fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
+    override fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> = aggregateState
+
+    override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState = aggregateState.value
+
+    private fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
         models = listOf(
             ProvisionedModelState(
                 modelId = modelId,
@@ -1981,21 +2023,7 @@ private class QuickLoadProvisioningGatewayForTest(
         requiredModelIds = setOf(modelId),
     )
 
-    override fun observeDownloads(): StateFlow<List<DownloadTaskState>> = downloads
-
-    override fun observeDownloadPreferences(): StateFlow<DownloadPreferencesState> = preferences
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = preferences.value
-
-    override fun observeModelLifecycle(): StateFlow<RuntimeModelLifecycleSnapshot> = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
-
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
-        error("not used in ChatViewModelTest")
-    }
-
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
         error("not used in ChatViewModelTest")
     }
 
@@ -2003,11 +2031,17 @@ private class QuickLoadProvisioningGatewayForTest(
         return currentSnapshot().models.firstOrNull { it.modelId == modelId }?.installedVersions.orEmpty()
     }
 
-    override fun setActiveVersion(modelId: String, version: String): Boolean = true
+    override fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.Applied
+    }
 
-    override fun clearActiveVersion(modelId: String): Boolean = true
+    override fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.Applied
+    }
 
-    override fun removeVersion(modelId: String, version: String): Boolean = true
+    override fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
+        return ProvisioningMutationResult.Applied
+    }
 
     override suspend fun loadInstalledModel(
         modelId: String,
@@ -2022,6 +2056,7 @@ private class QuickLoadProvisioningGatewayForTest(
             errorCode = null,
             errorDetail = null,
         )
+        syncAggregateState()
         return com.pocketagent.runtime.RuntimeModelLifecycleCommandResult.applied(loadedModel = loadedModel)
     }
 
@@ -2048,6 +2083,7 @@ private class QuickLoadProvisioningGatewayForTest(
             errorDetail = null,
             queuedOffload = false,
         )
+        syncAggregateState()
         return com.pocketagent.runtime.RuntimeModelLifecycleCommandResult.applied()
     }
 
@@ -2070,6 +2106,15 @@ private class QuickLoadProvisioningGatewayForTest(
     override fun cancelDownload(taskId: String) = Unit
 
     override fun syncDownloadsFromScheduler() = Unit
+
+    private fun syncAggregateState() {
+        aggregateState.value = aggregateState.value.copy(
+            snapshot = currentSnapshot(),
+            downloads = downloads.value,
+            downloadPreferences = preferences.value,
+            lifecycle = lifecycle.value,
+        )
+    }
 }
 
 private enum class StreamTerminal {

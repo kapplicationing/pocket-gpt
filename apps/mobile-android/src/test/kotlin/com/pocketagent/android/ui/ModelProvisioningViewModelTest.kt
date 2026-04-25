@@ -3,6 +3,7 @@ package com.pocketagent.android.ui
 import android.net.Uri
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.runtime.ProvisioningGateway
+import com.pocketagent.android.runtime.ProvisioningAggregateState
 import com.pocketagent.android.runtime.RuntimeDomainError
 import com.pocketagent.android.runtime.RuntimeDomainException
 import com.pocketagent.android.runtime.RuntimeErrorCodes
@@ -17,6 +18,7 @@ import com.pocketagent.android.runtime.ModelSupportLevel
 import com.pocketagent.android.runtime.RuntimeModelImportResult
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
+import com.pocketagent.android.runtime.ProvisioningMutationResult
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadNetworkPreference
 import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
@@ -62,22 +64,23 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
-    fun `init loads snapshot and observes download flow updates`() = runTest(dispatcher) {
+    fun `init loads seeded aggregate state and observes aggregate updates`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
 
         assertEquals("qwen3.5-0.8b-q4", viewModel.uiState.value.snapshot?.models?.firstOrNull()?.modelId)
+        assertTrue(viewModel.uiState.value.manifestLoaded)
         assertEquals(0, viewModel.uiState.value.downloads.size)
 
-        gateway.downloads.value = listOf(sampleDownloadTask())
+        gateway.setDownloads(listOf(sampleDownloadTask()))
         advanceUntilIdle()
 
         assertEquals(1, viewModel.uiState.value.downloads.size)
     }
 
     @Test
-    fun `import model updates importing state and refreshes snapshot`() = runTest(dispatcher) {
+    fun `import model updates importing state and observes aggregate snapshot refresh`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
@@ -91,7 +94,7 @@ class ModelProvisioningViewModelTest {
         assertTrue(result.isSuccess)
         assertFalse(viewModel.uiState.value.isImporting)
         assertTrue(gateway.importCalls > 0)
-        assertTrue(gateway.snapshotCalls > 1)
+        assertEquals("2", viewModel.uiState.value.snapshot?.models?.firstOrNull()?.activeVersion)
     }
 
     @Test
@@ -132,8 +135,8 @@ class ModelProvisioningViewModelTest {
         advanceUntilIdle()
         assertEquals(1, viewModel.uiState.value.manifest.models.size)
 
-        assertTrue(viewModel.setActiveVersion("qwen3.5-0.8b-q4", "1"))
-        assertTrue(viewModel.removeVersion("qwen3.5-0.8b-q4", "1"))
+        assertTrue(viewModel.setActiveVersion("qwen3.5-0.8b-q4", "1").changed)
+        assertTrue(viewModel.removeVersion("qwen3.5-0.8b-q4", "1").changed)
         viewModel.cancelDownload("task-1")
         assertEquals(1, gateway.setActiveCalls)
         assertEquals(1, gateway.removeCalls)
@@ -146,11 +149,11 @@ class ModelProvisioningViewModelTest {
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
 
-        assertTrue(viewModel.clearActiveVersion("qwen3.5-0.8b-q4"))
+        assertTrue(viewModel.clearActiveVersion("qwen3.5-0.8b-q4").changed)
         advanceUntilIdle()
 
         assertEquals(1, gateway.clearActiveCalls)
-        assertTrue(gateway.snapshotCalls > 1)
+        assertEquals(null, viewModel.uiState.value.snapshot?.models?.firstOrNull()?.activeVersion)
     }
 
     @Test
@@ -176,7 +179,7 @@ class ModelProvisioningViewModelTest {
     @Test
     fun `library ui state exposes provisioning and download data`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway().apply {
-            downloads.value = listOf(sampleDownloadTask())
+            setDownloads(listOf(sampleDownloadTask()))
         }
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
@@ -253,10 +256,12 @@ class ModelProvisioningViewModelTest {
     @Test
     fun `runtime ui state exposes lifecycle and installed versions`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway().apply {
-            lifecycle.value = RuntimeModelLifecycleSnapshot(
-                loadedModel = RuntimeLoadedModel(
-                    modelId = "qwen3.5-0.8b-q4",
-                    modelVersion = "1",
+            setLifecycle(
+                RuntimeModelLifecycleSnapshot(
+                    loadedModel = RuntimeLoadedModel(
+                        modelId = "qwen3.5-0.8b-q4",
+                        modelVersion = "1",
+                    ),
                 ),
             )
         }
@@ -302,7 +307,7 @@ class ModelProvisioningViewModelTest {
 
         val offloadResult = viewModel.offloadModel("manual")
         advanceUntilIdle()
-        assertTrue(offloadResult.success)
+        assertTrue(offloadResult?.success == true)
         assertEquals(null, viewModel.uiState.value.lifecycle.loadedModel)
     }
 
@@ -316,9 +321,11 @@ class ModelProvisioningViewModelTest {
         val result = viewModel.removeVersionAsync("qwen3.5-0.8b-q4", "1")
         advanceUntilIdle()
 
-        assertTrue(result)
+        assertTrue(result.changed)
         assertEquals(1, gateway.removeCalls)
-        assertTrue(gateway.snapshotCalls > 1)
+        assertTrue(
+            viewModel.uiState.value.snapshot?.models?.firstOrNull()?.installedVersions?.isEmpty() == true,
+        )
     }
 
     @Test
@@ -327,11 +334,22 @@ class ModelProvisioningViewModelTest {
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
 
-        val snapshotCountAfterInit = gateway.snapshotCalls
-        assertFalse(viewModel.removeVersionAsync("qwen3.5-0.8b-q4", "1"))
+        val installedVersionsBefore = viewModel.uiState.value.snapshot
+            ?.models
+            ?.firstOrNull()
+            ?.installedVersions
+            ?.map { it.version }
+        assertFalse(viewModel.removeVersionAsync("qwen3.5-0.8b-q4", "1").changed)
         advanceUntilIdle()
 
-        assertEquals(snapshotCountAfterInit, gateway.snapshotCalls)
+        assertEquals(
+            installedVersionsBefore,
+            viewModel.uiState.value.snapshot
+                ?.models
+                ?.firstOrNull()
+                ?.installedVersions
+                ?.map { it.version },
+        )
     }
 
     @Test
@@ -351,6 +369,7 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     val downloads = MutableStateFlow<List<DownloadTaskState>>(emptyList())
     val downloadPreferences = MutableStateFlow(DownloadPreferencesState())
     val lifecycle = MutableStateFlow(RuntimeModelLifecycleSnapshot.initial())
+    private val aggregateState = MutableStateFlow(ProvisioningAggregateState())
     var snapshotResult: RuntimeProvisioningSnapshot = sampleSnapshot()
     var manifestResult: ModelDistributionManifest = ModelDistributionManifest(
         models = listOf(
@@ -361,7 +380,6 @@ private class FakeProvisioningGateway : ProvisioningGateway {
             ),
         ),
     )
-    var snapshotCalls: Int = 0
     var importCalls: Int = 0
     var setActiveCalls: Int = 0
     var clearActiveCalls: Int = 0
@@ -374,27 +392,33 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     var lastWarnVersion: ModelDistributionVersion? = null
     var removeResult: Boolean = true
 
-    override fun currentSnapshot(): RuntimeProvisioningSnapshot {
-        snapshotCalls += 1
-        return snapshotResult
+    init {
+        syncAggregateState()
     }
 
-    override fun observeDownloads() = downloads
+    override fun observeProvisioningAggregateState() = aggregateState
 
-    override fun observeDownloadPreferences() = downloadPreferences
-
-    override fun currentDownloadPreferences(): DownloadPreferencesState = downloadPreferences.value
-
-    override fun observeModelLifecycle() = lifecycle
-
-    override fun currentModelLifecycle(): RuntimeModelLifecycleSnapshot = lifecycle.value
+    override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState {
+        val seeded = aggregateState.value.copy(
+            snapshot = snapshotResult,
+            downloads = downloads.value,
+            downloadPreferences = downloadPreferences.value,
+            lifecycle = lifecycle.value,
+            manifest = manifestResult,
+            manifestLoaded = true,
+        )
+        aggregateState.value = seeded
+        return seeded
+    }
 
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
         importFailure?.let { throw it }
         importCalls += 1
+        snapshotResult = sampleSnapshot(activeVersion = "2", installedVersion = "2")
+        syncAggregateState()
         return RuntimeModelImportResult(
             modelId = modelId,
-            version = "1",
+            version = "2",
             absolutePath = "/tmp/model.gguf",
             sha256 = "a".repeat(64),
             copiedBytes = 123L,
@@ -402,27 +426,32 @@ private class FakeProvisioningGateway : ProvisioningGateway {
         )
     }
 
-    override suspend fun loadModelDistributionManifest(): ModelDistributionManifest {
-        return manifestResult
-    }
-
     override fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
         return snapshotResult.models.first().installedVersions
     }
 
-    override fun setActiveVersion(modelId: String, version: String): Boolean {
+    override fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
         setActiveCalls += 1
-        return true
+        snapshotResult = snapshotResult.withActiveVersion(modelId = modelId, activeVersion = version)
+        syncAggregateState()
+        return ProvisioningMutationResult.Applied
     }
 
-    override fun clearActiveVersion(modelId: String): Boolean {
+    override fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
         clearActiveCalls += 1
-        return true
+        snapshotResult = snapshotResult.withActiveVersion(modelId = modelId, activeVersion = null)
+        syncAggregateState()
+        return ProvisioningMutationResult.Applied
     }
 
-    override fun removeVersion(modelId: String, version: String): Boolean {
+    override fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
         removeCalls += 1
-        return removeResult
+        if (removeResult) {
+            snapshotResult = snapshotResult.withRemovedVersion(modelId = modelId, version = version)
+            syncAggregateState()
+            return ProvisioningMutationResult.Applied
+        }
+        return ProvisioningMutationResult.NoChange(detail = "remove_failed")
     }
 
     override suspend fun loadInstalledModel(modelId: String, version: String): RuntimeModelLifecycleCommandResult {
@@ -432,6 +461,7 @@ private class FakeProvisioningGateway : ProvisioningGateway {
             loadedModel = loaded,
             lastUsedModel = loaded,
         )
+        syncAggregateState()
         return RuntimeModelLifecycleCommandResult.applied(loadedModel = loaded)
     }
 
@@ -448,6 +478,7 @@ private class FakeProvisioningGateway : ProvisioningGateway {
             loadedModel = null,
             queuedOffload = false,
         )
+        syncAggregateState()
         return RuntimeModelLifecycleCommandResult.applied()
     }
 
@@ -464,12 +495,14 @@ private class FakeProvisioningGateway : ProvisioningGateway {
 
     override fun setDownloadWifiOnlyEnabled(enabled: Boolean) {
         downloadPreferences.value = downloadPreferences.value.copy(wifiOnlyEnabled = enabled)
+        syncAggregateState()
     }
 
     override fun acknowledgeLargeDownloadCellularWarning() {
         downloadPreferences.value = downloadPreferences.value.copy(
             largeDownloadCellularWarningAcknowledged = true,
         )
+        syncAggregateState()
     }
 
     override fun pauseDownload(taskId: String) = Unit
@@ -483,23 +516,46 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     }
 
     override fun syncDownloadsFromScheduler() = Unit
+
+    fun setDownloads(tasks: List<DownloadTaskState>) {
+        downloads.value = tasks
+        syncAggregateState()
+    }
+
+    fun setLifecycle(snapshot: RuntimeModelLifecycleSnapshot) {
+        lifecycle.value = snapshot
+        syncAggregateState()
+    }
+
+    private fun syncAggregateState() {
+        aggregateState.value = aggregateState.value.copy(
+            snapshot = snapshotResult,
+            downloads = downloads.value,
+            downloadPreferences = downloadPreferences.value,
+            lifecycle = lifecycle.value,
+        )
+    }
 }
 
-private fun sampleSnapshot(): RuntimeProvisioningSnapshot {
+private fun sampleSnapshot(
+    modelId: String = "qwen3.5-0.8b-q4",
+    installedVersion: String = "1",
+    activeVersion: String? = "1",
+): RuntimeProvisioningSnapshot {
     return RuntimeProvisioningSnapshot(
         models = listOf(
             ProvisionedModelState(
-                modelId = "qwen3.5-0.8b-q4",
+                modelId = modelId,
                 displayName = "Qwen",
                 fileName = "qwen.gguf",
                 absolutePath = "/tmp/qwen.gguf",
                 sha256 = "a".repeat(64),
                 importedAtEpochMs = 1L,
-                activeVersion = "1",
+                activeVersion = activeVersion,
                 installedVersions = listOf(
                     ModelVersionDescriptor(
-                        modelId = "qwen3.5-0.8b-q4",
-                        version = "1",
+                        modelId = modelId,
+                        version = installedVersion,
                         displayName = "Qwen",
                         absolutePath = "/tmp/qwen.gguf",
                         sha256 = "a".repeat(64),
@@ -520,6 +576,42 @@ private fun sampleSnapshot(): RuntimeProvisioningSnapshot {
             tempDownloadBytes = 0L,
         ),
         requiredModelIds = setOf("qwen3.5-0.8b-q4"),
+    )
+}
+
+private fun RuntimeProvisioningSnapshot.withActiveVersion(
+    modelId: String,
+    activeVersion: String?,
+): RuntimeProvisioningSnapshot {
+    return copy(
+        models = models.map { model ->
+            if (model.modelId != modelId) {
+                model
+            } else {
+                model.copy(activeVersion = activeVersion)
+            }
+        },
+    )
+}
+
+private fun RuntimeProvisioningSnapshot.withRemovedVersion(
+    modelId: String,
+    version: String,
+): RuntimeProvisioningSnapshot {
+    return copy(
+        models = models.map { model ->
+            if (model.modelId != modelId) {
+                model
+            } else {
+                val installedVersions = model.installedVersions.filterNot { descriptor ->
+                    descriptor.version == version
+                }
+                model.copy(
+                    activeVersion = model.activeVersion.takeUnless { it == version },
+                    installedVersions = installedVersions,
+                )
+            }
+        },
     )
 }
 

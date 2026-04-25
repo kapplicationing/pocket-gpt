@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 internal fun ChatViewModel.sendMessageInternal() {
     val snapshot = _uiState.value
     val activeSession = snapshot.activeSession ?: return
-    val prompt = _composerDraftText.value.trim()
+    val prompt = snapshot.composer.text.trim()
     if (prompt.isBlank() || snapshot.composer.isSending) {
         return
     }
@@ -58,7 +58,6 @@ internal fun ChatViewModel.sendMessageInternal() {
             title = deriveSessionTitle(updatedMessages),
         )
     }
-    _composerDraftText.value = ""
     _uiState.update { state ->
         state.copy(
             composer = ComposerUiState(text = "", isSending = true, isCancelling = false),

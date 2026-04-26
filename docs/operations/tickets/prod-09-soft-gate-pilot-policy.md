@@ -33,10 +33,10 @@ Not allowed under this policy:
 ## Mandatory Signals (Pilot Continue Criteria)
 
 1. No open `UX-S0`/`UX-S1` blockers.
-2. Latest `android-instrumented` PASS id attached.
-3. Latest `maestro` PASS id attached.
-4. Latest `journey` report attached with `run_owner`/`run_host`.
-5. Latest journey send-capture stage is `phase=completed` and `placeholder_visible=false`.
+2. For the current pilot window, attach the latest `android-instrumented` PASS id.
+3. For the current pilot window, attach the latest `maestro` PASS id.
+4. For the current pilot window, attach the latest `journey` report with `run_owner`/`run_host`.
+5. For the current pilot window, attach the latest journey send-capture stage with `phase=completed` and `placeholder_visible=false`.
 6. Policy/safety regressions remain closed.
 
 ## Advisory Signals (Pilot Evaluation)

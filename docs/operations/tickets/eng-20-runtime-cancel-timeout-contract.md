@@ -1,9 +1,9 @@
 # ENG-20 Runtime Cancel/Timeout Contract
 
-Last updated: 2026-03-05
+Last updated: 2026-04-25
 Owner: Engineering
 Support: QA, Product
-Status: In Progress
+Status: Done for host-side contract; pending final strict journey evidence under `QA-11`
 
 ## Objective
 
@@ -52,3 +52,13 @@ Send-capture stage records:
 2. Native bridge tests cover cancel delegation for JNI + fallback paths.
 3. Journey reports include required send-capture fields for every run.
 4. Product docs reference this contract in PRD/UX behavior sections.
+
+## 2026-04-25 Update
+
+Host-side contract coverage landed:
+
+1. `ChatStreamCoordinatorTest` now asserts timeout terminal state maps to `UI-RUNTIME-001` and records a terminal event.
+2. Journey report serialization backfills required failed send-capture fields so `phase`, `placeholder_visible`, runtime status, backend, and active model are never ambiguous in failure evidence.
+3. Existing app/runtime tests and devctl lane/gate tests pass under the fast lane.
+
+Strict journey proof is now downstream of the active runtime-ready blocker in `QA-11`: the device rerun can reach the lane harness, but the app can still remain `Unloaded` before valid send-capture evidence begins.

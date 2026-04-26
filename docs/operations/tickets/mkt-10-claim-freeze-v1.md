@@ -1,6 +1,6 @@
 # MKT-10 Claim Freeze v1
 
-Last updated: 2026-03-05
+Last updated: 2026-04-26
 Owner: Marketing
 Support: Product, Security
 Status: Ready
@@ -12,15 +12,17 @@ Freeze claim language for launch windows so only evidence-safe claims are used e
 ## Publish-Safe Claims (External)
 
 1. Local-first runtime path with on-device inference default.
-2. Offline quick-answer and local tool utility for MVP workflows.
-3. Deterministic runtime status visibility (`Not ready`, `Loading`, `Ready`, `Error`).
-4. Session continuity and local diagnostics export.
+2. Offline quick-answer and prompt-first local tool utility for validated MVP workflows.
+3. Single-image attach/contextual image help for validated in-thread workflows.
+4. Deterministic runtime status visibility (`Not ready`, `Loading`, `Ready`, `Error`).
+5. Session continuity and local diagnostics export.
 
 ## Internal-Only Claims (Not Yet External)
 
 1. Claims requiring moderated UX metrics not yet populated (`WP-13` run-02 pending).
 2. Privacy-control depth claims without full claim parity verification (`SEC-02` partial rows).
-3. Any performance claim lacking latest required-tier artifact links.
+3. Voice activation/STT/TTS claims beyond clearly labeled limited-beta closed-track materials.
+4. Any performance claim lacking latest required-tier artifact links.
 
 ## Claim Mapping Contract
 

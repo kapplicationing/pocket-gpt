@@ -41,13 +41,12 @@ PocketAgent is local-first by default:
 ## Security Controls
 
 1. Model artifact integrity checks (hash verification)
-2. Local encrypted storage where OS support is available
-3. Least-privilege permissions for file/media access
-4. Secure update channel for model manifests (when remote catalog is enabled)
+2. Least-privilege permissions for file/media access
+3. Secure update channel for model manifests (when remote catalog is enabled)
 
 ## User-Visible Controls (Implemented)
 
-1. Privacy information sheet with implemented policy summary
+1. Collapsible Privacy section inside `Advanced` settings with implemented policy summary
 2. Model setup and runtime-refresh actions for readiness recovery
 3. Diagnostics export with redaction
 
@@ -70,7 +69,7 @@ Do not publish these as available controls until implementation and validation a
 | Control Area | Planned Guarantee | Current Coverage |
 |---|---|---|
 | Local inference default | No cloud-required inference path | Implemented (native JNI runtime + startup checks + local model provisioning) |
-| Local data retention policy | local persistence with bounded retention policy | Implemented for MVP baseline (file-backed local persistence active on Android runtime path) |
+| Local data persistence | local persistence on-device | Implemented (on-device prefs + SQLite runtime state) |
 | Tool safety | strict schema validation + allowlist | Implemented (schema validation + deterministic rejection contracts) |
 | Diagnostics privacy | no raw prompt/response by default | Implemented (redaction checks in runtime tests and UI export path) |
 | Network gating | explicit policy checks per action | Implemented (policy wiring integrated with Android platform enforcement checks) |

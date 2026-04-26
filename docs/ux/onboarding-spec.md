@@ -21,8 +21,8 @@ Explain privacy guarantees, capability surface, and runtime readiness in the fir
    - Message: chats and memory stay local by default.
 2. **Page 2 - Capability preview**
    - Message: text chat, image analysis, and local tools run in one timeline.
-3. **Page 3 - Runtime readiness**
-   - Message: check runtime status before heavy prompts and open model setup if `Not ready`.
+3. **Page 3 - Get ready**
+   - Message: use `Get ready` to download the default model, or open model library if you want to import your own.
 
 ## Actions
 
@@ -40,5 +40,5 @@ Explain privacy guarantees, capability surface, and runtime readiness in the fir
 
 1. Onboarding never blocks core app render.
 2. Privacy wording must stay aligned with `docs/security/privacy-model.md`.
-3. Runtime-readiness guidance must reference in-app recovery (`Advanced` -> `Open model setup`).
+3. Runtime-readiness guidance must reference in-app recovery (`Advanced` -> `Open model library`).
 4. Onboarding copy must not imply hidden cloud dependency for core flows.

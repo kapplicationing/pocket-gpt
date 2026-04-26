@@ -12,7 +12,7 @@ python3 tools/devctl/main.py <command> ...
 ```bash
 python3 -m pip install -r tools/devctl/requirements.txt
 python3 tools/devctl/main.py doctor
-bash scripts/dev/test.sh quick
+bash scripts/dev/test.sh fast
 ```
 
 If `doctor` fails, follow the suggested fix lines and rerun `doctor`.
@@ -23,7 +23,7 @@ Run these in order for fast, layered confidence:
 
 ```bash
 python3 tools/devctl/main.py doctor
-bash scripts/dev/test.sh quick
+bash scripts/dev/test.sh fast
 python3 tools/devctl/main.py lane android-instrumented
 python3 tools/devctl/main.py lane maestro
 ```
@@ -32,8 +32,9 @@ What each command proves:
 
 1. `doctor`
    Environment/toolchain is usable (Python deps, Gradle/Android prerequisites, lane prerequisites).
-2. `test.sh quick`
+2. `test.sh fast`
    Core JVM/Kotlin and policy/runtime contracts still hold after your changes.
+   `quick` is a compatibility alias for `core`; prefer `fast` for new work.
 3. `lane android-instrumented`
    App boots and bridge/runtime integration still works on-device/emulator instrumentation lane.
 4. `lane maestro`
@@ -321,9 +322,9 @@ Plan doc:
 
 - `docs/testing/gpu-qualification-split-plan.md`
 
-## Maestro Cloud (Supplemental)
+## Maestro Cloud (Hosted Automation)
 
-Use this when you want hosted device coverage without a local emulator/phone. This is supplemental to `python3 tools/devctl/main.py lane maestro`.
+Use this when you want hosted device coverage without a local emulator/phone. Under `QA-14`, this is the target default path for machine-verifiable hosted reruns once artifact parity is proven. Keep `devctl` and the physical-device canary for local preflight, device-specific forensics, and promotion evidence until that parity is established.
 
 ```bash
 set -a
@@ -367,7 +368,7 @@ Important:
 
 1. `maestro cloud` runs the Maestro flow files directly.
 2. It does not run `devctl` device health checks, real-runtime provisioning preflight, per-device lock handling, or local benchmark artifact/logcat capture contracts.
-3. Keep `devctl lane maestro` and `devctl lane journey` as promotion/closure gates.
+3. Keep `devctl lane maestro`, `devctl lane journey`, and the physical-device canary as the current promotion/closure path until QA-14 artifact parity is complete.
 
 ## Artifact Pruning
 
@@ -413,9 +414,16 @@ python3 tools/devctl/main.py governance docs-accuracy
 python3 tools/devctl/main.py governance screenshot-inventory-check
 python3 tools/devctl/main.py governance evidence-check docs/operations/evidence/wp-xx/YYYY-MM-DD-note.md
 python3 tools/devctl/main.py governance evidence-check-changed
+python3 tools/devctl/main.py governance launch-readiness
 python3 tools/devctl/main.py governance validate-pr-body /tmp/pr-body.md
 python3 tools/devctl/main.py governance stage-close-gate /tmp/pr-body.md
 python3 tools/devctl/main.py governance self-test
+```
+
+Wrapper:
+
+```bash
+bash scripts/dev/launch-readiness.sh
 ```
 
 ## Docs Update Checklist

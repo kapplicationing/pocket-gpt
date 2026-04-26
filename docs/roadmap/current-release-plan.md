@@ -38,6 +38,12 @@ Ship a usable privacy-first Android MVP under soft-gate pilot policy with comple
 2. Publish promote/hold decision memo with explicit constraints and follow-ups.
 3. Keep policy updates in board + ticket specs only.
 
+### Phase 4: Play Store submission readiness
+
+1. Finalize the cross-functional submission package only after `PROD-10` required rows pass.
+2. Keep submission copy, assets, and privacy/support metadata aligned to verified behavior only.
+3. Use `docs/operations/play-store-launch-program.md` for the full owner/dependency split and `docs/operations/play-store-submission-readiness.md` for the final package checklist.
+
 ## Required pre-promotion signals
 
 1. Unit and required device lanes pass.
@@ -52,3 +58,4 @@ Ship a usable privacy-first Android MVP under soft-gate pilot policy with comple
 - Active ticket specs: `docs/operations/tickets/`
 - Evidence inventory and retention policy: `docs/operations/evidence/index.md`
 - Launch policy + decision artifacts: `docs/operations/tickets/prod-09-soft-gate-pilot-policy.md`, `docs/operations/tickets/prod-10-launch-gate-matrix.md`
+- Full launch execution split: `docs/operations/play-store-launch-program.md`

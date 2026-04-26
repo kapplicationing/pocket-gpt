@@ -18,14 +18,9 @@ python3 tools/devctl/main.py doctor
 
 If `doctor` fails, fix issues first.
 
-## 3) Run the confidence baseline (4 commands)
+## 3) Run the confidence baseline
 
-```bash
-python3 tools/devctl/main.py doctor
-bash scripts/dev/test.sh quick
-python3 tools/devctl/main.py lane android-instrumented
-python3 tools/devctl/main.py lane maestro
-```
+Use `scripts/dev/README.md` for the current command ladder. Start with `doctor` and `bash scripts/dev/test.sh fast`, then expand to the relevant device lanes from there.
 
 For UI-focused changes, also run:
 

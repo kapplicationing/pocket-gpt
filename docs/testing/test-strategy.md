@@ -1,6 +1,6 @@
 # Test Strategy (Canonical Playbook)
 
-Last updated: 2026-03-15
+Last updated: 2026-04-25
 
 ## Source Of Truth
 
@@ -35,39 +35,28 @@ Last updated: 2026-03-15
 | Local host/unit lanes | fastest turnaround; lowest setup cost; easy debug cycle | cannot validate full Android UI/runtime behavior | per-save iteration, contract and reducer tests |
 | Local Android device (`devctl`) | production-like behavior, richest diagnostics (`journey-report.json`, local screenshots/logcat), deterministic preflight contracts | limited parallelism; depends on attached hardware state | root-cause debugging, release/promotion confidence, runtime closure |
 | CI emulator lanes | deterministic and repeatable required checks; easy branch protection integration | slower than local loop; emulator fidelity limits | required PR/main gates and broad baseline confidence |
-| Maestro Cloud (supplemental) | hosted fan-out; parallel suite expansion; shared cloud reports | queue/network variance; not a replacement for local preflight contracts | nightly/regression expansion, cross-config supplemental coverage |
+| Maestro Cloud / hosted automation | hosted fan-out; parallel suite expansion; shared cloud reports | queue/network variance; still requires artifact parity and one physical-device canary | default execution path for machine-verifiable reruns under `QA-14`; broad regression expansion once parity is proven |
 
 ## Value-Per-Minute Cadence
 
-| When | Primary Commands | Target Runtime | Decision Value |
-|---|---|---|---|
-| Per-save | `bash scripts/dev/test.sh fast` | 2-8 min | catches common logic regressions early |
-| Targeted bug repro loop | scoped Maestro flow in `tmp/` + logcat dump/scan (see `docs/testing/runbooks.md`) | 3-15 min | fastest device-level crash signature isolation for one path |
-| Pre-push | `bash scripts/dev/test.sh merge` | 10-25 min | validates merge-equivalent safety net |
-| Runtime/UI change local check | `python3 tools/devctl/main.py lane android-instrumented` + `python3 tools/devctl/main.py lane maestro` | 10-35 min | validates on-device runtime/UI wiring |
-| PR high-risk gate | CI `lifecycle-e2e-first-run` | 10-35 min | blocks critical lifecycle regressions before merge |
-| Every `main` push | CI `lifecycle-e2e-first-run` (required) | 10-35 min | protects your direct-to-main development path |
-| Nightly | emulator matrix + Maestro smoke + first-run lifecycle + optional cloud-first-run | 45-180 min | catches drift/flakes across wider configs |
-| Weekly release rehearsal | stage-2/hardware closure lanes + evidence packet | half-day | final production-like launch confidence |
+1. Per-save: use the fastest changed-file checks for logic and contract changes.
+2. Targeted bug repro loop: use a scoped Maestro flow plus logcat when one device path is failing.
+3. Pre-push: use merge-equivalent validation.
+4. Runtime/UI change local check: use the relevant device lanes from the command contract.
+5. Weekly release rehearsal: use stage-2/device closure lanes plus the evidence packet.
 
 ## Lane Policy
 
-1. `bash scripts/dev/test.sh fast` for fast changed-file confidence.
-2. scoped Maestro + logcat loop for device-specific crash/hang debugging only (not merge/release signoff).
-3. `python3 tools/devctl/main.py gate merge-unblock` for day-to-day unblock safety.
-4. `python3 tools/devctl/main.py gate promotion [--include-screenshot-pack]` for promotion readiness.
-5. `bash scripts/dev/test.sh merge` remains the canonical broad merge-equivalent unit/contract lane.
-6. `python3 tools/devctl/main.py lane android-instrumented` for Android smoke.
-7. `python3 tools/devctl/main.py lane maestro` for E2E app workflows; prefer tag-scoped runs when you only need one risk slice (for example `--include-tags smoke` or `--include-tags model-management`), and use the bundle-download scoped repro recipe for remote-manifest multi-artifact validation.
-8. `python3 tools/devctl/main.py lane journey` for strict send/runtime journey evidence; add `--steps instrumentation,send-capture,maestro` only when you explicitly want Maestro replay in the same lane.
-9. `python3 tools/devctl/main.py lane screenshot-pack [--product-signal-only]` for UI screenshot contract.
-10. Stage-2 runtime closure lanes remain physical-device signoff lanes.
+1. `scripts/dev/README.md` owns exact command syntax.
+2. Choose the narrowest lane that proves the changed risk.
+3. Prefer `fast` for iteration, `merge` for merge-equivalent safety, `android-instrumented` for startup/runtime smoke, `maestro` for workflow coverage, `journey` for strict send/runtime evidence, `screenshot-pack` for screenshot contract, and physical-device stage-2 lanes for closure evidence.
+4. Use scoped Maestro + logcat loops only for one device-specific crash/hang path.
 
 ## Merge-Unblock vs Promotion Gates
 
 1. Merge-unblock gate contract:
    - `merge` + `doctor` + `android-instrumented`
-   - risk-triggered lifecycle flow (`tests/maestro/scenario-first-run-download-chat.yaml`)
+   - risk-triggered lifecycle flow (`tests/maestro/scenario-first-run-download-chat.yaml`) executed through the hardened wrapper `python3 tools/devctl/main.py lane maestro --flows ...`
 2. Promotion gate contract:
    - `merge` + `doctor` + `android-instrumented` + `maestro` + strict `journey`
    - optional `screenshot-pack` via `--include-screenshot-pack`
@@ -85,7 +74,7 @@ Last updated: 2026-03-15
    - PR label is one of `risk:e2e-lifecycle`, `risk:runtime`, `risk:provisioning`, or
    - high-risk paths change (mobile runtime/provisioning/download/chat and shared app-runtime/native-bridge paths).
 3. Every push to `main` runs `lifecycle-e2e-first-run` and blocks on failure.
-4. Lifecycle gate executes `tests/maestro/scenario-first-run-download-chat.yaml`.
+4. Lifecycle gate executes `tests/maestro/scenario-first-run-download-chat.yaml` through the hardened `devctl lane maestro --flows ...` path rather than raw `maestro test`.
 5. Gate allows one bounded clean-state retry; first-failure artifacts are preserved for triage.
 
 ## CI Baseline
@@ -95,7 +84,7 @@ Primary workflow: `.github/workflows/ci.yml`
 1. Hosted required checks: `unit-and-host-tests`, `android-lint`, `native-build-package-check`, `android-instrumented-smoke`, `lifecycle-e2e-first-run` (risk-conditional on PRs, always-on for `main`).
 2. `android-instrumented-smoke` is intentionally scoped to two deterministic checks: onboarding completion (`MainActivityUiSmokeTest#onboardingFlowCanProgressAndComplete`) plus the focused model-management Compose contract (`ModelManagementSheetComposeContractTest`). Full first-run/download/send behavior stays in lifecycle E2E.
 3. Governance checks run docs drift/health/accuracy and governance self-tests.
-4. Nightly workflows provide emulator matrix coverage and Maestro supplemental coverage (including first-run lifecycle and the model-management split smoke); cloud runs execute when API key is configured and should stay tag-scoped and short.
+4. Nightly workflows provide emulator matrix coverage and cloud-first hosted coverage (including first-run lifecycle and the model-management split smoke); hosted runs should stay tag-scoped and short.
 5. Required checks for branch protection should include `lifecycle-e2e-first-run`.
 
 ## Engineering Principles (Applied)
@@ -109,7 +98,8 @@ Primary workflow: `.github/workflows/ci.yml`
 
 1. Local `devctl` lanes are the fastest path to root cause because they bundle preflight checks, provisioning sanity, structured runtime snapshots, screenshots, and logcat in one run.
 2. CI emulators are the best place for deterministic required checks that protect `main` and enforce contracts consistently.
-3. Cloud runs are most useful for supplemental fan-out and hosted reports, not as the only release gate.
+3. Cloud/device automation is the default path for machine-verifiable reruns once artifact parity is proven, but it is still not a replacement for the physical-device canary or human-required moderation.
+4. The preferred launch sequence is code closure first, cloud-first reruns second, physical-device canary third, and human-required moderation last.
 4. First-run lifecycle failures can be environment-sensitive; preserving first-attempt artifacts is essential even when retry passes.
 5. Cloud smoke should validate one focused contract per flow; benchmark and qualification paths should be tagged separately and kept out of smoke/default fan-out.
 
@@ -126,6 +116,8 @@ Human-required checkpoints:
 1. Physical-device environment control and anomalies
 2. Moderated usability packet evaluation
 3. Final go/no-go call when multiple evidence sources conflict
+
+Cloud/device automation is the default execution path for machine-verifiable QA evidence. Use `docs/testing/cloud-first-qa-operating-model.md` for the operating split between cloud/agent runs and human-required moderation.
 
 ## Evidence Rules
 

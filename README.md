@@ -2,16 +2,23 @@
 
 Offline, privacy-first AI assistant for Android — runs large language models directly on your phone.
 
+Source of truth:
+- Runnable commands live in `scripts/dev/README.md`.
+- Current launch scope, claim boundaries, and readiness order live in `docs/operations/play-store-launch-program.md` and `docs/operations/tickets/prod-10-launch-gate-matrix.md`.
+
 ## Features
 
 - **Offline-first** — all AI processing happens locally, no cloud dependencies
 - **Streaming responses** — real-time token-by-token display
-- **Model routing** — automatic model selection based on device state (0.8B/2B)
+- **Model routing** — automatic model selection based on device state
 - **Performance profiles** — BALANCED / FAST / BATTERY modes
 - **GPU acceleration** — OpenCL/Hexagon backend support
-- **Local tools** — date/time, notes lookup, web search
+- **Prompt-first local tools** — validated local tool flows entered from prompt shortcuts
 - **Memory** — persistent context across sessions
-- **Image Q&A** — vision-capable multimodal inference
+- **Single-image Q&A** — one attached image can stay in the same chat thread
+- **Voice activation (limited beta)** — controlled/closed-track voice surface, not a broad public launch claim
+
+Launch scope note: public launch claims stay bounded to the core chat surface, prompt-first local tools, and single-image attach/Q&A. Voice remains a limited beta until evidence, privacy wording, and device-tier language are ready for wider promotion.
 
 ## Tech Stack
 
@@ -24,28 +31,16 @@ Offline, privacy-first AI assistant for Android — runs large language models d
 
 ## Supported Models
 
-- Qwen2.5-0.5B / 0.8B / 2B (Q4_K_M, Q8_0)
-- SmolLM2-135M / 360M / 1.7B
-- Phi3.5-mini-instruct
-- Gemma 4 E2B-it
+- Qwen3 0.6B
+- Qwen 3.5 0.8B
+- Qwen3 1.7B
+- Llama 3.2 1B
 
 ## Quick Start
 
-```bash
-# Clone and enter directory
-git clone https://github.com/your-org/pocket-gpt.git
-cd pocket-gpt
-
-# Run tests
-./gradlew test
-
-# Build debug APK
-./gradlew :apps/mobile-android:assembleDebug
-```
-
 **Requirements:** Android SDK 34+, Kotlin 1.9+, JDK 17+
 
-For full setup including device testing, see [scripts/dev/README.md](scripts/dev/README.md).
+Start from the canonical command guide in [scripts/dev/README.md](scripts/dev/README.md) for the current fast-test, build, device-lane, and release-readiness commands.
 
 ## Architecture
 
@@ -134,20 +129,6 @@ sequenceDiagram
 
 ## Contributing
 
-Contributions are welcome. Please ensure tests pass before submitting PRs:
-
-```bash
-# Run unit tests
-bash scripts/dev/test.sh fast
-
-# Run full test suite
-bash scripts/dev/test.sh merge
-```
-
-## License
-
-MIT License — see LICENSE file (to be added).
-
----
+Contributions are welcome. Use the canonical workflow in [scripts/dev/README.md](scripts/dev/README.md) for the current fast, merge, lane, and governance checks before opening a PR.
 
 For detailed documentation, see [`docs/`](docs/).

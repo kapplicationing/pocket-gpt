@@ -1,6 +1,6 @@
 # Implemented UX Behavior Reference
 
-Last updated: 2026-03-10  
+Last updated: 2026-04-26  
 Owner: Product + Android
 
 ## Purpose
@@ -13,16 +13,27 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 2. Selecting a tool item pre-fills composer text and closes the dialog.
 3. Tool shortcuts do not directly dispatch `runTool` from the dialog.
 4. No legacy tool-intent parser runs in send flow.
-5. Direct typed tool execution path (`runTool` + typed tool results) exists in ViewModel/controller code and test contracts, but is not currently bound to a primary user action.
+5. Send flow still parses model-emitted tool calls in the runtime path.
+6. Direct typed tool execution path (`runTool` + typed tool results) exists in ViewModel/controller code and test contracts, but is not currently bound to a primary user action or treated as a launch claim.
 
-## Privacy Sheet Behavior
+## Voice Activation (Limited Beta)
 
-1. Top-bar privacy icon opens an in-app privacy explainer sheet.
-2. Sheet copy currently states:
+1. `Advanced` settings include a voice activation section with:
+   - enable toggle
+   - model-readiness copy
+   - listener-status line
+   - setup/help CTAs for assistant role, battery settings, and app settings
+2. Voice activation is a limited-beta surface for controlled cohorts, not the default onboarding or broad public launch path.
+3. Public launch copy must stay bounded to the core chat surface, prompt-first tools, and single-image attach/Q&A until voice evidence, privacy wording, and device-tier language are ready.
+
+## Privacy Section Behavior
+
+1. `Advanced` settings include a collapsible Privacy section with the implemented policy summary.
+2. Section copy currently states:
    - chats/memory are local,
    - offline-only policy gates runtime network actions,
    - diagnostics export redacts sensitive keys.
-3. No in-sheet controls currently exist for per-tool toggles, retention window selection, or local reset/delete actions.
+3. No controls currently exist for per-tool toggles, retention window selection, or local reset/delete actions.
 
 ## Empty-State Prompt Cards
 
@@ -87,7 +98,7 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
    - `FirstAnswerDone`
    - `FollowUpDone`
    - `AdvancedUnlocked`
-2. `Get ready` is the primary blocked-state CTA and defaults to `0.8B` download path.
+2. `Get ready` is the primary blocked-state CTA and defaults to the `0.6B` download path.
 3. Tools and Advanced entry points are available by default (no follow-up unlock gate).
 4. Follow-up completion emits first-session telemetry and cue state.
 5. Stage/unlock flags are persisted across app restarts.
@@ -139,21 +150,20 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 
 ## Model Provisioning and Download Manager UX (Phase-2)
 
-1. The app now uses two bottom sheets:
-   - `Model library` for import, downloads, activation, removal, and storage
-   - `Runtime model` for load, offload, and lifecycle state
-2. Model library includes explicit sections for:
+1. The app now uses a single `ModelLibrary` bottom sheet with `Library` and `Runtime` tabs.
+2. `Library` includes explicit sections for:
    - required models
    - downloads
    - installed versions
    - storage summary
-3. Runtime model includes runtime load state, last-used model affordance, and installed versions that can be loaded now.
+3. `Runtime` includes runtime load state, last-used model affordance, and installed versions that can be loaded now.
 4. Import path remains available in all builds and writes versioned model records.
 5. Download path is available in the primary app build and supports queue/pause/resume/retry.
-6. Active downloads can be cancelled from the model library sheet; cancellation also cleans temporary files.
-7. Download completion result is `verified, activation pending` (no auto-activation).
-8. Installed versions can be manually activated from model library; active version deletion is blocked.
-9. Runtime unlock is only confirmed after activation + refresh startup checks.
+6. Active downloads can be cancelled from the library tab; cancellation also cleans temporary files.
+7. Manual download completion result is `verified, activation pending`.
+8. The `Get ready` path can auto-activate and load the matching version when a pending activation is set.
+9. Active version removal is guarded; the cleanup flow can clear the sole installed version when it is safe to do so.
+10. Runtime unlock is only confirmed after activation + refresh startup checks.
 
 ## Manifest Outage Behavior
 

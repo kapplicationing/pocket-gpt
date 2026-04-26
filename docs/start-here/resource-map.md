@@ -5,6 +5,7 @@ Use this map to jump to the right source quickly.
 ## Start Here
 
 - New joiner path: `docs/start-here/new-joiner.md`
+- Principal PM handover: `docs/start-here/principal-pm-handover.md`
 - Source-of-truth ownership: `docs/start-here/source-of-truth-matrix.md`
 - Documentation drift tracker: `docs/start-here/documentation-drift-register.md`
 
@@ -33,6 +34,7 @@ Use this map to jump to the right source quickly.
 
 - Current release plan: `docs/roadmap/current-release-plan.md`
 - Active board and ownership: `docs/operations/execution-board.md`
+- Release-unblock workstream split: `docs/operations/release-unblock-workstreams.md`
 - Ticket specs: `docs/operations/tickets/`
 - Evidence index and retention model: `docs/operations/evidence/index.md`
 - Privacy model and controls: `docs/security/privacy-model.md`

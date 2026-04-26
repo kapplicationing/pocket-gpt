@@ -1,6 +1,6 @@
 # Testing Runbooks
 
-Last updated: 2026-03-10
+Last updated: 2026-04-26
 
 These runbooks are short task guides. Strategy and gates stay in `docs/testing/test-strategy.md`.
 
@@ -45,6 +45,25 @@ Include screenshot contract checks when needed:
 python3 tools/devctl/main.py gate promotion --include-screenshot-pack
 ```
 
+## Runbook: Launch Readiness Snapshot
+
+```bash
+bash scripts/dev/launch-readiness.sh
+```
+
+Use this before weekly launch review, PM planning, or release-date discussion.
+It compiles the current execution board, `PROD-10`, and key launch-ticket statuses into two launch-readiness artifacts under `build/devctl/launch-readiness/`:
+
+1. `launch-readiness-report.json`
+2. `launch-readiness-report.md`
+
+Launch review ordering stays strict:
+
+1. Close code/contract blockers first.
+2. Run cloud-first machine-verifiable reruns second.
+3. Use one narrow physical-device canary third.
+4. Run moderated/human-required review last.
+
 ## Runbook: Android UI/Runtime Smoke
 
 ```bash
@@ -57,11 +76,10 @@ python3 tools/devctl/main.py lane maestro --include-tags model-management
 ## Runbook: Local Lifecycle E2E (First-Run Download -> Chat)
 
 ```bash
-./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=false :apps:mobile-android:assembleDebug
-APK_PATH="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
-adb install -r "${APK_PATH}"
-maestro --device "$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')" test tests/maestro/scenario-first-run-download-chat.yaml
+python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml
 ```
+
+Use the hardened lane entry instead of raw `maestro test` so the lifecycle run inherits the release-gate clear-state, seeded-runtime, and flow-materialization behavior.
 
 ## Runbook: Scoped Device Crash Repro (Maestro + Logcat Fast Loop)
 
@@ -188,34 +206,32 @@ bash scripts/dev/test.sh merge
 python3 tools/devctl/main.py lane android-instrumented
 python3 tools/devctl/main.py lane maestro
 python3 tools/devctl/main.py lane journey --steps instrumentation,send-capture,maestro
-maestro --device "$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')" test tests/maestro/scenario-first-run-download-chat.yaml
+python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml
 ```
 
 ## Runbook: Main-Push Blocking Lifecycle Check (CI Equivalent)
 
 ```bash
-./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=false :apps:mobile-android:assembleDebug
-APK_PATH="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
-adb install -r "${APK_PATH}"
-maestro --format junit --device "$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')" test tests/maestro/scenario-first-run-download-chat.yaml > tmp/lifecycle-e2e-first-run-local.xml
+python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml
 ```
 
-For CI-equivalent crash-signature guard behavior (logcat scan for app `SIGSEGV`/abort/fatal patterns), run:
+For CI-equivalent raw Maestro + crash-signature guard behavior, run:
 
 ```bash
 bash scripts/ci/run_lifecycle_e2e.sh local-manual
 ```
 
-## Runbook: Cloud Smoke (Supplemental)
+## Runbook: Cloud Smoke (Hosted Machine-Verifiable Rerun)
 
 ```bash
 bash scripts/dev/maestro-cloud-smoke.sh
 ```
 
+Use this as the hosted rerun path for machine-verifiable smoke coverage while `QA-14` is proving artifact parity against the local/devctl contract.
 This runs only flows tagged `cloud-smoke` under `tests/maestro-cloud/`.
-Keep long-running hosted benchmarks in dedicated scripts such as `bash scripts/dev/maestro-cloud-gpu-benchmark.sh`.
+Use this before widening to a physical-device canary. Keep one narrow physical-device canary for OEM/runtime issues and the final pre-promotion brush, and keep long-running hosted benchmarks in dedicated scripts such as `bash scripts/dev/maestro-cloud-gpu-benchmark.sh`.
 
-## Runbook: Cloud GPU vs CPU Benchmark (Supplemental)
+## Runbook: Cloud GPU vs CPU Benchmark (Hosted Benchmark)
 
 Runs a minimal first-run hosted-device benchmark that requires GPU qualification to succeed, then compares GPU-on vs GPU-off send duration on the same cloud device.
 

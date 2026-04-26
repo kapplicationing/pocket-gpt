@@ -13,7 +13,13 @@ Current tickets include:
 - `doc-02-product-ux-doc-sync-timeout-cancel-send-capture.md`
 - `eng-20-runtime-cancel-timeout-contract.md`
 - `eng-22-provisioning-startup-check-lane-blocker.md`
+- `eng-23-native-runtime-provisioning-sigill-unblock.md`
+- `eng-24-startup-readiness-metadata-self-healing.md`
+- `prod-12-human-required-gate-split.md`
+- `prod-13-play-store-submission-readiness.md`
 - `qa-13-send-capture-gate-operationalization.md`
+- `qa-14-cloud-first-qa-evidence-migration.md`
+- `qa-15-agent-assisted-qa-triage.md`
 - `sec-02-privacy-claim-parity-audit.md`
 - `ux-13-stuck-send-timeout-recovery.md`
 - `prod-09-soft-gate-pilot-policy.md`

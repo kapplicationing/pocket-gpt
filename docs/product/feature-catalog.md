@@ -1,6 +1,6 @@
 # Feature Catalog and Feasibility Bands
 
-Last updated: 2026-03-10
+Last updated: 2026-04-26
 
 This catalog lists current and possible features based on known technical constraints (mobile RAM/thermal limits, model/runtime maturity, and privacy requirements).
 
@@ -9,16 +9,16 @@ This catalog lists current and possible features based on known technical constr
 | Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
 |---|---|---|---|---|
 | Offline text chat | core assistant utility | first-token latency, memory/OOM | Implemented | Implemented (WP-11 gate complete with device evidence) |
-| In-app model provisioning + readiness recovery | enables normal-user runtime setup without shell commands | file import UX, artifact verification strictness | Implemented (WP-12 policy reused in app path) | Implemented (`Advanced` -> `Open model setup`, import + refresh checks) |
+| In-app model provisioning + readiness recovery | enables normal-user runtime setup without shell commands | file import UX, artifact verification strictness | Implemented (WP-12 policy reused in app path) | Implemented (release-gated; `ModelLibrary` import + refresh checks) |
 | Streaming responses | perceived speed and UX quality | runtime callback reliability | Implemented | Implemented (instrumented + Maestro flows validated) |
-| Model routing (`0.8B`/`2B` + optional fast-tier) | battery and thermal control | device-state signal quality | Implemented | Implemented (advanced controls + routing override validated) |
+| Model routing (`Qwen3 0.6B` / `Qwen3 1.7B` / `Llama 3.2 1B` / `Qwen 3.5 0.8B`) | battery and thermal control | device-state signal quality | Implemented | Implemented (advanced controls + routing override validated) |
 | Runtime performance profiles (`BATTERY`/`BALANCED`/`FAST`) | explicit speed vs battery control with deterministic runtime presets | profile tuning must not break timeout/recovery UX | Implemented (`PerformanceRuntimeConfig` contract) | Implemented (advanced controls profile selector + persisted restore) |
 | GPU acceleration toggle (capability-gated) | allows supported devices to opt into faster decode path | OpenCL/Hexagon backend packaging + runtime capability detection on device | Implemented | Implemented (toggle disabled when unsupported, persisted when supported) |
 | Runtime telemetry readout labels | faster triage for regressions and support | label correctness and user-facing clarity | Implemented | Implemented (first-token/total/prefill/decode/decode-rate/peak-rss in advanced details) |
-| Simple-first first-session lane | improves first-run clarity and reduces setup/control overload | must keep deterministic recovery + no dead-end setup path | Implemented | Implemented (`Get ready` default 0.8B path, advanced/tools available by default) |
-| Local tool runtime (3-5 tools) | practical daily utility | strict validation/sandboxing | Implemented (WP-05 closed) | Implemented (UI action + success/failure paths validated) |
+| Simple-first first-session lane | improves first-run clarity and reduces setup/control overload | must keep deterministic recovery + no dead-end setup path | Implemented | Implemented (`Get ready` default 0.6B path, advanced/tools available by default) |
+| Prompt-first local tools | practical daily utility without exposing a richer direct-tool launch surface | strict validation/sandboxing; launch claims must stay prompt-first | Implemented (WP-05 closed) | Implemented (prompt shortcuts prefill composer; validated success/failure paths) |
 | Memory v1 | continuity across sessions | retrieval quality + retention policy | Implemented (file-backed + pruning) | Implemented (session restore/switch continuity validated) |
-| Single-image Q&A | multimodal differentiation | image path latency and correctness | Implemented (WP-06 closed) | Implemented (image attach success/failure UX validated) |
+| Single-image attach + Q&A | multimodal differentiation without expanding to broad document/photo analytics claims | image path latency and correctness; launch claims stay bounded to one attached image in-thread | Implemented (WP-06 closed) | Implemented (single-image attach success/failure UX validated) |
 | Offline policy-aware network enforcement | trust and privacy claim integrity | strict runtime boundary wiring | Implemented (ENG-17) | Implemented (runtime startup checks + UX messaging) |
 | Resilience and startup guards | reduce crash/startup failure support load | guard correctness across OEM behavior | Implemented (WP-07 resilience closeout) | Implemented (runtime error banners + startup status) |
 | Runtime backend transparency | support/debug can identify runtime path quickly | backend identity correctness | Implemented | Implemented (backend chip + advanced-sheet backend details) |
@@ -29,11 +29,12 @@ This catalog lists current and possible features based on known technical constr
 | Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
 |---|---|---|---|---|
 | Expanded Android device-tier coverage | market expansion within Android install base | OEM variance and runtime compatibility qualification | Planned | Planned |
-| Strict JSON-schema tools | stronger safety guarantees | parser contract and test coverage | Implemented | Implemented (WP-11 UI integration validated) |
+| Voice activation and hands-free command path (limited beta only) | keeps voice in scope for controlled cohorts without turning it into a broad public launch promise | OEM battery policy, assistant-role setup, voice-model install, privacy wording | Implemented (limited-beta path) | Implemented (settings toggle + readiness/setup guidance); not a general launch claim |
+| Strict tool schema/runtime contract | stronger safety guarantees behind the prompt-first tool surface | parser/runtime contract coverage; should not be marketed as richer direct-tool UX on its own | Implemented | Implemented (runtime/UI contract retained behind prompt-first entry) |
 | Rich diagnostics dashboards | faster QA and regression triage | safe redaction + metrics consistency | Planned | Planned |
 | Better image workflows | broader use cases (documents/photos) | model quality on edge cases | Planned | Planned |
 
-## Band C: Voice Layer (Medium-Term)
+## Band C: Voice Expansion (Post-Limited-Beta)
 
 | Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
 |---|---|---|---|---|

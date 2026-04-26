@@ -19,6 +19,8 @@ Canonical ownership by concern:
 15. Repo-local skill for agent/test context: `.claude/skills/maestro-android-cli/SKILL.md`
 16. Repo-local testing ladder: `.claude/skills/maestro-android-cli/references/testing-map.md`
 17. Runtime performance E2E playbook and time-saver commands: `docs/testing/runtime-performance-e2e-playbook.md`
+18. Cloud-first QA operating model and human-vs-machine gate split: `docs/testing/cloud-first-qa-operating-model.md`
+19. Launch readiness snapshot runbook: `bash scripts/dev/launch-readiness.sh` and `docs/testing/runbooks.md`
 
 Consolidation rule:
 

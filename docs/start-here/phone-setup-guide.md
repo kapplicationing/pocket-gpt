@@ -43,7 +43,7 @@ Fix any issues before proceeding.
 ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleDebug
 ```
 
-APK location: `apps/mobile-android/build/outputs/apk/debug/`
+The debug APK is written to the module's Gradle output directory; use the `find` command below instead of hard-coding a build path.
 
 ### 3) Install on Phone
 

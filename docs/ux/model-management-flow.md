@@ -8,8 +8,8 @@ Lifecycle: Phase-2 implemented (versioned install + downloads + activation contr
 
 1. Download channel is enabled by default in the primary app build.
 2. Version activation auto-activates only when no active version exists for that model.
-3. Active version deletion is blocked; safe cleanup is enforced for temp/failed artifacts.
-4. Download continuation/recovery uses persisted task state + WorkManager.
+3. Active version deletion is guarded; safe cleanup is enforced for temp/failed artifacts and can clear the sole installed version when safe.
+4. Download continuation/recovery uses persisted task state plus the scheduler-backed manager.
 5. Provisioning registry is `modelId` keyed and supports baseline + dynamically discovered IDs.
 
 ## Runtime Controls Defaults
@@ -76,7 +76,7 @@ Provisioning readiness (`RuntimeProvisioningSnapshot`) is separate:
 ### Simple-first `Get ready` action
 
 1. Refresh manifest.
-2. Pick default `Qwen 3.5 0.8B (Q4)` version.
+2. Pick default `Qwen3 0.6B (Q4)` version.
 3. Enqueue download.
 4. On completion, activate if needed and refresh runtime checks.
 5. If manifest/download is unavailable, import path remains available.
@@ -84,7 +84,7 @@ Provisioning readiness (`RuntimeProvisioningSnapshot`) is separate:
 ### A) Local import
 
 1. Open `Advanced` -> `Open model library`.
-2. Import at least one required GGUF model (recommended first: `Qwen 3.5 0.8B (Q4)`).
+2. Import at least one required GGUF model (recommended first: `Qwen3 0.6B (Q4)`).
 3. App records versioned metadata:
    - absolute path
    - SHA-256
@@ -116,7 +116,7 @@ Provisioning readiness (`RuntimeProvisioningSnapshot`) is separate:
 2. Checksum/runtime mismatch never installs a version.
 3. Duplicate active non-terminal enqueue returns existing task ID.
 4. One active task per model/version.
-5. Active version cannot be removed until another version is activated.
+5. Active version removal is guarded and only allowed through the cleanup flow when it can safely clear the sole installed version.
 6. Bundled catalog fallback remains available when remote fetch fails.
 
 ## Manifest Outage Fallback

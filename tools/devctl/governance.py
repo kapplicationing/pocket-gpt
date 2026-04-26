@@ -6,6 +6,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from tools.devctl.subprocess_utils import DevctlError, REPO_ROOT, run_subprocess
 
@@ -76,6 +77,30 @@ DOCS_ACCURACY_MANIFEST_PATH = Path("docs/governance/docs-accuracy-manifest.json"
 DOCS_DRIFT_REPORT_PATH = Path("build/devctl/docs-drift-report.json")
 DOCS_DRIFT_REPORT_SCHEMA = "docs-drift-report-v1"
 DOCS_ACCURACY_MANIFEST_SCHEMA = "docs-accuracy-manifest-v1"
+LAUNCH_READINESS_OUTPUT_DIR = Path("build/devctl/launch-readiness")
+LAUNCH_READINESS_REPORT_SCHEMA = "launch-readiness-report-v1"
+
+LAUNCH_READINESS_TICKETS: dict[str, str] = {
+    "ENG-20": "docs/operations/tickets/eng-20-runtime-cancel-timeout-contract.md",
+    "ENG-23": "docs/operations/tickets/eng-23-native-runtime-provisioning-sigill-unblock.md",
+    "ENG-24": "docs/operations/tickets/eng-24-startup-readiness-metadata-self-healing.md",
+    "QA-13": "docs/operations/tickets/qa-13-send-capture-gate-operationalization.md",
+    "QA-14": "docs/operations/tickets/qa-14-cloud-first-qa-evidence-migration.md",
+    "QA-15": "docs/operations/tickets/qa-15-agent-assisted-qa-triage.md",
+    "PROD-11": "docs/operations/tickets/prod-11-pilot-support-incident-playbook.md",
+    "PROD-12": "docs/operations/tickets/prod-12-human-required-gate-split.md",
+    "PROD-13": "docs/operations/tickets/prod-13-play-store-submission-readiness.md",
+    "SEC-02": "docs/operations/tickets/sec-02-privacy-claim-parity-audit.md",
+    "MKT-08": "docs/operations/tickets/mkt-08-proof-asset-capture-and-listing-finalization.md",
+    "MKT-10": "docs/operations/tickets/mkt-10-claim-freeze-v1.md",
+}
+
+LAUNCH_READINESS_DOCS: dict[str, str] = {
+    "launch_program": "docs/operations/play-store-launch-program.md",
+    "submission_checklist": "docs/operations/play-store-submission-readiness.md",
+    "pm_handover": "docs/start-here/principal-pm-handover.md",
+    "listing_spec": "docs/ux/play-store-listing-spec.md",
+}
 
 DEFAULT_DOCS_GOVERNANCE_CONFIG: dict[str, object] = {
     "required_index_markers": {
@@ -978,6 +1003,227 @@ def stage_close_gate(pr_body_file: str, repo_root: Path = REPO_ROOT) -> None:
 
     evidence_check(evidence_path, repo_root=repo_root)
     print("Stage-close evidence gate passed.")
+
+
+def _extract_status_line(text: str) -> str | None:
+    match = re.search(r"^Status:\s*(.+?)\s*$", text, flags=re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def _extract_single_line_field(text: str, label: str) -> str | None:
+    match = re.search(rf"^{re.escape(label)}:\s*(.+?)\s*$", text, flags=re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def _extract_markdown_bullet_sections(text: str, headings: list[str]) -> dict[str, list[str]]:
+    sections = {heading: [] for heading in headings}
+    current_heading: str | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("### "):
+            title = line.removeprefix("### ").strip()
+            current_heading = title if title in sections else None
+            continue
+        if current_heading is None:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- [ ] ") or stripped.startswith("- [x] "):
+            sections[current_heading].append(stripped[6:].strip())
+        elif stripped.startswith("- "):
+            sections[current_heading].append(stripped[2:].strip())
+    return sections
+
+
+def _parse_launch_matrix(matrix_text: str) -> dict[str, Any]:
+    in_matrix = False
+    rows: list[dict[str, str]] = []
+    for raw_line in matrix_text.splitlines():
+        stripped = raw_line.strip()
+        if stripped == "## Matrix":
+            in_matrix = True
+            continue
+        if in_matrix and stripped.startswith("## ") and stripped != "## Matrix":
+            break
+        if not in_matrix or not stripped.startswith("|"):
+            continue
+        columns = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(columns) != 8 or columns[0] in {"Story ID", "---"}:
+            continue
+        rows.append(
+            {
+                "story_id": columns[0],
+                "user_story": columns[1],
+                "gate_type": columns[6],
+                "current_state": columns[7],
+            }
+        )
+
+    required_rows = [row for row in rows if row["gate_type"].lower() == "required"]
+    advisory_rows = [row for row in rows if row["gate_type"].lower() == "advisory"]
+    required_pass = sum(1 for row in required_rows if row["current_state"].startswith("PASS"))
+    required_not_passing = [row for row in required_rows if not row["current_state"].startswith("PASS")]
+    return {
+        "rows": rows,
+        "required_rows": required_rows,
+        "advisory_rows": advisory_rows,
+        "required_pass": required_pass,
+        "required_total": len(required_rows),
+        "required_not_passing": required_not_passing,
+    }
+
+
+def _load_ticket_statuses(repo_root: Path) -> list[dict[str, str]]:
+    tickets: list[dict[str, str]] = []
+    for ticket_id, rel_path in LAUNCH_READINESS_TICKETS.items():
+        path = repo_root / rel_path
+        text = _read_file(path)
+        tickets.append(
+            {
+                "ticket_id": ticket_id,
+                "path": rel_path,
+                "status": _extract_status_line(text) or "Unknown",
+                "owner": _extract_single_line_field(text, "Owner") or "Unknown",
+            }
+        )
+    return tickets
+
+
+def _launch_readiness_markdown(payload: dict[str, Any]) -> str:
+    matrix = payload["matrix"]
+    board = payload["execution_board"]
+    lines: list[str] = [
+        "# Launch Readiness Report",
+        "",
+        f"Generated: {payload['generated_at_utc']}",
+        f"Overall readiness: `{payload['overall_readiness']}`",
+        f"Promotion status (`PROD-10`): `{payload['prod10_status']}`",
+        f"Required launch rows passing: `{matrix['required_pass']}/{matrix['required_total']}`",
+        "",
+        "## Required Rows Not Passing",
+        "",
+    ]
+
+    if matrix["required_not_passing"]:
+        for row in matrix["required_not_passing"]:
+            lines.append(f"- `{row['story_id']}` {row['user_story']}: {row['current_state']}")
+    else:
+        lines.append("- None.")
+
+    lines.extend(
+        [
+            "",
+            "## Execution Board",
+            "",
+            f"- Last updated: {board['last_updated'] or 'unknown'}",
+            f"- Blocked items: {len(board['blocked'])}",
+            f"- In progress items: {len(board['in_progress'])}",
+            "",
+            "### Blocked",
+            "",
+        ]
+    )
+    if board["blocked"]:
+        for item in board["blocked"]:
+            lines.append(f"- {item}")
+    else:
+        lines.append("- None.")
+
+    lines.extend(["", "### In Progress", ""])
+    if board["in_progress"]:
+        for item in board["in_progress"]:
+            lines.append(f"- {item}")
+    else:
+        lines.append("- None.")
+
+    lines.extend(["", "## Launch Program Ticket Status", ""])
+    for ticket in payload["ticket_statuses"]:
+        lines.append(f"- `{ticket['ticket_id']}` {ticket['status']} — {ticket['owner']}")
+
+    lines.extend(["", "## Canonical Docs", ""])
+    for key, doc in payload["required_docs"].items():
+        state = "present" if doc["exists"] else "missing"
+        lines.append(f"- `{key}` `{state}` — `{doc['path']}`")
+
+    lines.extend(["", "## Next Actions", ""])
+    for item in payload["next_actions"]:
+        lines.append(f"- {item}")
+    return "\n".join(lines) + "\n"
+
+
+def launch_readiness_report(repo_root: Path = REPO_ROOT, output_dir: Path | None = None) -> tuple[Path, Path]:
+    matrix_path = repo_root / "docs/operations/tickets/prod-10-launch-gate-matrix.md"
+    board_path = repo_root / "docs/operations/execution-board.md"
+
+    matrix_text = _read_file(matrix_path)
+    board_text = _read_file(board_path)
+    matrix = _parse_launch_matrix(matrix_text)
+    board_sections = _extract_markdown_bullet_sections(
+        board_text,
+        headings=["In Progress", "Blocked", "Ready", "Done (Recent)"],
+    )
+    ticket_statuses = _load_ticket_statuses(repo_root)
+    required_docs = {
+        key: {
+            "path": rel_path,
+            "exists": (repo_root / rel_path).exists(),
+        }
+        for key, rel_path in LAUNCH_READINESS_DOCS.items()
+    }
+
+    next_actions: list[str] = []
+    next_actions.extend(board_sections["Blocked"][:3])
+    for ticket in ticket_statuses:
+        if ticket["status"].strip().lower() != "done":
+            next_actions.append(f"Close {ticket['ticket_id']} ({ticket['status']}).")
+    if not all(item["exists"] for item in required_docs.values()):
+        next_actions.append("Restore any missing launch-program canon documents before the next readiness review.")
+
+    deduped_next_actions: list[str] = []
+    seen_actions: set[str] = set()
+    for item in next_actions:
+        normalized = item.strip()
+        if not normalized or normalized in seen_actions:
+            continue
+        seen_actions.add(normalized)
+        deduped_next_actions.append(normalized)
+
+    prod10_status = _extract_status_line(matrix_text) or "Unknown"
+    overall_readiness = "ready" if prod10_status.lower() == "promote" and not matrix["required_not_passing"] else "blocked"
+    payload: dict[str, Any] = {
+        "schema": LAUNCH_READINESS_REPORT_SCHEMA,
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "overall_readiness": overall_readiness,
+        "prod10_status": prod10_status,
+        "matrix": matrix,
+        "execution_board": {
+            "last_updated": _extract_single_line_field(board_text, "Last updated"),
+            "in_progress": board_sections["In Progress"],
+            "blocked": board_sections["Blocked"],
+            "ready": board_sections["Ready"],
+            "done_recent": board_sections["Done (Recent)"],
+        },
+        "ticket_statuses": ticket_statuses,
+        "required_docs": required_docs,
+        "next_actions": deduped_next_actions,
+    }
+
+    resolved_output_dir = repo_root / (output_dir or LAUNCH_READINESS_OUTPUT_DIR)
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = resolved_output_dir / "launch-readiness-report.json"
+    markdown_path = resolved_output_dir / "launch-readiness-report.md"
+    json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text(_launch_readiness_markdown(payload), encoding="utf-8")
+
+    print(f"Launch readiness report written: {json_path.relative_to(repo_root)}")
+    print(f"Launch readiness summary: {markdown_path.relative_to(repo_root)}")
+    print(
+        "Launch readiness snapshot: "
+        f"PROD-10={prod10_status}; required_pass={matrix['required_pass']}/{matrix['required_total']}; "
+        f"blocked_items={len(board_sections['Blocked'])}"
+    )
+    return json_path, markdown_path
 
 
 MODEL_CATALOG_PATH = Path("packages/inference-adapters/src/commonMain/kotlin/com/pocketagent/inference/ModelCatalog.kt")

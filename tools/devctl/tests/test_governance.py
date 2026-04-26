@@ -420,6 +420,73 @@ class GovernanceTest(unittest.TestCase):
             )
             governance.screenshot_inventory_check(root)
 
+    def _seed_launch_readiness_repo(self, root: Path) -> None:
+        (root / "docs/operations/tickets").mkdir(parents=True, exist_ok=True)
+        (root / "docs/start-here").mkdir(parents=True, exist_ok=True)
+        (root / "docs/ux").mkdir(parents=True, exist_ok=True)
+
+        (root / "docs/operations/execution-board.md").write_text(
+            "\n".join(
+                [
+                    "# Execution Board",
+                    "",
+                    "Last updated: 2026-04-25",
+                    "",
+                    "### In Progress",
+                    "- [ ] ENG-20 runtime cancel/timeout contract hardening",
+                    "",
+                    "### Blocked",
+                    "- [ ] QA-11 rerun blocked by native SIGILL in provisioning preflight",
+                    "",
+                    "### Ready",
+                    "- [ ] QA-14 cloud-first QA evidence migration",
+                    "",
+                    "### Done (Recent)",
+                    "- [x] PROD-09 soft-gate pilot policy published",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        (root / "docs/operations/tickets/prod-10-launch-gate-matrix.md").write_text(
+            "\n".join(
+                [
+                    "# PROD-10 Launch Gate Matrix",
+                    "",
+                    "Status: Hold",
+                    "",
+                    "## Matrix",
+                    "",
+                    "| Story ID | User Story | UX Flow Reference | Test IDs / Lanes | Evidence IDs | Claim ID | Gate Type | Current State |",
+                    "|---|---|---|---|---|---|---|---|",
+                    "| S-A | Offline quick answer works in first session | doc | lane | evidence | C-01 | Required | PASS |",
+                    "| S-D | User can recover from `NotReady` to `Ready` | doc | lane | evidence | C-04 | Required | FAIL (native SIGILL in provisioning preflight) |",
+                    "| S-E | Privacy boundaries and controls are understandable | doc | lane | evidence | C-05 | Required | FAIL (moderated metrics missing) |",
+                    "| A-01 | Time-to-first-useful-answer meets pilot target | doc | lane | evidence | C-06 | Advisory | Pending |",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        for ticket_id, rel_path in governance.LAUNCH_READINESS_TICKETS.items():
+            path = root / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if ticket_id == "ENG-20":
+                status = "Done for host-side contract; pending final strict journey evidence under `QA-11`"
+            else:
+                status = "Done" if ticket_id == "QA-13" else "Ready"
+            path.write_text(
+                f"# {ticket_id}\n\nOwner: Owner {ticket_id}\nStatus: {status}\n",
+                encoding="utf-8",
+            )
+
+        for rel_path in governance.LAUNCH_READINESS_DOCS.values():
+            path = root / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"# {path.stem}\n", encoding="utf-8")
+
 
     def _seed_model_audit_repo(self, root: Path) -> None:
         catalog_dir = root / "packages/inference-adapters/src/commonMain/kotlin/com/pocketagent/inference"
@@ -470,6 +537,36 @@ class GovernanceTest(unittest.TestCase):
         scripts_dir = root / "scripts/dev"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         (scripts_dir / "maestro-gpu-matrix-common.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    def test_launch_readiness_report_writes_json_and_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed_launch_readiness_repo(root)
+
+            json_path, markdown_path = governance.launch_readiness_report(root)
+
+            self.assertTrue(json_path.exists())
+            self.assertTrue(markdown_path.exists())
+
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual("launch-readiness-report-v1", payload["schema"])
+            self.assertEqual("Hold", payload["prod10_status"])
+            self.assertEqual("blocked", payload["overall_readiness"])
+            self.assertEqual(1, payload["matrix"]["required_pass"])
+            self.assertEqual(3, payload["matrix"]["required_total"])
+            self.assertEqual(len(governance.LAUNCH_READINESS_TICKETS), len(payload["ticket_statuses"]))
+            self.assertIn(
+                "QA-11 rerun blocked by native SIGILL in provisioning preflight",
+                payload["execution_board"]["blocked"][0],
+            )
+
+            summary = markdown_path.read_text(encoding="utf-8")
+            self.assertIn("Launch Readiness Report", summary)
+            self.assertIn("`S-D` User can recover from `NotReady` to `Ready`", summary)
+            self.assertIn(
+                "- `ENG-20` Done for host-side contract; pending final strict journey evidence under `QA-11` — Owner ENG-20",
+                summary,
+            )
 
     def test_model_audit_passes_for_consistent_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

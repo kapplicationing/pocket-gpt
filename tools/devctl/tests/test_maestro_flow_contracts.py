@@ -34,11 +34,11 @@ class MaestroFlowContractsTest(unittest.TestCase):
             "bootstrap-to-ready must not start with hideKeyboard because Maestro can resolve that to a back press.",
         )
 
-    def test_cloud_send_after_ready_flow_is_not_part_of_default_cloud_smoke_tag(self) -> None:
+    def test_cloud_send_after_ready_flow_is_part_of_default_cloud_smoke_tag(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro-cloud/scenario-send-after-ready-smoke.yaml"
         text = flow_path.read_text(encoding="utf-8")
         self.assertIn("- cloud-send", text)
-        self.assertNotIn("- cloud-smoke", text)
+        self.assertIn("- cloud-smoke", text)
 
     def test_cloud_open_model_library_uses_text_contract_and_top_bar_entry(self) -> None:
         helper_paths = (
@@ -68,15 +68,26 @@ class MaestroFlowContractsTest(unittest.TestCase):
 
     def test_ensure_runtime_loaded_uses_downloaded_models_load_path(self) -> None:
         helper_expectations = (
-            (REPO_ROOT / "tests/maestro/shared/ensure-runtime-loaded.yaml", True),
-            (REPO_ROOT / "tests/maestro-cloud/shared/ensure-runtime-loaded.yaml", True),
+            (
+                REPO_ROOT / "tests/maestro/shared/ensure-runtime-loaded.yaml",
+                True,
+                'text: "Downloaded models"',
+                None,
+            ),
+            (
+                REPO_ROOT / "tests/maestro-cloud/shared/ensure-runtime-loaded.yaml",
+                True,
+                "recover-runtime-from-model-library.yaml",
+                'visible: "Setup"',
+            ),
         )
-        for helper_path, expect_enabled_send in helper_expectations:
+        for helper_path, expect_enabled_send, recovery_marker, explicit_setup_marker in helper_expectations:
             with self.subTest(helper=helper_path.relative_to(REPO_ROOT).as_posix()):
                 text = helper_path.read_text(encoding="utf-8")
-                self.assertIn('text: "Downloaded models"', text)
+                self.assertIn(recovery_marker, text)
                 self.assertIn('visible: "Load"', text)
-                self.assertIn('visible: "Download"', text)
+                if explicit_setup_marker is not None:
+                    self.assertIn(explicit_setup_marker, text)
                 self.assertIn('notVisible: "Setup"', text)
                 self.assertIn('notVisible: "Retry"', text)
                 if expect_enabled_send:
@@ -102,7 +113,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('notVisible: "Retry"', text)
         self.assertIn('id: "send_button"', text)
         self.assertIn('enabled: true', text)
-        self.assertIn('visible: "Send"', text)
+        self.assertIn('id: "message_bubble_assistant_complete"', text)
         self.assertIn('visible: "Loading…"', text)
 
     def test_download_settings_smoke_uses_unified_model_library_path(self) -> None:

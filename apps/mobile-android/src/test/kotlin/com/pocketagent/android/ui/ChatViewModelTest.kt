@@ -172,7 +172,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `advanced controls are available on first launch`() = runTest(dispatcher) {
+    fun `advanced controls remain openable on first launch before unlock`() = runTest(dispatcher) {
         val viewModel = ChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
@@ -181,7 +181,7 @@ class ChatViewModelTest {
         )
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value.advancedUnlocked)
+        assertFalse(viewModel.uiState.value.advancedUnlocked)
         viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.AdvancedSettings)
         assertTrue(viewModel.uiState.value.activeSurface is com.pocketagent.android.ui.state.ModalSurface.AdvancedSettings)
 
@@ -380,7 +380,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `simple-first progress still advances milestones when advanced controls are already available`() = runTest(dispatcher) {
+    fun `simple-first progress unlocks advanced controls after the follow up`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
         val viewModel = ChatViewModel(
             runtimeFacade = runtime,
@@ -392,14 +392,14 @@ class ChatViewModelTest {
 
         viewModel.completeOnboarding()
         advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.advancedUnlocked)
+        assertFalse(viewModel.uiState.value.advancedUnlocked)
 
         viewModel.onComposerChanged("first question")
         viewModel.sendMessage()
         advanceUntilIdle()
         assertTrue(viewModel.uiState.value.firstAnswerCompleted)
         assertFalse(viewModel.uiState.value.followUpCompleted)
-        assertTrue(viewModel.uiState.value.advancedUnlocked)
+        assertFalse(viewModel.uiState.value.advancedUnlocked)
         assertEquals(FirstSessionStage.FIRST_ANSWER_DONE, viewModel.uiState.value.firstSessionStage)
 
         viewModel.onComposerChanged("follow up question")
@@ -408,8 +408,8 @@ class ChatViewModelTest {
         assertTrue(viewModel.uiState.value.firstAnswerCompleted)
         assertTrue(viewModel.uiState.value.followUpCompleted)
         assertTrue(viewModel.uiState.value.advancedUnlocked)
-        assertEquals(FirstSessionStage.FOLLOW_UP_DONE, viewModel.uiState.value.firstSessionStage)
-        assertFalse(viewModel.uiState.value.firstSessionTelemetryEvents.any { it.eventName == "advanced_unlocked" })
+        assertEquals(FirstSessionStage.ADVANCED_UNLOCKED, viewModel.uiState.value.firstSessionStage)
+        assertTrue(viewModel.uiState.value.firstSessionTelemetryEvents.any { it.eventName == "advanced_unlocked" })
     }
 
     @Test

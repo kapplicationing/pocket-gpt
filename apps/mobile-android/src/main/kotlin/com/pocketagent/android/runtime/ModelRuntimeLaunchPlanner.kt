@@ -5,6 +5,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelspec.NormalizedModelCatalogRegistry
 import com.pocketagent.core.model.ModelArtifactRole
+import com.pocketagent.core.model.ModelVariantSpec
 import com.pocketagent.core.model.RuntimeBackendFamilyTag
 import com.pocketagent.nativebridge.ModelRuntimeFormatHint
 import com.pocketagent.nativebridge.ModelRuntimeFormatProbeInput
@@ -38,9 +39,10 @@ class DefaultModelRuntimeLaunchPlanner(
 ) : ModelRuntimeLaunchPlanner {
     override fun planInstalledModel(descriptor: ModelVersionDescriptor): ModelRuntimeLaunchPlan {
         val spec = catalogRegistry.specFor(descriptor.modelId)
-        val variant = catalogRegistry.variantFor(descriptor.modelId, descriptor.version)
+        val variant = resolveVariant(descriptor.modelId, descriptor.version)
         val resolvedArtifacts = descriptor.artifacts
         val sideArtifactsByRole = resolvedArtifacts.groupBy { artifact -> artifact.role }
+        val primaryModelFile = File(descriptor.absolutePath)
         val formatHint = ModelRuntimeFormats.infer(
             ModelRuntimeFormatProbeInput(
                 modelId = descriptor.modelId,
@@ -54,18 +56,28 @@ class DefaultModelRuntimeLaunchPlanner(
             .orEmpty()
         val missingRequiredArtifacts = requiredArtifacts
             .filter { required ->
-                val matched = sideArtifactsByRole[required.role]
+                val matchingArtifactPresent = sideArtifactsByRole[required.role]
                     .orEmpty()
-                    .firstOrNull { artifact ->
-                        val explicit = artifact.absolutePath?.takeIf { it.isNotBlank() }?.let(::File)
-                        explicit?.exists() == true || artifact.fileName == required.locator.fileName
+                    .any { artifact ->
+                        val artifactPath = resolveInstalledArtifactPath(
+                            primaryModelFile = primaryModelFile,
+                            artifact = artifact,
+                        ) ?: return@any false
+                        val requiredFileName = required.locator.fileName?.trim().orEmpty()
+                        artifactPath.exists() &&
+                            (requiredFileName.isBlank() || artifactPath.name == requiredFileName)
                     }
-                matched == null
+                !matchingArtifactPresent
             }
             .map { artifact -> artifact.locator.fileName ?: artifact.role.name.lowercase() }
         val projectorPath = sideArtifactsByRole[ModelArtifactRole.MMPROJ]
             .orEmpty()
-            .mapNotNull { artifact -> artifact.absolutePath?.takeIf { path -> File(path).exists() } }
+            .mapNotNull { artifact ->
+                resolveInstalledArtifactPath(
+                    primaryModelFile = primaryModelFile,
+                    artifact = artifact,
+                )?.takeIf(File::exists)?.absolutePath
+            }
             .firstOrNull()
         return ModelRuntimeLaunchPlan(
             modelId = descriptor.modelId,
@@ -97,24 +109,79 @@ class DefaultModelRuntimeLaunchPlanner(
 
     override fun planDistributionVersion(version: ModelDistributionVersion): ModelRuntimeLaunchPlan {
         val spec = catalogRegistry.specFor(version.modelId)
-        val variant = catalogRegistry.variantFor(version.modelId, version.version)
-        val primaryArtifact = version.artifacts.first()
+        val variant = resolveVariant(version.modelId, version.version)
+        val primaryArtifact = version.artifacts.firstOrNull { artifact -> artifact.role == ModelArtifactRole.PRIMARY_GGUF }
+            ?: version.artifacts.first()
+        val formatHint = ModelRuntimeFormats.infer(
+            ModelRuntimeFormatProbeInput(
+                modelId = version.modelId,
+                modelVersion = version.version,
+                modelPath = primaryArtifact.fileName,
+                declaredQuantization = variant?.parameters?.quantization,
+            ),
+        )
+        val requiredArtifacts = variant?.artifactBundle?.requiredArtifacts()
+            ?.filter { artifact -> artifact.role != ModelArtifactRole.PRIMARY_GGUF }
+            .orEmpty()
+        val declaredArtifactsByRole = version.artifacts.groupBy { artifact -> artifact.role }
+        val missingRequiredArtifacts = requiredArtifacts
+            .filter { required ->
+                val requiredFileName = required.locator.fileName?.trim().orEmpty()
+                declaredArtifactsByRole[required.role]
+                    .orEmpty()
+                    .none { artifact ->
+                        requiredFileName.isBlank() || artifact.fileName == requiredFileName
+                    }
+            }
+            .map { artifact -> artifact.locator.fileName ?: artifact.role.name.lowercase() }
         return ModelRuntimeLaunchPlan(
             modelId = version.modelId,
             version = version.version,
-            formatHint = ModelRuntimeFormats.infer(
-                ModelRuntimeFormatProbeInput(
-                    modelId = version.modelId,
-                    modelVersion = version.version,
-                    modelPath = primaryArtifact.fileName,
-                    declaredQuantization = variant?.parameters?.quantization,
-                ),
-            ),
+            formatHint = formatHint,
             sourceKind = version.sourceKind.name,
             promptProfileId = version.promptProfileId ?: spec?.promptProfile?.profileId,
-            requiredBackendFamily = spec?.runtimeRequirements?.requiredBackendFamily,
+            requiredBackendFamily = when {
+                variant?.source?.kind?.name == "HUGGING_FACE" && spec?.runtimeRequirements?.requiredBackendFamily != null ->
+                    spec.runtimeRequirements.requiredBackendFamily
+                formatHint.requiresQualifiedGpu -> RuntimeBackendFamilyTag.OPENCL
+                else -> spec?.runtimeRequirements?.requiredBackendFamily
+            },
+            missingRequiredArtifacts = missingRequiredArtifacts,
             recommendedContextTokens = variant?.parameters?.contextLength ?: spec?.runtimeRequirements?.preferredContextTokens,
-            diagnostics = listOf("source=${version.sourceKind.name.lowercase()}"),
+            diagnostics = buildList {
+                add("source=${version.sourceKind.name.lowercase()}")
+                formatHint.normalizedToken?.let { token -> add("format=$token") }
+                if (missingRequiredArtifacts.isNotEmpty()) {
+                    add("missing=${missingRequiredArtifacts.joinToString(",")}")
+                }
+            },
         )
+    }
+
+    private fun resolveVariant(
+        modelId: String,
+        version: String?,
+    ): ModelVariantSpec? {
+        return catalogRegistry.variantFor(modelId, version)
+            ?: catalogRegistry.specFor(modelId)?.variants?.singleOrNull()
+    }
+
+    private fun resolveInstalledArtifactPath(
+        primaryModelFile: File,
+        artifact: InstalledArtifactDescriptor,
+    ): File? {
+        artifact.absolutePath
+            ?.takeIf { path -> path.isNotBlank() }
+            ?.let(::File)
+            ?.let { file -> if (file.exists()) return file else null }
+        if (artifact.fileName.isBlank()) {
+            return null
+        }
+        val artifactFileName = File(artifact.fileName)
+        if (artifactFileName.isAbsolute && artifactFileName.exists()) {
+            return artifactFileName
+        }
+        val sibling = primaryModelFile.parentFile?.resolve(artifact.fileName)
+        return sibling?.takeIf(File::exists)
     }
 }

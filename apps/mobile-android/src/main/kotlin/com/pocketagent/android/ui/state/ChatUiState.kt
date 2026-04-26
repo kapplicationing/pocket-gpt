@@ -213,7 +213,7 @@ data class ChatUiState(
     val activeSurface: ModalSurface = ModalSurface.None,
     val onboardingPage: Int = 0,
     val firstSessionStage: FirstSessionStage = FirstSessionStage.ONBOARDING,
-    val advancedUnlocked: Boolean = true,
+    val advancedUnlocked: Boolean = false,
     val firstAnswerCompleted: Boolean = false,
     val followUpCompleted: Boolean = false,
     val firstSessionTelemetryEvents: List<FirstSessionTelemetryEvent> = emptyList(),

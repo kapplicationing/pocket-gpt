@@ -47,12 +47,11 @@ class AndroidChatConversationService(
     internal fun addAttachedImage(state: ChatUiState, imagePath: String): ChatUiState {
         val trimmed = imagePath.trim()
         if (trimmed.isBlank()) return state
-        val current = state.composer.attachedImages
-        if (current.size >= 5) return state
-        if (current.contains(trimmed)) return state
+        val current = state.composer.attachedImages.firstOrNull()
+        if (current == trimmed) return state
         return state.copy(
             composer = state.composer.copy(
-                attachedImages = current + trimmed,
+                attachedImages = listOf(trimmed),
             ),
         )
     }
@@ -78,7 +77,10 @@ class AndroidChatConversationService(
             composer = state.composer.copy(
                 text = message.content,
                 editingMessageId = messageId,
-                attachedImages = message.imagePaths.ifEmpty { listOfNotNull(message.imagePath) },
+                attachedImages = launchSafeAttachedImages(
+                    imagePaths = message.imagePaths,
+                    legacyImagePath = message.imagePath,
+                ),
             ),
         )
     }
@@ -138,11 +140,26 @@ class AndroidChatConversationService(
             }.copy(
                 composer = state.composer.copy(
                     text = userMessage.content,
-                    attachedImages = userMessage.imagePaths.ifEmpty { listOfNotNull(userMessage.imagePath) },
+                    attachedImages = launchSafeAttachedImages(
+                        imagePaths = userMessage.imagePaths,
+                        legacyImagePath = userMessage.imagePath,
+                    ),
                 ),
             ),
             shouldPersist = true,
         )
+    }
+
+    private fun launchSafeAttachedImages(
+        imagePaths: List<String>,
+        legacyImagePath: String? = null,
+    ): List<String> {
+        val firstImage = (imagePaths + listOfNotNull(legacyImagePath))
+            .asSequence()
+            .map(String::trim)
+            .firstOrNull { it.isNotBlank() }
+            ?: return emptyList()
+        return listOf(firstImage)
     }
 
     internal fun createSession(

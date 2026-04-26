@@ -39,18 +39,30 @@ data class ModelAdmissionDecision(
         }
 
     fun asLifecycleRejectedResult(): RuntimeModelLifecycleCommandResult {
+        val technicalDetail = buildTechnicalDetail()
+        val missingArtifacts = missingRequiredArtifactsFromTechnicalDetail(technicalDetail)
         return RuntimeModelLifecycleCommandResult.rejected(
-            code = ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE,
-            detail = buildTechnicalDetail(),
+            code = if (missingArtifacts.isNullOrEmpty()) {
+                ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE
+            } else {
+                ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE
+            },
+            detail = technicalDetail,
         )
     }
 
     fun asRuntimeDomainException(): RuntimeDomainException {
+        val technicalDetail = buildTechnicalDetail()
+        val missingArtifacts = missingRequiredArtifactsFromTechnicalDetail(technicalDetail)
         return RuntimeDomainException(
             domainError = RuntimeDomainError(
                 code = RuntimeErrorCodes.MODEL_ADMISSION_BLOCKED,
-                userMessage = userMessageFor(action, eligibility.reason),
-                technicalDetail = buildTechnicalDetail(),
+                userMessage = if (missingArtifacts.isNullOrEmpty()) {
+                    userMessageFor(action, eligibility.reason)
+                } else {
+                    missingRequiredArtifactsUserMessage(missingArtifacts)
+                },
+                technicalDetail = technicalDetail,
             ),
         )
     }
@@ -207,7 +219,10 @@ class BridgeEnabledAdmissionRule : ModelAdmissionRule {
 
 class ArtifactCompletenessAdmissionRule : ModelAdmissionRule {
     override fun evaluate(context: ModelAdmissionContext): ModelVersionEligibility? {
-        if (context.action != ModelAdmissionAction.LOAD && context.action != ModelAdmissionAction.ACTIVATE) {
+        if (context.action != ModelAdmissionAction.DOWNLOAD &&
+            context.action != ModelAdmissionAction.LOAD &&
+            context.action != ModelAdmissionAction.ACTIVATE
+        ) {
             return null
         }
         val launchPlan = context.launchPlan ?: return null
@@ -273,6 +288,31 @@ internal fun defaultModelAdmissionRules(): List<ModelAdmissionRule> {
         ArtifactCompletenessAdmissionRule(),
         BackendRequirementAdmissionRule(),
     )
+}
+
+internal fun missingRequiredArtifactsFromTechnicalDetail(detail: String?): List<String>? {
+    val rawArtifacts = detail
+        ?.split('|')
+        ?.firstOrNull { field -> field.startsWith("missing_artifacts=") }
+        ?.substringAfter('=')
+        ?.trim()
+        .orEmpty()
+    if (rawArtifacts.isBlank()) {
+        return null
+    }
+    return rawArtifacts.split(',')
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .ifEmpty { null }
+}
+
+internal fun missingRequiredArtifactsUserMessage(artifacts: List<String>): String {
+    val listedArtifacts = artifacts.joinToString(", ")
+    return if (artifacts.size == 1) {
+        "Required companion file is missing: $listedArtifacts. Re-download or re-import the full model package."
+    } else {
+        "Required companion files are missing: $listedArtifacts. Re-download or re-import the full model package."
+    }
 }
 
 private fun userMessageFor(

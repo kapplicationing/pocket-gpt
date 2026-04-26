@@ -18,7 +18,7 @@ data class StoredChatState(
     val defaultThinkingEnabled: Boolean = false,
     val onboardingCompleted: Boolean = false,
     val firstSessionStage: String = FirstSessionStage.ONBOARDING.name,
-    val advancedUnlocked: Boolean = true,
+    val advancedUnlocked: Boolean = false,
     val firstAnswerCompleted: Boolean = false,
     val followUpCompleted: Boolean = false,
     val firstSessionTelemetryEvents: List<FirstSessionTelemetryEvent> = emptyList(),

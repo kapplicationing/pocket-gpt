@@ -8,6 +8,10 @@ import com.pocketagent.runtime.ChatStreamEvent
 import com.pocketagent.runtime.ImageAnalysisResult
 import com.pocketagent.runtime.PreparedChatStream
 import com.pocketagent.runtime.ToolExecutionResult
+import com.pocketagent.android.ui.state.ChatUiState
+import com.pocketagent.android.ui.state.ModelRuntimeStatus
+import com.pocketagent.android.ui.state.RuntimeUiState
+import com.pocketagent.android.ui.state.StartupProbeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -82,6 +86,37 @@ class ControllersTest {
         assertTrue(checks.single().contains("failed unexpectedly"))
     }
 
+    @Test
+    fun `startup flow preserves ready model while probe refresh runs`() {
+        val flow = ChatStartupFlow(
+            runtimeGateway = RecordingRuntimeGateway(),
+            startupProbeController = StartupProbeController(),
+            startupReadinessCoordinator = StartupReadinessCoordinator(),
+            ioDispatcher = Dispatchers.IO,
+            runtimeStartupProbeTimeoutMs = 1_000L,
+            nativeRuntimeLibraryPackaged = true,
+        )
+        val state = ChatUiState(
+            runtime = RuntimeUiState(
+                activeModelId = "qwen3.5-0.8b-q4",
+                startupProbeState = StartupProbeState.READY,
+                modelRuntimeStatus = ModelRuntimeStatus.READY,
+                modelStatusDetail = "Runtime model ready",
+                lastErrorCode = "STALE_ERROR",
+                lastErrorUserMessage = "stale",
+                lastErrorTechnicalDetail = "stale_detail",
+                lastError = "stale",
+            ),
+        )
+
+        val nextState = flow.markProbeRunning(state)
+
+        assertEquals(StartupProbeState.READY, nextState.runtime.startupProbeState)
+        assertEquals(ModelRuntimeStatus.READY, nextState.runtime.modelRuntimeStatus)
+        assertEquals("Runtime model ready", nextState.runtime.modelStatusDetail)
+        assertEquals(null, nextState.runtime.lastErrorCode)
+        assertEquals(null, nextState.runtime.lastErrorUserMessage)
+    }
 }
 
 private class RecordingRuntimeGateway(

@@ -27,7 +27,7 @@ data class ChatGateState(
         get() = status == ChatGateStatus.READY
 }
 
-internal fun resolveChatGateState(
+fun resolveChatGateState(
     runtime: RuntimeUiState,
     provisioningSnapshot: RuntimeProvisioningSnapshot?,
     advancedUnlocked: Boolean,

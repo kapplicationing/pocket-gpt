@@ -9,6 +9,8 @@ import com.pocketagent.android.runtime.GpuProbeResult
 import com.pocketagent.android.runtime.GpuProbeStatus
 import com.pocketagent.android.runtime.RuntimeTuning
 import com.pocketagent.android.runtime.errorCodeName
+import com.pocketagent.android.runtime.missingRequiredArtifactsFromTechnicalDetail
+import com.pocketagent.android.runtime.missingRequiredArtifactsUserMessage
 import com.pocketagent.android.ui.controllers.ChatPersistenceFlow
 import com.pocketagent.android.ui.controllers.ChatStreamCoordinator
 import com.pocketagent.android.ui.controllers.ChatPersistenceCoordinator
@@ -727,6 +729,9 @@ internal fun lifecycleErrorMessage(
     fallbackModelId: String?,
     fallbackVersion: String?,
 ): String {
+    missingRequiredArtifactsFromTechnicalDetail(result.detail)?.let { artifacts ->
+        return missingRequiredArtifactsUserMessage(artifacts)
+    }
     val modelLabel = buildString {
         append(fallbackModelId.orEmpty())
         fallbackVersion?.takeIf { it.isNotBlank() }?.let { version ->

@@ -3,7 +3,9 @@ package com.pocketagent.android.ui
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.SnackbarHostState
@@ -15,7 +17,9 @@ import com.pocketagent.android.voice.VoiceActivationEnableResult
 import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.voice.VoiceActivationUiState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal data class ChatAppLaunchers(
     val launchImageAttachmentPicker: () -> Unit,
@@ -38,7 +42,7 @@ internal fun rememberChatAppLaunchers(
     voiceController: VoiceActivationController,
     voiceState: VoiceActivationUiState,
 ): ChatAppLaunchers {
-    val launchImageAttachmentPicker = rememberImageAttachmentLauncher(
+    val launchImageAttachmentPicker = rememberChatAppImageAttachmentLauncher(
         context = context,
         scope = scope,
         snackbarHostState = snackbarHostState,
@@ -68,7 +72,12 @@ internal fun rememberChatAppLaunchers(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            voiceController.setEnabled(true)
+            handleVoiceActivationResult(
+                result = voiceController.setEnabled(true),
+                context = context,
+                scope = scope,
+                snackbarHostState = snackbarHostState,
+            )
         } else {
             voiceController.refresh()
             scope.launch {
@@ -143,25 +152,12 @@ internal fun rememberChatAppLaunchers(
             !enabled -> voiceController.setEnabled(false)
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
                 microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            else -> {
-                when (voiceController.setEnabled(true)) {
-                    VoiceActivationEnableResult.BLOCKED_MODELS_MISSING -> {
-                        scope.launch {
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.ui_voice_activation_models_missing),
-                            )
-                        }
-                    }
-                    VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION -> {
-                        scope.launch {
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.ui_voice_activation_microphone_required),
-                            )
-                        }
-                    }
-                    else -> Unit
-                }
-            }
+            else -> handleVoiceActivationResult(
+                result = voiceController.setEnabled(true),
+                context = context,
+                scope = scope,
+                snackbarHostState = snackbarHostState,
+            )
         }
     }
     val requestAssistantRole: () -> Unit = {
@@ -191,6 +187,28 @@ internal fun rememberChatAppLaunchers(
     )
 }
 
+private fun handleVoiceActivationResult(
+    result: VoiceActivationEnableResult,
+    context: Context,
+    scope: CoroutineScope,
+    snackbarHostState: SnackbarHostState,
+) {
+    val messageResId = voiceActivationFeedbackMessageResId(result) ?: return
+    scope.launch {
+        snackbarHostState.showSnackbar(context.getString(messageResId))
+    }
+}
+
+internal fun voiceActivationFeedbackMessageResId(
+    result: VoiceActivationEnableResult,
+): Int? {
+    return when (result) {
+        VoiceActivationEnableResult.BLOCKED_MODELS_MISSING -> R.string.ui_voice_activation_models_missing
+        VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION -> R.string.ui_voice_activation_microphone_required
+        else -> null
+    }
+}
+
 private fun beginDownload(
     context: Context,
     scope: CoroutineScope,
@@ -198,11 +216,83 @@ private fun beginDownload(
     version: ModelDistributionVersion,
 ) {
     scope.launch {
-        startModelDownload(
-            context = context,
-            version = version,
-            enqueueDownload = { selected -> provisioningViewModel.enqueueDownload(selected) },
-            onStatus = { message -> provisioningViewModel.setStatusMessage(message) },
-        )
+        runCatching { provisioningViewModel.enqueueDownload(version) }
+            .onSuccess { taskId ->
+                provisioningViewModel.setStatusMessage(
+                    context.getString(
+                        R.string.ui_model_download_enqueued,
+                        version.modelId,
+                        version.version,
+                        taskId,
+                    ),
+                )
+            }
+            .onFailure { error ->
+                provisioningViewModel.setStatusMessage(
+                    context.getString(
+                        R.string.ui_model_download_start_failed,
+                        version.modelId,
+                        version.version,
+                        error.message ?: "unknown error",
+                    ),
+                )
+            }
+    }
+}
+
+@Composable
+private fun rememberChatAppImageAttachmentLauncher(
+    context: Context,
+    scope: CoroutineScope,
+    snackbarHostState: SnackbarHostState,
+    onAttachImage: (String) -> Unit,
+): () -> Unit {
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val localPath = copySelectedImageToLocal(context, uri)
+                if (localPath != null) {
+                    onAttachImage(localPath)
+                } else {
+                    snackbarHostState.showSnackbar(
+                        message = context.getString(R.string.ui_image_attach_failed),
+                    )
+                }
+            }
+        }
+    }
+    return { imagePicker.launch("image/*") }
+}
+
+private suspend fun copySelectedImageToLocal(context: Context, uri: Uri): String? {
+    return withContext(Dispatchers.IO) {
+        runCatching {
+            val mimeType = context.contentResolver.getType(uri)
+            val extension = MimeTypeMap.getSingleton()
+                .getExtensionFromMimeType(mimeType)
+                ?.lowercase()
+                ?: uri.lastPathSegment?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
+                ?: "jpg"
+            val imagesDir = java.io.File(context.cacheDir, "attached_images").apply { mkdirs() }
+            cleanupStaleAttachedImages(imagesDir)
+            val target = java.io.File(imagesDir, "img_${System.currentTimeMillis()}.$extension")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: return@runCatching null
+            if (target.length() == 0L) {
+                target.delete()
+                return@runCatching null
+            }
+            target.absolutePath
+        }.getOrNull()
+    }
+}
+
+private fun cleanupStaleAttachedImages(imagesDir: java.io.File) {
+    val staleThresholdMs = 60 * 60 * 1000L
+    imagesDir.listFiles()?.forEach { file ->
+        if (System.currentTimeMillis() - file.lastModified() > staleThresholdMs) {
+            file.delete()
+        }
     }
 }

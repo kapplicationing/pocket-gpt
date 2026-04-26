@@ -14,8 +14,10 @@ import com.pocketagent.android.runtime.modelspec.HuggingFaceSourceAdapter
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.inference.ModelCatalog
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ModelRuntimeLaunchPlannerTest {
@@ -23,11 +25,13 @@ class ModelRuntimeLaunchPlannerTest {
     fun `launch planner reports missing required multimodal artifacts`() {
         val registry = DefaultNormalizedModelCatalogRegistry()
         val planner = DefaultModelRuntimeLaunchPlanner(registry)
+        val modelDir = Files.createTempDirectory("launch-plan-missing-mmproj")
+        val primaryPath = modelDir.resolve("qwen.gguf").toFile().apply { writeText("primary") }.absolutePath
         val descriptor = ModelVersionDescriptor(
             modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
             version = "q4",
             displayName = "Qwen",
-            absolutePath = "/tmp/qwen.gguf",
+            absolutePath = primaryPath,
             sha256 = "a".repeat(64),
             provenanceIssuer = "issuer",
             provenanceSignature = "sig",
@@ -41,7 +45,7 @@ class ModelRuntimeLaunchPlannerTest {
                     artifactId = "primary",
                     role = ModelArtifactRole.PRIMARY_GGUF,
                     fileName = "qwen.gguf",
-                    absolutePath = "/tmp/qwen.gguf",
+                    absolutePath = primaryPath,
                 ),
             ),
         )
@@ -53,66 +57,18 @@ class ModelRuntimeLaunchPlannerTest {
     }
 
     @Test
-    fun `launch planner blocks manifest q4_0 variant when required mmproj is missing`() {
-        val registry = DefaultNormalizedModelCatalogRegistry(
-            manifestProvider = {
-                ModelDistributionManifest(
-                    models = listOf(
-                        ModelDistributionModel(
-                            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-                            displayName = "Qwen 3.5 0.8B",
-                            versions = listOf(
-                                ModelDistributionVersion(
-                                    modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-                                    version = "q4_0",
-                                    downloadUrl = "https://example.test/Qwen3.5-0.8B-Q4_0.gguf",
-                                    expectedSha256 = "a".repeat(64),
-                                    provenanceIssuer = "huggingface/unsloth",
-                                    provenanceSignature = "b".repeat(64),
-                                    runtimeCompatibility = "android-arm64-v8a",
-                                    fileSizeBytes = 507_154_688L,
-                                    verificationPolicy = DownloadVerificationPolicy.PROVENANCE_STRICT,
-                                    sourceKind = ModelSourceKind.REMOTE_MANIFEST,
-                                    artifacts = listOf(
-                                        ModelDistributionArtifact(
-                                            artifactId = "primary",
-                                            role = ModelArtifactRole.PRIMARY_GGUF,
-                                            fileName = "Qwen3.5-0.8B-Q4_0.gguf",
-                                            downloadUrl = "https://example.test/Qwen3.5-0.8B-Q4_0.gguf",
-                                            expectedSha256 = "a".repeat(64),
-                                            provenanceIssuer = "huggingface/unsloth",
-                                            provenanceSignature = "b".repeat(64),
-                                            runtimeCompatibility = "android-arm64-v8a",
-                                            fileSizeBytes = 507_154_688L,
-                                            verificationPolicy = DownloadVerificationPolicy.PROVENANCE_STRICT,
-                                        ),
-                                        ModelDistributionArtifact(
-                                            artifactId = "mmproj",
-                                            role = ModelArtifactRole.MMPROJ,
-                                            fileName = ModelCatalog.mmProjFileNameFor(ModelCatalog.QWEN_3_5_0_8B_Q4).orEmpty(),
-                                            downloadUrl = "https://example.test/mmproj-F16.gguf",
-                                            expectedSha256 = "c".repeat(64),
-                                            provenanceIssuer = "huggingface/unsloth",
-                                            provenanceSignature = "",
-                                            runtimeCompatibility = "android-arm64-v8a",
-                                            fileSizeBytes = 204_987_232L,
-                                            required = true,
-                                            verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                )
-            },
-        )
+    fun `launch planner resolves sibling multimodal projector when descriptor omits absolute path`() {
+        val registry = DefaultNormalizedModelCatalogRegistry()
         val planner = DefaultModelRuntimeLaunchPlanner(registry)
+        val modelDir = Files.createTempDirectory("launch-plan-sibling-mmproj")
+        val primaryPath = modelDir.resolve("qwen.gguf").toFile().apply { writeText("primary") }.absolutePath
+        val projectorName = ModelCatalog.mmProjFileNameFor(ModelCatalog.QWEN_3_5_0_8B_Q4).orEmpty()
+        val projectorPath = modelDir.resolve(projectorName).toFile().apply { writeText("projector") }.absolutePath
         val descriptor = ModelVersionDescriptor(
             modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-            version = "q4_0",
+            version = "q4",
             displayName = "Qwen",
-            absolutePath = "/tmp/qwen-q4_0.gguf",
+            absolutePath = primaryPath,
             sha256 = "a".repeat(64),
             provenanceIssuer = "issuer",
             provenanceSignature = "sig",
@@ -125,13 +81,55 @@ class ModelRuntimeLaunchPlannerTest {
                 InstalledArtifactDescriptor(
                     artifactId = "primary",
                     role = ModelArtifactRole.PRIMARY_GGUF,
-                    fileName = "qwen-q4_0.gguf",
-                    absolutePath = "/tmp/qwen-q4_0.gguf",
+                    fileName = "qwen.gguf",
+                    absolutePath = primaryPath,
+                ),
+                InstalledArtifactDescriptor(
+                    artifactId = "mmproj",
+                    role = ModelArtifactRole.MMPROJ,
+                    fileName = projectorName,
                 ),
             ),
         )
 
         val plan = planner.planInstalledModel(descriptor)
+
+        assertFalse(plan.loadBlocked)
+        assertEquals(projectorPath, plan.multimodalProjectorPath)
+    }
+
+    @Test
+    fun `distribution plan blocks renamed single-variant vision build when mmproj is missing`() {
+        val registry = DefaultNormalizedModelCatalogRegistry()
+        val planner = DefaultModelRuntimeLaunchPlanner(registry)
+        val version = ModelDistributionVersion(
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            version = "q4_0",
+            downloadUrl = "https://example.test/Qwen3.5-0.8B-Q4_0.gguf",
+            expectedSha256 = "a".repeat(64),
+            provenanceIssuer = "huggingface/unsloth",
+            provenanceSignature = "b".repeat(64),
+            runtimeCompatibility = "android-arm64-v8a",
+            fileSizeBytes = 507_154_688L,
+            verificationPolicy = DownloadVerificationPolicy.PROVENANCE_STRICT,
+            sourceKind = ModelSourceKind.REMOTE_MANIFEST,
+            artifacts = listOf(
+                ModelDistributionArtifact(
+                    artifactId = "primary",
+                    role = ModelArtifactRole.PRIMARY_GGUF,
+                    fileName = "Qwen3.5-0.8B-Q4_0.gguf",
+                    downloadUrl = "https://example.test/Qwen3.5-0.8B-Q4_0.gguf",
+                    expectedSha256 = "a".repeat(64),
+                    provenanceIssuer = "huggingface/unsloth",
+                    provenanceSignature = "b".repeat(64),
+                    runtimeCompatibility = "android-arm64-v8a",
+                    fileSizeBytes = 507_154_688L,
+                    verificationPolicy = DownloadVerificationPolicy.PROVENANCE_STRICT,
+                ),
+            ),
+        )
+
+        val plan = planner.planDistributionVersion(version)
 
         assertTrue(plan.loadBlocked)
         assertEquals(listOf("mmproj-F16.gguf"), plan.missingRequiredArtifacts)

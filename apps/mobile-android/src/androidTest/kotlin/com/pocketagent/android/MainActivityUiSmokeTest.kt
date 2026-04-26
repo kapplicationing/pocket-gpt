@@ -535,7 +535,7 @@ class MainActivityUiSmokeTest {
     }
 }
 
-private class FakeRuntimeFacade : MvpRuntimeFacade {
+internal class FakeRuntimeFacade : MvpRuntimeFacade {
     private var sessionCounter = 0
     private var mode: RoutingMode = RoutingMode.AUTO
     private val cancelledRequestIds = mutableSetOf<String>()

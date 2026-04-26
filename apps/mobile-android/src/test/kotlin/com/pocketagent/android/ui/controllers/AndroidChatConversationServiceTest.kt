@@ -21,6 +21,38 @@ class AndroidChatConversationServiceTest {
     private val service = AndroidChatConversationService()
 
     @Test
+    fun `add attached image keeps a single latest selection`() {
+        val state = baseState(
+            composer = ComposerUiState(attachedImages = listOf("/tmp/old.png")),
+        )
+
+        val updated = service.addAttachedImage(state, " /tmp/new.png ")
+
+        assertEquals(listOf("/tmp/new.png"), updated.composer.attachedImages)
+    }
+
+    @Test
+    fun `start editing clamps legacy multi image history to one attachment`() {
+        val state = baseState(
+            messages = listOf(
+                message(
+                    id = "u1",
+                    role = MessageRole.USER,
+                    content = "look at this",
+                    kind = MessageKind.IMAGE,
+                    imagePath = "/tmp/primary.png",
+                    imagePaths = listOf("/tmp/first.png", "/tmp/second.png"),
+                ),
+            ),
+        )
+
+        val updated = service.startEditing(state, "u1")
+
+        assertNotNull(updated)
+        assertEquals(listOf("/tmp/first.png"), updated?.composer?.attachedImages)
+    }
+
+    @Test
     fun `submit edit trims trailing timeline and keeps composer draft`() {
         val state = baseState(
             messages = listOf(
@@ -49,7 +81,14 @@ class AndroidChatConversationServiceTest {
     fun `regenerate trims assistant reply and seeds composer from previous user turn`() {
         val state = baseState(
             messages = listOf(
-                message(id = "u1", role = MessageRole.USER, content = "hello"),
+                message(
+                    id = "u1",
+                    role = MessageRole.USER,
+                    content = "hello",
+                    kind = MessageKind.IMAGE,
+                    imagePath = "/tmp/legacy.png",
+                    imagePaths = listOf("/tmp/first.png", "/tmp/second.png"),
+                ),
                 message(id = "a1", role = MessageRole.ASSISTANT, content = "first"),
                 message(id = "a2", role = MessageRole.ASSISTANT, content = "retry me"),
             ),
@@ -60,6 +99,7 @@ class AndroidChatConversationServiceTest {
         assertNotNull(update)
         assertEquals(listOf("u1", "a1"), update?.state?.activeSession?.messages?.map(MessageUiModel::id))
         assertEquals("hello", update?.state?.composer?.text)
+        assertEquals(listOf("/tmp/first.png"), update?.state?.composer?.attachedImages)
         assertTrue(update?.shouldPersist == true)
     }
 
@@ -152,6 +192,8 @@ class AndroidChatConversationServiceTest {
         content: String,
         kind: MessageKind = MessageKind.TEXT,
         toolName: String? = null,
+        imagePath: String? = null,
+        imagePaths: List<String> = emptyList(),
     ): MessageUiModel {
         return MessageUiModel(
             id = id,
@@ -159,6 +201,8 @@ class AndroidChatConversationServiceTest {
             content = content,
             timestampEpochMs = 1L,
             kind = kind,
+            imagePath = imagePath,
+            imagePaths = imagePaths,
             toolName = toolName,
         )
     }

@@ -6,7 +6,7 @@ Owner: Product + Tech Lead
 Mutable status stays in `docs/operations/execution-board.md`.
 Program learnings stay in `docs/operations/launch-program-learnings.md`.
 
-Current status note: the retained provisioning `SIGILL` class is no longer the first live failure in the active device rerun. The immediate deterministic blocker has moved forward to the Maestro/runtime-ready path leaving the app `Unloaded` before required lane evidence completes.
+Current status note: launch remains `Hold`. The retained provisioning `SIGILL` class is no longer the first live failure, and the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight rather than a new generic native-runtime defect. That local code path is now understood and fixed. Local authoritative onboarding proof now exists in the `android-instrumented` lane, but the active remaining blockers are still a missing clean hosted verdict for `send-after-ready`, missing current-window authoritative lane evidence, wireless Samsung Maestro harness instability on the physical canaries, and the still-incomplete moderated WP-13 packet.
 
 Execution policy for the active program:
 
@@ -14,6 +14,13 @@ Execution policy for the active program:
 2. Cloud-hosted machine-verifiable reruns come next and are the default evidence path.
 3. One narrow real-device canary is reserved for OEM/runtime confirmation and final brush, not broad discovery.
 4. Human-required moderation happens only after the deterministic technical path is materially stable.
+
+Branch/merge note for the active program:
+
+1. `codex/launch-readiness-implementation` is the current launch integration branch and exists to keep the launch stack linear on top of local `main` while the final blockers are being cleared.
+2. Local `main` is not the same thing as `origin/main` in this repo, so the merge-back plan must account for the local-main base as well as the launch commits layered above it.
+3. Do not treat already-subsumed older `codex/*` branches as separate merge targets during launch closeout.
+4. Once the branch is green enough for preservation, merge it back by fast-forwarding local `main` to the launch branch tip and pushing `main`, rather than replaying the stack through cherry-picks or pretending the remote already contains the local-main base.
 
 ## Objective
 
@@ -25,42 +32,43 @@ Ship the current PocketAgent MVP to the Play Store without expanding product sco
 2. Image attach remains in scope, but external claims stay bounded to single-image/contextual Q&A rather than broader image-analysis promises.
 3. Tools stay prompt-first at launch; richer direct-tool/runtime depth is an implementation detail, not the user-facing claim surface.
 4. Voice stays in scope only as a limited beta for controlled cohorts and closed-track handling; it is not part of the broad public Play Store claim set in the current launch window.
+5. Setup stays simple-first: `Get ready` is the primary blocked-state setup action, while the unified `Model library` is the advanced import/download/recovery surface.
 
 This program is complete only when:
 
-1. the native provisioning blocker is fixed,
-2. required technical gates are green with current evidence,
-3. moderated WP-13 usability evidence is complete,
-4. privacy, claim, support, and release-governance work is closed,
-5. and the Play Store submission package is ready for rollout.
+1. required technical gates are green with current evidence,
+2. moderated WP-13 usability evidence is complete,
+3. privacy, claim, support, and release-governance work is closed,
+4. the Play Store submission package is ready for rollout,
+5. and the remaining physical-device canary work is reduced to final brush rather than active blocker discovery.
 
 ## Critical Path
 
-1. Native provisioning/runtime unblock
-2. Startup/readiness self-healing
-3. Timeout/cancel/send reliability closure
-4. Cloud-first required lane reruns with current evidence
+1. Startup/readiness and multimodal packaging contract closure
+2. Timeout/cancel/send reliability closure
+3. Cloud-first required reruns with a clean hosted `send-after-ready` verdict
+4. Authoritative `android-instrumented` and strict `journey` reruns
 5. Narrow real-device canary confirmation and final brush
 6. Moderated WP-13 packet
 7. Release decision and Play Store submission prep
 
 ## Team Split
 
-### Engineer 1: Native Runtime Owner
+### Engineer 1: Runtime Setup And Packaging Owner
 
-Own the provisioning/runtime crash path.
+Own the startup/setup contract that still determines whether single-image and first-session claims are evidence-safe.
 
 Responsibilities:
 
-1. Root-cause the native `SIGILL` in `libpocket_llama.so` during `RealRuntimeProvisioningInstrumentationTest#seedModelsAndVerifyStartupChecks`.
-2. Validate the fix inside lane preflight and preserve the retained crash/evidence signature.
-3. Pair with Engineer 2 on any startup regressions revealed by the crash fix.
+1. Keep the fixed multimodal companion sync (`mmproj`) path stable in setup/provisioning preflight and recovery flows.
+2. Preserve the local startup/readiness contract so first-session setup proof stays deterministic under authoritative lane execution.
+3. Pair with Engineer 2 on any setup regressions exposed by hosted/default reruns.
 
 Exit criteria:
 
-1. Provisioning preflight no longer crashes the app process.
-2. `merge-unblock` and `promotion` stop failing at provisioning preflight.
-3. Evidence notes record the fixed signature, rerun commands, and artifact roots.
+1. Setup/provisioning preflight remains claim-safe for single-image coverage.
+2. Recovery/setup evidence no longer regresses because of companion-artifact or startup contract drift.
+3. Evidence notes record the active setup contract and artifact roots rather than the old retained crash signature.
 
 ### Engineer 2: Android Runtime / Startup Reliability Owner
 
@@ -110,7 +118,8 @@ Exit criteria:
 
 1. Cloud-backed reruns exist for `android-instrumented`, `maestro`, `journey`, `screenshot-pack`, and lifecycle smoke where applicable.
 2. Artifact schema matches what `PROD-10` and WP-13 need.
-3. The canary-device rule is explicit and limited.
+3. Hosted `send-after-ready` returns a clean verdict or is explicitly tracked as infrastructure-blocked with preserved upload provenance.
+4. The canary-device rule is explicit and limited.
 
 ### Engineer 5: Release Tooling / Evidence Ops Owner
 
@@ -152,11 +161,12 @@ Starts only when Phase 1 is stable enough for reruns.
 
 Deliverables:
 
-1. Fresh cloud-first `android-instrumented`, `maestro`, and strict `journey` pass IDs where applicable
+1. Fresh cloud-first `maestro`/hosted smoke verdicts where applicable, including `send-after-ready`
 2. Journey send-capture output with `phase=completed` and `placeholder_visible=false`
 3. Updated evidence notes with artifact roots
 4. Cloud/device parity proof for deterministic lanes
-5. One narrow real-device canary confirmation after cloud evidence is materially stable
+5. Fresh authoritative `android-instrumented` and strict `journey` pass IDs
+6. One narrow real-device canary confirmation after cloud evidence is materially stable
 
 Dependency rule:
 
@@ -201,11 +211,12 @@ Dependency rule:
 
 ## Internal Contracts That Must Be Stable
 
-1. Provisioning/startup contract: provisioning preflight must not crash and stale runtime metadata must self-heal.
+1. Provisioning/startup contract: provisioning preflight must not crash, stale runtime metadata must self-heal, and single-image launch claims require claim-safe multimodal companion packaging (`mmproj`) in setup/provisioning evidence.
 2. Timeout/cancel/send contract: timeout maps to `UI-RUNTIME-001`, retry preserves context, and send-capture fields are always emitted.
 3. QA artifact contract: cloud/device reruns must produce the pass IDs, reports, screenshots, logcat, and runtime fields required by launch gates.
 4. Gate taxonomy: machine-verifiable evidence and human-required evidence stay explicitly separated through `PROD-12`.
 5. Claim boundary: retention/reset/per-tool privacy controls remain internal-only claims until explicitly implemented and verified.
+6. Evidence authority split: cloud-first is the default machine-verifiable execution path, but `android-instrumented` and strict `journey` remain authoritative gate rows and are not replaced by hosted smoke alone.
 
 ## Required Output Artifacts
 
@@ -222,6 +233,7 @@ Dependency rule:
 3. Run cloud-first machine-verifiable evidence before scheduling real-device confirmation or moderated sessions.
 4. Keep machine-verifiable evidence and human-required evidence on separate tracks.
 5. Run release-date planning only when the readiness report and current evidence both support it.
+6. Before any closeout merge, confirm the launch branch still contains the intended linear stack and that no unrelated visible branch needs deliberate extraction.
 
 ## Completion Rule
 

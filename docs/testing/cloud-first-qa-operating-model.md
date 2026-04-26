@@ -1,6 +1,6 @@
 # Cloud-First QA Operating Model
 
-Last updated: 2026-04-25  
+Last updated: 2026-04-26
 Owner: QA + Engineering  
 Support: Product
 
@@ -11,23 +11,23 @@ Move repeatable QA evidence collection to cloud/device automation wherever the o
 ## What Can Be Replaced
 
 1. Required lane reruns for deterministic workflows:
-   - `android-instrumented`
    - `maestro`
    - `journey`
    - `screenshot-pack`
    - lifecycle E2E flows
-2. Artifact collection:
+2. Parallel hosted smoke/model-management/send-after-ready fan-out where the outcome is pass/fail and the uploaded APK is known to come from the branch tip under review.
+3. Artifact collection:
    - pass IDs
    - journey reports
    - screenshots
    - logcat
    - structured runtime snapshots
-3. Regression detection for scripted flows:
+4. Regression detection for scripted flows:
    - first-run setup
    - send/timeout/cancel
    - model provisioning paths
    - manifest outage recovery
-4. QA triage prework:
+5. QA triage prework:
    - compare runs
    - isolate the first failing step
    - generate a reproducible failure summary
@@ -38,6 +38,7 @@ Move repeatable QA evidence collection to cloud/device automation wherever the o
 2. Privacy/comprehension/trust judgment that depends on real participants.
 3. Final promote/iterate/hold decision when evidence is mixed or incomplete.
 4. Any claim that depends on subjective UX interpretation rather than a scripted pass/fail outcome.
+5. Authoritative `android-instrumented` or strict `journey` rows; cloud can reduce risk and drive triage, but does not replace those gate sources.
 
 ## Operating Rules
 
@@ -47,6 +48,9 @@ Move repeatable QA evidence collection to cloud/device automation wherever the o
 4. Record only validated outcomes in gate docs; do not convert agent preference or heuristic feedback into moderated-usability evidence.
 5. Escalate to human moderation only after the deterministic technical gate is green or when the remaining question is subjective.
 6. Prefer code/contract closure before widening QA fan-out; broad reruns are not a substitute for unfinished engineering work.
+7. When a wireless Samsung canary fails before the first app-owned step, classify it as a harness/environment blocker until the evidence shows the failure moved inside the app.
+8. Count hosted output as current-window launch evidence only when the uploaded APK was rebuilt from the branch tip under review.
+9. Keep the authority split explicit in every gate review: cloud-first is the default machine-verifiable execution path, but `android-instrumented` and strict `journey` still require their own current-window proof.
 
 ## Implementation Plan
 
@@ -62,6 +66,9 @@ Move repeatable QA evidence collection to cloud/device automation wherever the o
 2. Standardize cloud runs to emit the same artifact set as local device runs.
 3. Preserve raw logs and screenshots so QA can compare results across runs.
 4. Use the physical device after the hosted pass to confirm the narrow OEM/runtime edge, not to rediscover already-proven cloud failures.
+5. If the local Samsung canary shows transport loss, app foreground loss, or `localhost:7001` connection failures before app logic begins, keep the launch gate anchored on the cloud result and track the device issue separately as harness instability.
+6. If Maestro Cloud returns a null-status polling failure before any hosted results or JUnit output exist, classify it as infrastructure failure and preserve the upload id rather than recording it as a product regression.
+7. Rebuild the APK from the branch tip before uploading to the cloud runner, and record that artifact provenance alongside the hosted pass id.
 
 ### Phase 3: Agent-assisted QA workflow
 
@@ -78,12 +85,14 @@ Move repeatable QA evidence collection to cloud/device automation wherever the o
 
 ## Unblock Sequence For Current Work
 
-1. Keep the current blocker chain honest: provisioning preflight is no longer the first live failure; the active deterministic blocker is the Maestro/runtime-ready contract leaving the app `Unloaded` in lifecycle/startup flows.
-2. Clear that runtime-ready blocker, then run the required lanes through the cloud-first path and attach pass IDs and artifact roots to the active tickets.
-3. Use agents to inspect failures, compare deltas, and narrow remaining issues.
-4. Run one narrow physical-device canary after the cloud path is materially stable.
-5. Run the moderated WP-13 packet only after the scripted gates are green or the remaining question is explicitly subjective.
-6. Publish a promote/iterate/hold recommendation only after both technical and human-required evidence are present.
+1. Keep the current blocker chain honest: the old retained provisioning blocker was narrowed to missing `mmproj` sync in `devctl` preflight and has been addressed in local code; local authoritative onboarding proof now exists, but the remaining open work is a clean hosted `send-after-ready` verdict, current-window authoritative lane evidence, and incomplete human-required evidence.
+2. Run the required hosted/default machine-verifiable flows first and attach pass IDs, upload ids, and artifact roots to the active tickets.
+3. If hosted `send-after-ready` returns `infra_status_fetch_failed` or otherwise lacks hosted results, keep it open as incomplete machine evidence rather than downgrading it into a product regression without a hosted verdict.
+4. Use agents to inspect failures, compare deltas, and narrow remaining issues.
+5. Re-run authoritative `android-instrumented` and strict `journey` separately once the cloud/default technical path is materially stable.
+6. Run one narrow physical-device canary after the cloud path is materially stable, and do not let wireless Samsung harness noise overwrite a clean hosted result.
+7. Run the moderated WP-13 packet only after the scripted gates are green or the remaining question is explicitly subjective.
+8. Publish a promote/iterate/hold recommendation only after both technical and human-required evidence are present.
 
 ## How Future Work Should Be Structured
 

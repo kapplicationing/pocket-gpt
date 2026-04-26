@@ -16,11 +16,13 @@ The locked launch scope is the core MVP surface plus prompt-first local tools, s
 
 The core MVP surface is already built: offline chat, streaming, model setup and recovery, routing, performance controls, prompt-first local tools, memory, single-image Q&A, diagnostics, privacy-aware network enforcement, and a limited-beta voice surface are all represented in the implementation and retained evidence. The active problem is whether the release path is reliable enough, evidenced enough, and understandable enough to justify promotion beyond the current pilot posture.
 
+The launch setup experience should be understood as simple-first: `Get ready` is the primary blocked-state setup action, while the unified `Model library` remains the import/download/recovery surface when the default path is not enough.
+
 The near-term release path is gated by two categories of work:
 
 1. Deterministic technical evidence:
-   - native provisioning/runtime stability
-   - required lane pass IDs
+   - required authoritative lane pass IDs
+   - clean hosted verdicts for cloud-first machine coverage, especially `send-after-ready`
    - send-capture and timeout/recovery reliability
 2. Human-required usability evidence:
    - onboarding clarity
@@ -49,18 +51,22 @@ The current release plan and launch matrix continue to require:
 3. privacy/claim parity,
 4. and a formal promote/hold decision flow.
 
-The retained gate evidence shows that provisioning preflight was previously blocked by a native `SIGILL` in `libpocket_llama.so`, but that is no longer the immediate blocker in the active device rerun. The live blocker chain has moved forward: onboarding selector drift is fixed, provisioning preflight is no longer the first failure, and the current deterministic blocker is the Maestro/runtime-ready contract leaving the app `Unloaded` during lifecycle/startup flows before the required send evidence can start.
+The retained gate evidence shows that provisioning preflight was previously blocked by a native `SIGILL` in `libpocket_llama.so`, but that is no longer the immediate blocker in the active launch program. The later setup/provisioning gap was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight for single-image claim-safe coverage, and that local code path is now understood and fixed.
+
+The current blocker chain is more operational than architectural:
+
+1. current-window authoritative lane evidence is still missing for the required promotion rows,
+2. cloud `send-after-ready` still lacks a clean hosted verdict, so the cloud-first technical packet is not complete yet,
+3. wireless Samsung Maestro remains a physical-canary harness blocker before app logic begins,
+4. `android-instrumented` and strict `journey` still remain authoritative gate rows even though cloud-first is the default machine-verifiable execution path,
+5. and the moderated WP-13 packet is still incomplete.
 
 Story-level gate picture from the retained launch matrix:
 
 1. `S-A`, `S-B`, `S-C`: `PASS`
 2. `S-D`, `S-D1`, `S-E`, `S-F`, `S-G`: `FAIL`
 
-The blocker chain is now:
-
-1. Maestro/runtime-ready bootstrap can still leave the app `Unloaded` in required lifecycle/startup flows,
-2. missing current-window deterministic lane evidence blocks credible moderated WP-13 execution,
-3. and the incomplete moderated packet blocks release-decision confidence.
+One important nuance: the app no longer lacks an authoritative onboarding contract in code. The local `android-instrumented` lane now includes `MainActivityAuthoritativeOnboardingInstrumentationTest`, so first-session onboarding proof is represented locally even though the current-window lane set is still incomplete.
 
 ## What Is Already Built
 
@@ -83,9 +89,9 @@ This matters because the next release decision should not be managed as a large 
 The current open work falls into three main buckets:
 
 1. Technical reliability:
-   - runtime-ready/bootstrap stability in lifecycle and Maestro flows
+   - current-window cloud and authoritative lane evidence
    - `ENG-20`
-   - required lane reruns
+   - required lane reruns and hosted verdict closure
 2. Human evidence:
    - moderated WP-13 packet
    - onboarding, recovery, and privacy-comprehension metrics
@@ -107,11 +113,12 @@ The current open work can be managed through eight execution workstreams:
 
 The critical path is:
 
-1. clear the runtime-ready `Unloaded` blocker in required device flows,
-2. restore passing cloud-first technical lane evidence,
-3. confirm the result on one narrow physical-device canary,
-4. complete the minimum moderated usability packet,
-5. then make the release decision.
+1. restore current-window cloud-first technical evidence where hosted execution is valid,
+2. get a clean hosted verdict for `send-after-ready`,
+3. close the authoritative `android-instrumented` and strict `journey` rows,
+4. confirm the result on one narrow physical-device canary once the harness is usable enough for final brush,
+5. complete the minimum moderated usability packet,
+6. then make the release decision.
 
 Newer April documentation adds `QA-14`, `QA-15`, and `PROD-12` as operating-model work to make that path faster and cleaner. Those items improve execution quality, but they should be treated as `Ready` planning work, not closed evidence.
 `QA-14`, `QA-15`, and `QA-13` should now be read as active execution enablers for the deterministic track, not as substitutes for passing lane evidence or human moderation.
@@ -122,6 +129,13 @@ The repo now also carries an explicit end-to-end launch program and Play Store s
 2. `docs/operations/play-store-submission-readiness.md`
 
 Those docs define the owner split, dependency order, and final submission package. They do not change the underlying evidence state on their own.
+
+Branch hygiene note:
+
+1. The current launch stack is intentionally isolated on `codex/launch-readiness-implementation`, which sits linearly on top of local `main`, not directly on `origin/main`.
+2. Local `main` itself has diverged from `origin/main`, so merge-back planning must account for both the local-main base and the launch commits above it.
+3. Older `codex/*` branches already appear subsumed into `main`; they are not separate launch-closeout streams that need independent merge planning.
+4. Once the branch is green and the working tree is clean, the safest merge-back is to fast-forward local `main` to the launch branch tip and then push `main`, after confirming that the local-main-only base commits are intentionally part of what should reach `origin/main`.
 
 ## Evidence Quality
 
@@ -153,7 +167,7 @@ The highest-value PM actions are:
 3. Prevent passing automation from being mistaken for trust/comprehension evidence that only moderated sessions can provide.
 4. Keep marketing and public claims constrained to verified privacy and product evidence.
 5. Force every release-date conversation to anchor on passed gates, not informal confidence.
-6. Keep the execution order strict: code first, cloud-first machine evidence second, device canary third, human-required closure last.
+6. Keep the execution order strict: code first, cloud-first machine evidence second, authoritative device/CI rows third, physical canary brush fourth, human-required closure last.
 
 ## Release-Date Guidance
 
@@ -161,12 +175,14 @@ A credible release date should not be set from optimism or target pressure.
 
 It should only be prepared after:
 
-1. the active runtime-ready/bootstrap blocker is resolved,
-2. required lanes have fresh pass IDs,
-3. the WP-13 packet contains measured values,
+1. required authoritative lanes have fresh current-window pass IDs,
+2. the WP-13 packet contains measured values,
+3. the remaining physical-device canary work has moved from harness diagnosis to final brush,
 4. and `PROD-10` can be rerun from current evidence instead of placeholders and blocked rows.
 
 Use `bash scripts/dev/launch-readiness.sh` to generate the current launch-readiness snapshot before any release-date review. That report is a planning aid, not a substitute for the underlying evidence.
+
+Keep one nuance explicit in release reviews: `S-D1` is still open because simple-first onboarding completion does not by itself prove the advanced unlock path. The row only closes when current-window evidence shows the first-session path can reach advanced controls cleanly without the runtime-ready `Unloaded` blocker stopping the journey.
 
 Before those conditions are true, the right PM output is a release window model with explicit conditions, not a committed date.
 
@@ -177,6 +193,12 @@ No public or firm internal release date should be committed until:
 3. journey send-capture is clean,
 4. moderated WP-13 metrics are filled,
 5. and claim parity is locked to verified controls.
+
+Branch hygiene remains real operational work, not just documentation:
+
+1. The current branch audit still shows `codex/launch-readiness-implementation` stacked directly on top of local `main`.
+2. Local `main` is still ahead of `origin/main`, so merge-back planning must account for the local-main base as well as the launch-closeout commits above it.
+3. The branch story is therefore still linear, but it is not yet "already merged" or safe to describe as a trivial push to remote `main`.
 
 ## Recommended Follow-Up Plan
 

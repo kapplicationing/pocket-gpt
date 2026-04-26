@@ -53,7 +53,7 @@ Engineering and quality excellence are mandatory.
 
 ### Blocked
 
-- [ ] QA-11 rerun `android-instrumented` + `maestro` + strict `journey` (`--mode strict --repeats 3`) is now blocked on the Maestro/runtime-ready contract. The active rerun path has moved past provisioning preflight and onboarding selector drift, but lifecycle/bootstrap flows can still leave the app `Unloaded` before first-send evidence starts. Required lane pass IDs are still missing until that runtime-ready path is green.
+- [ ] QA-11 rerun `android-instrumented` + `maestro` + strict `journey` (`--mode strict --repeats 3`) is still blocked on missing current-window authoritative evidence. Local authoritative onboarding proof is now represented in the `android-instrumented` lane, but hosted `send-after-ready` still lacks a clean hosted verdict and strict `journey` pass evidence is still missing.
 - [ ] QA-WP13-RUN02 moderated 5-user usability run packet completion blocked pending required-lane reliability rerun
 - [ ] PROD-10 launch gate matrix decision run blocked by required-row failures (`S-D`, `S-E`, `S-F`, `S-G`)
 
@@ -75,17 +75,18 @@ Engineering and quality excellence are mandatory.
 - [x] ENG-21 interaction architecture refactor landed
 - [x] ENG-19 devctl package UID parser hardening landed (`userId`/`appId`/`uid` + tests)
 - [x] ENG-22 provisioning startup-check lane blocker closed (`docs/operations/tickets/eng-22-provisioning-startup-check-lane-blocker.md`)
-- [x] ENG-23 host-side native runtime provisioning `SIGILL` mitigation landed; active device rerun has moved past provisioning preflight, with final lane proof still pending under `QA-11`
-- [x] ENG-24 startup/readiness metadata self-healing landed; next live blocker is the Maestro/runtime-ready `Unloaded` path in `QA-11`
+- [x] ENG-23 host-side native runtime provisioning `SIGILL` mitigation landed; the retained provisioning crash is no longer the live blocker in the launch program
+- [x] ENG-24 startup/readiness metadata self-healing landed; the later setup/provisioning gap was narrowed to missing multimodal companion (`mmproj`) sync in `devctl` preflight and fixed in local code
 - [x] ENG-20 host-side runtime cancel/timeout contract coverage landed; strict journey proof still depends on clearing the runtime-ready blocker in `QA-11`
+- [x] Local authoritative onboarding proof is now represented in `android-instrumented` coverage through `MainActivityAuthoritativeOnboardingInstrumentationTest`; launch still remains blocked on current-window pass evidence, not on missing onboarding contract coverage
 - [x] WP-12 package closeout complete
 
 ## Owner Focus (Current)
 
-1. Engineering: clear the runtime-ready `Unloaded` blocker in `QA-11`, then stop changing product code unless a lane artifact exposes a real remaining defect.
-2. QA: run cloud-first machine-verifiable evidence through `QA-11`, `QA-14`, `QA-13`, and `QA-15`, then use one physical-device canary as the final brush.
+1. Engineering: keep product-code changes bounded to defects exposed by current lane artifacts; the live launch gap is now evidence closure, not a known missing feature contract.
+2. QA: run cloud-first machine-verifiable evidence through `QA-11`, `QA-14`, `QA-13`, and `QA-15`, with special focus on getting a clean hosted `send-after-ready` verdict before widening physical-device effort.
 3. Product: keep machine-verifiable evidence separate from human-required closure, close `PROD-12`, `PROD-11`, and `PROD-13`, then run the `PROD-10` decision flow.
-4. Marketing: execute `MKT-08` and `MKT-09`, then finalize `MKT-10` claim freeze against verified behavior only.
+4. Marketing: execute `MKT-08` and `MKT-09`, then finalize `MKT-10` claim freeze against verified behavior only, with voice still bounded to limited-beta/closed-track language and image claims staying single-image only.
 
 Full owner/dependency split: `docs/operations/play-store-launch-program.md`
 

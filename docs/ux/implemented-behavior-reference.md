@@ -24,7 +24,20 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
    - listener-status line
    - setup/help CTAs for assistant role, battery settings, and app settings
 2. Voice activation is a limited-beta surface for controlled cohorts, not the default onboarding or broad public launch path.
-3. Public launch copy must stay bounded to the core chat surface, prompt-first tools, and single-image attach/Q&A until voice evidence, privacy wording, and device-tier language are ready.
+3. Always-on listening is blocked only when:
+   - microphone permission is missing
+   - local voice model files under `offas-voice-models` are missing
+4. Assistant-role setup and battery-optimization guidance are advisory/support CTAs:
+   - assistant role enables assistant-gesture capture-once on supported Android versions
+   - battery guidance improves background reliability but does not gate the toggle
+5. Current voice device-action tool allowlist is intentionally narrow:
+   - `alarm_set`
+   - `timer_set`
+   - `app_open`
+   - `volume_set`
+   - `flashlight_toggle`
+6. Public launch copy must stay bounded to the core chat surface, prompt-first tools, and single-image attach/Q&A until voice evidence, privacy wording, and device-tier language are ready.
+7. Voice is user-visible and supportable as limited beta; it must not be described in launch canon as merely planned or hidden.
 
 ## Privacy Section Behavior
 
@@ -98,10 +111,14 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
    - `FirstAnswerDone`
    - `FollowUpDone`
    - `AdvancedUnlocked`
-2. `Get ready` is the primary blocked-state CTA and defaults to the `0.6B` download path.
-3. Tools and Advanced entry points are available by default (no follow-up unlock gate).
-4. Follow-up completion emits first-session telemetry and cue state.
-5. Stage/unlock flags are persisted across app restarts.
+2. `Get ready` is the primary setup workflow and defaults to the `0.6B` download path.
+3. In the blocked composer, the user-visible primary button label is `Setup`; that button enters the `Get ready` workflow.
+4. The first-session UX is still simple-first even though `Tools` and `Advanced` entry points may remain visible; the default happy path is `Get ready` first, then chat.
+5. `Open model library` remains the secondary import/download/recovery path when the simple-first default is not enough.
+6. `AdvancedUnlocked` is a telemetry/evidence milestone for first-session progression, not a hard visibility gate for every advanced entry point.
+7. Follow-up completion emits first-session telemetry and cue state.
+8. Stage/unlock flags are persisted across app restarts.
+9. Authoritative local onboarding proof now exists in the `android-instrumented` lane; current launch hold is about current-window evidence closure, not about the first-session contract being absent from the codebase.
 
 ## Runtime Telemetry Labels in UI
 
@@ -150,20 +167,20 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 
 ## Model Provisioning and Download Manager UX (Phase-2)
 
-1. The app now uses a single `ModelLibrary` bottom sheet with `Library` and `Runtime` tabs.
-2. `Library` includes explicit sections for:
-   - required models
-   - downloads
-   - installed versions
-   - storage summary
-3. `Runtime` includes runtime load state, last-used model affordance, and installed versions that can be loaded now.
+1. The app uses one unified `Model library` bottom sheet rather than separate runtime/library tabs.
+2. Entry points into that surface include the top-bar model chip, the blocked composer `Setup` path, and runtime error/recovery actions such as `Open model library` or `Fix model library`.
+3. The sheet includes explicit sections for:
+   - `Active model`
+   - `Downloaded models`
+   - `Available models`
 4. Import path remains available in all builds and writes versioned model records.
 5. Download path is available in the primary app build and supports queue/pause/resume/retry.
-6. Active downloads can be cancelled from the library tab; cancellation also cleans temporary files.
-7. Manual download completion result is `verified, activation pending`.
+6. Active downloads can be cancelled from the unified sheet; cancellation also cleans temporary files.
+7. Manual download completion result is `verified, activation pending`; it does not by itself prove the runtime is loaded.
 8. The `Get ready` path can auto-activate and load the matching version when a pending activation is set.
 9. Active version removal is guarded; the cleanup flow can clear the sole installed version when it is safe to do so.
 10. Runtime unlock is only confirmed after activation + refresh startup checks.
+11. Single-image attach is only claim-safe when the selected model packaging includes the required multimodal companion artifact (`mmproj`) and setup/provisioning evidence covers that companion sync, not just the primary model file.
 
 ## Manifest Outage Behavior
 

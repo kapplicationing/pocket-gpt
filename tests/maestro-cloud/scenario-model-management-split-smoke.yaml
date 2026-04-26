@@ -8,6 +8,12 @@ tags:
 - assertVisible: "Model library"
 - assertVisible: "Search models"
 - assertVisible: "Downloaded models"
+- scrollUntilVisible:
+    element:
+      text: "Available models"
+    direction: DOWN
+    timeout: 20000
+- assertVisible: "Available models"
 - assertVisible: "Refresh"
 - scrollUntilVisible:
     element:

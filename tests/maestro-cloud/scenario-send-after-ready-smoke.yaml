@@ -1,5 +1,6 @@
 appId: com.pocketagent.android
 tags:
+  - cloud-smoke
   - cloud-send
   - send
 ---
@@ -8,6 +9,7 @@ tags:
     id: "composer_input"
 - eraseText
 - inputText: "Reply with exactly: SEND_AFTER_READY_OK"
+- hideKeyboard
 - extendedWaitUntil:
     notVisible: "Loading…"
     timeout: 180000
@@ -19,6 +21,7 @@ tags:
 - extendedWaitUntil:
     notVisible: "Retry"
     timeout: 180000
+- takeScreenshot: "cloud-send-after-ready-ready-to-send"
 - tapOn:
     id: "send_button"
 - runFlow:
@@ -43,7 +46,9 @@ tags:
       id: "message_bubble_assistant_complete"
     timeout: 180000
 - extendedWaitUntil:
-    visible: "Send"
+    visible:
+      id: "send_button"
+      enabled: true
     timeout: 180000
 - assertNotVisible: "UI-RUNTIME-001"
 - takeScreenshot: "cloud-send-after-ready"

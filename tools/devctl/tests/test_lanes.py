@@ -727,6 +727,74 @@ class LanesTest(unittest.TestCase):
         self.assertEqual("unknown", result.active_model_id)
         self.assertFalse(result.placeholder_visible)
 
+    def test_send_capture_kickoff_failure_signature_ignores_debug_output_path(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def fake_run(command, **_kwargs):
+            cmd = list(command)
+            if cmd and cmd[0] == "maestro":
+                return Result(
+                    returncode=1,
+                    stdout=(
+                        "Running on SER123\n"
+                        "io.grpc.StatusRuntimeException: UNAVAILABLE: io exception\n"
+                        "==== Debug output (logs & screenshots) ====\n"
+                        "/tmp/debug-path\n"
+                    ),
+                    stderr="",
+                )
+            return Result(returncode=0, stdout="", stderr="")
+
+        context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+        kickoff_snapshot = SendCaptureSnapshot(
+            second=0,
+            screenshot=None,
+            window_dump=None,
+            chat_state_snapshot=None,
+            runtime_status=None,
+            backend=None,
+            active_model_id=None,
+            placeholder_visible=False,
+            runtime_error_visible=False,
+            timeout_message_visible=False,
+            streaming_text_visible=False,
+            response_visible=False,
+            response_role=None,
+            response_non_empty=False,
+            first_token_seen=False,
+            request_id=None,
+            finish_reason=None,
+            terminal_event_seen=False,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "tools.devctl.lanes._capture_send_snapshot", return_value=kickoff_snapshot
+        ), mock.patch(
+            "tools.devctl.lanes._capture_logcat", return_value=None
+        ), mock.patch(
+            "tools.devctl.lanes._collect_maestro_screenshots", return_value=[]
+        ):
+            result = _run_send_capture_stage(
+                context=context,
+                maestro_bin="maestro",
+                serial="SER123",
+                app_package="com.pocketagent.android",
+                run_root=Path(tmpdir),
+                prompt="hello",
+                reply_timeout_seconds=60,
+                capture_intervals=[0],
+                mode="strict",
+            )
+
+        self.assertEqual("failed", result.status)
+        self.assertEqual("io.grpc.StatusRuntimeException: UNAVAILABLE: io exception", result.failure_signature)
+
     def test_run_maestro_flow_retries_once_on_transient_launch_failure(self) -> None:
         configs = load_devctl_configs(REPO_ROOT)
 
@@ -1609,6 +1677,88 @@ class LanesTest(unittest.TestCase):
             lanes._capture_logcat = original_capture_logcat
             lanes._run_maestro_flow = original_run_maestro_flow
             lanes._write_runtime_log_signal_artifacts = original_write_runtime_log_signal_artifacts
+
+    def test_ensure_serial_resolves_ip_port_alias_before_preflight(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+        ensure_command = configs.device.preflight.ensure_device_command
+        observed_preflight_env: dict[str, str] = {}
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def fake_run(command, **kwargs):
+            command_list = list(command)
+            if command_list == ["adb", "devices", "-l"]:
+                return Result(
+                    stdout=(
+                        "List of devices attached\n"
+                        "adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp device "
+                        "product:a51nsxx model:SM_A515F device:a51 transport_id:1\n"
+                    )
+                )
+            if command_list == ["adb", "mdns", "services"]:
+                return Result(stdout="adb-RR8NB087YTF-P4Pfzs    _adb-tls-connect._tcp   192.168.1.45:44439\n")
+            if command_list == list(ensure_command):
+                observed_preflight_env.update(kwargs["env"])
+                return Result(stdout="adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp\n")
+            raise AssertionError(f"Unexpected command: {command_list}")
+
+        context = RuntimeContext(
+            repo_root=REPO_ROOT,
+            configs=configs,
+            env={"ADB_SERIAL": "192.168.1.45:44439"},
+            run=fake_run,
+        )
+
+        resolved = _ensure_serial(context)
+
+        self.assertEqual("adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp", resolved)
+        self.assertEqual(
+            "adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp",
+            observed_preflight_env["ADB_SERIAL"],
+        )
+        self.assertEqual(
+            "adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp",
+            observed_preflight_env["ANDROID_SERIAL"],
+        )
+
+    def test_ensure_serial_preserves_requested_serial_when_alias_cannot_be_resolved(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+        ensure_command = configs.device.preflight.ensure_device_command
+        observed_preflight_env: dict[str, str] = {}
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def fake_run(command, **kwargs):
+            command_list = list(command)
+            if command_list == ["adb", "devices", "-l"]:
+                return Result(stdout="List of devices attached\nSER123 device transport_id:1\n")
+            if command_list == ["adb", "mdns", "services"]:
+                return Result(stdout="")
+            if command_list == list(ensure_command):
+                observed_preflight_env.update(kwargs["env"])
+                return Result(stdout="SER123\n")
+            raise AssertionError(f"Unexpected command: {command_list}")
+
+        context = RuntimeContext(
+            repo_root=REPO_ROOT,
+            configs=configs,
+            env={"ADB_SERIAL": "192.168.1.45:44439"},
+            run=fake_run,
+        )
+
+        resolved = _ensure_serial(context)
+
+        self.assertEqual("SER123", resolved)
+        self.assertEqual("192.168.1.45:44439", observed_preflight_env["ADB_SERIAL"])
+        self.assertNotIn("ANDROID_SERIAL", observed_preflight_env)
 
     def test_maestro_flow_clears_app_state_detects_clear_state_true(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -28,6 +28,16 @@ class AdbSerialTest(unittest.TestCase):
         self.assertIsNotNone(matched)
         self.assertEqual("adb-RFCT2178PDV-nZWer7._adb-tls-connect._tcp", matched.serial)
 
+    def test_parse_mdns_services_supports_split_service_and_type_columns(self) -> None:
+        mdns = parse_adb_mdns_services_output(
+            "List of discovered mdns services\n"
+            "adb-RFCT2178PDV-nZWer7\t_adb-tls-connect._tcp\t192.168.1.37:37361\n"
+        )
+
+        self.assertEqual(1, len(mdns))
+        self.assertEqual("adb-RFCT2178PDV-nZWer7._adb-tls-connect._tcp", mdns[0].service)
+        self.assertEqual("192.168.1.37:37361", mdns[0].endpoint)
+
     def test_network_serial_detection_covers_mdns_and_ip_port(self) -> None:
         self.assertTrue(is_mdns_tls_serial("adb-RFCT2178PDV-nZWer7._adb-tls-connect._tcp"))
         self.assertTrue(is_network_serial("adb-RFCT2178PDV-nZWer7._adb-tls-connect._tcp"))

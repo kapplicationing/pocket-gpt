@@ -14,60 +14,39 @@ appId: com.pocketagent.android
           id: "refresh_button"
 - runFlow:
     when:
+      visible: "Retry"
+    commands:
+      - tapOn: "Retry"
+- runFlow:
+    when:
+      visible: "Load"
+    commands:
+      - tapOn: "Load"
+- runFlow:
+    when:
+      visible: "Setup"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
       visible: "Unloaded"
     commands:
-      - runFlow: open-model-library.yaml
-      - runFlow:
-          when:
-            visible: "Download default model"
-          commands:
-            - tapOn: "Download default model"
-      - runFlow:
-          when:
-            visible: "Download"
-          commands:
-            - tapOn: "Download"
-      - runFlow:
-          when:
-            visible: "Pause"
-          commands:
-            - extendedWaitUntil:
-                notVisible: "Pause"
-                timeout: 300000
-      - runFlow:
-          when:
-            visible: "Refresh"
-          commands:
-            - tapOn: "Refresh"
-      - runFlow:
-          when:
-            visible: "Model library"
-          commands:
-            - scrollUntilVisible:
-                element:
-                  text: "Downloaded models"
-                direction: UP
-                timeout: 20000
-      - runFlow:
-          when:
-            visible: "Load last used"
-          commands:
-            - tapOn: "Load last used"
-      - runFlow:
-          when:
-            visible: "Retry"
-          commands:
-            - tapOn: "Retry"
-      - runFlow:
-          when:
-            visible: "Load"
-          commands:
-            - tapOn: "Load"
-      - runFlow:
-          when:
-            visible: "Loaded"
-          commands:
-            - back
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Retry"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Load"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
 - runFlow:
     when:
       visible: "Model library"
@@ -85,6 +64,21 @@ appId: com.pocketagent.android
       visible: "Load last used"
     commands:
       - tapOn: "Load last used"
+- runFlow:
+    when:
+      visible: "Retry"
+    commands:
+      - tapOn: "Retry"
+- runFlow:
+    when:
+      visible: "Load"
+    commands:
+      - tapOn: "Load"
+- runFlow:
+    when:
+      visible: "Setup"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
 - extendedWaitUntil:
     notVisible: "Setup"
     timeout: 180000

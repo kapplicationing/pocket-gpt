@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import sys
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.maestro_android.adb_serial import (
     merge_mdns_aliases,
@@ -278,3 +283,16 @@ def print_doctor_report(report: DoctorReport, as_json: bool = False) -> None:
             print(f"  fix: {check.fix}")
 
     print("\nOverall:", "PASS" if report.ok else "FAIL")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="devctl doctor")
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    parsed = parser.parse_args(argv)
+    report = run_doctor()
+    print_doctor_report(report, as_json=parsed.as_json)
+    return 0 if report.ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

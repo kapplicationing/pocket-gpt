@@ -68,9 +68,12 @@ def parse_adb_mdns_services_output(output: str) -> list[MdnsServiceRecord]:
     seen: set[tuple[str, str]] = set()
     for raw_line in output.splitlines():
         line = raw_line.strip()
-        if not line or _MDNS_CONNECT_SUFFIX not in line:
+        if not line or "_adb-tls-connect._tcp" not in line:
             continue
-        service_match = next((token for token in line.split() if token.endswith(_MDNS_CONNECT_SUFFIX)), None)
+        parts = line.split()
+        service_match = next((token for token in parts if token.endswith(_MDNS_CONNECT_SUFFIX)), None)
+        if service_match is None and len(parts) >= 2 and parts[1] == "_adb-tls-connect._tcp":
+            service_match = f"{parts[0]}{_MDNS_CONNECT_SUFFIX}"
         endpoint_match = _ENDPOINT_PATTERN.search(line)
         if service_match is None or endpoint_match is None:
             continue

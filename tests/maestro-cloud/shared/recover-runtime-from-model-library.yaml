@@ -1,0 +1,49 @@
+appId: com.pocketagent.android
+---
+- runFlow: open-model-library.yaml
+- runFlow:
+    when:
+      visible: "Download default model"
+    commands:
+      - tapOn: "Download default model"
+- runFlow:
+    when:
+      visible: "Download"
+    commands:
+      - tapOn: "Download"
+- runFlow:
+    when:
+      visible: "Pause"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Pause"
+          timeout: 300000
+- runFlow:
+    when:
+      visible: "Refresh"
+    commands:
+      - tapOn: "Refresh"
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - scrollUntilVisible:
+          element:
+            text: "Downloaded models"
+          direction: UP
+          timeout: 20000
+- runFlow:
+    when:
+      visible: "Load last used"
+    commands:
+      - tapOn: "Load last used"
+- runFlow:
+    when:
+      visible: "Load"
+    commands:
+      - tapOn: "Load"
+- runFlow:
+    when:
+      visible: "Loaded"
+    commands:
+      - back

@@ -31,6 +31,12 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - dependency guard is handled at runtime.
     yaml = None
 
+from tools.maestro_android.adb_serial import (
+    merge_mdns_aliases,
+    parse_adb_devices_output,
+    parse_adb_mdns_services_output,
+    resolve_requested_serial,
+)
 from tools.devctl.runtime_log_signals import write_runtime_log_signal_reports
 from tools.devctl.subprocess_utils import DevctlError, REPO_ROOT, format_command, print_step, run_subprocess
 
@@ -463,9 +469,45 @@ def _with_target_device_env(env: Mapping[str, str], serial: str) -> MutableMappi
     return resolved
 
 
+def _resolve_requested_target_serial(context: RuntimeContext) -> str | None:
+    requested_serial = (context.env.get("ADB_SERIAL") or context.env.get("ANDROID_SERIAL") or "").strip()
+    if not requested_serial:
+        return None
+
+    devices = context.run(
+        ["adb", "devices", "-l"],
+        check=False,
+        capture_output=True,
+        env=context.env,
+    )
+    if devices.returncode != 0:
+        return None
+
+    mdns = context.run(
+        ["adb", "mdns", "services"],
+        check=False,
+        capture_output=True,
+        env=context.env,
+    )
+    parsed_devices = merge_mdns_aliases(
+        parse_adb_devices_output(devices.stdout or ""),
+        parse_adb_mdns_services_output(mdns.stdout or ""),
+    )
+    authorized = [device for device in parsed_devices if device.authorized]
+    matched = resolve_requested_serial(requested_serial, authorized)
+    if matched is None:
+        return None
+    return matched.serial
+
+
 def _ensure_serial(context: RuntimeContext) -> str:
     ensure_command = context.configs.device.preflight.ensure_device_command
-    result = context.run(ensure_command, check=False, capture_output=True, env=context.env)
+    ensure_env = dict(context.env)
+    resolved_target_serial = _resolve_requested_target_serial(context)
+    if resolved_target_serial:
+        ensure_env["ADB_SERIAL"] = resolved_target_serial
+        ensure_env["ANDROID_SERIAL"] = resolved_target_serial
+    result = context.run(ensure_command, check=False, capture_output=True, env=ensure_env)
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         raise DevctlError(
@@ -2759,7 +2801,9 @@ def _run_send_capture_stage(
     fast_smoke_mode = mode == "fast-smoke"
     ready_wait_lines = [
         "- extendedWaitUntil:",
-        "    visible: \"Runtime: Ready\"",
+        "    visible:",
+        "      id: \"send_button\"",
+        "      enabled: true",
         f"    timeout: {reply_timeout_seconds * 1000}",
     ] if strict_mode else []
     runtime_clean_assert_lines = [
@@ -2779,14 +2823,40 @@ def _run_send_capture_stage(
                 "      - tapOn: \"Skip\"",
                 "- runFlow:",
                 "    when:",
-                "      visible: \"Pocket GPT\"",
+                "      visible:",
+                "        id: \"onboarding_skip\"",
                 "    commands:",
-                "      - tapOn: \"Pocket GPT\"",
+                "      - tapOn:",
+                "          id: \"onboarding_skip\"",
                 "- runFlow:",
                 "    when:",
-                "      visible: \"PocketAgent\"",
+                "      visible: \"Skip\"",
                 "    commands:",
-                "      - tapOn: \"PocketAgent\"",
+                "      - tapOn: \"Skip\"",
+                "- runFlow:",
+                "    when:",
+                "      visible:",
+                "        id: \"onboarding_next\"",
+                "    commands:",
+                "      - tapOn:",
+                "          id: \"onboarding_next\"",
+                "- runFlow:",
+                "    when:",
+                "      visible: \"Next\"",
+                "    commands:",
+                "      - tapOn: \"Next\"",
+                "- runFlow:",
+                "    when:",
+                "      visible:",
+                "        id: \"onboarding_get_started\"",
+                "    commands:",
+                "      - tapOn:",
+                "          id: \"onboarding_get_started\"",
+                "- runFlow:",
+                "    when:",
+                "      visible: \"Get started\"",
+                "    commands:",
+                "      - tapOn: \"Get started\"",
                 "- runFlow:",
                 "    when:",
                 "      visible: \"Get ready\"",
@@ -2794,26 +2864,29 @@ def _run_send_capture_stage(
                 "      - tapOn: \"Get ready\"",
                 "- runFlow:",
                 "    when:",
-                "      visible: \"Model provisioning\"",
+                "      visible: \"Model library\"",
                 "    commands:",
                 "      - back",
                 "- runFlow:",
                 "    when:",
-                "      visible: \"Runtime: Error\"",
+                "      visible: \"Load last used\"",
                 "    commands:",
-                "      - tapOn: \"Refresh runtime checks\"",
+                "      - tapOn: \"Load last used\"",
                 "- runFlow:",
                 "    when:",
-                "      visible: \"Refresh runtime checks\"",
+                "      visible:",
+                "        id: \"refresh_button\"",
                 "    commands:",
-                "      - tapOn: \"Refresh runtime checks\"",
+                "      - tapOn:",
+                "          id: \"refresh_button\"",
+                "- runFlow:",
+                "    when:",
+                "      visible: \"Setup\"",
+                "    commands:",
+                "      - tapOn:",
+                "          id: \"send_button\"",
                 *ready_wait_lines,
                 *runtime_clean_assert_lines,
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Advanced\"",
-                "    commands:",
-                "      - tapOn: \"Advanced\"",
                 "- takeScreenshot: \"send-kickoff-02-ready\"",
                 "- tapOn:",
                 "    id: \"composer_input\"",
@@ -2899,7 +2972,12 @@ def _run_send_capture_stage(
             kickoff_snapshot = None
         _capture_logcat(context, serial, logcat_path)
         combined = ((kickoff_result.stdout or "") + "\n" + (kickoff_result.stderr or "")).strip()
-        failure_signature = combined.splitlines()[-1] if combined else f"kickoff_exit={kickoff_result.returncode}"
+        maestro_log = _latest_maestro_log_text(debug_output_dir)
+        failure_signature = _extract_maestro_failure_signature(
+            combined=combined,
+            maestro_log=maestro_log,
+            returncode=kickoff_result.returncode,
+        )
         elapsed_ms = int((time.monotonic() - started) * 1000)
         qa13_runtime_status, qa13_backend, qa13_model_id, qa13_placeholder = _build_qa13_defaults_from_snapshot(
             kickoff_snapshot

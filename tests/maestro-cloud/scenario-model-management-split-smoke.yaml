@@ -5,25 +5,16 @@ tags:
 ---
 - runFlow: shared/bootstrap-cloud-startup.yaml
 - runFlow: shared/open-model-library.yaml
-- assertVisible: "Required models"
-- assertNotVisible: "Load now"
-- assertNotVisible: "Offload"
+- assertVisible: "Model library"
+- assertVisible: "Search models"
+- assertVisible: "Downloaded models"
+- assertVisible: "Refresh"
 - scrollUntilVisible:
     element:
-      text: "Open runtime controls"
+      text: "Close"
     direction: DOWN
     timeout: 20000
-- tapOn: "Open runtime controls"
-- extendedWaitUntil:
-    visible: "Runtime model"
-    timeout: 30000
-- assertVisible: "Runtime load state"
-- assertVisible: "No installed models yet"
-- assertNotVisible: "Downloads"
-- assertNotVisible: "Start download"
-- takeScreenshot: "cloud-model-management-split-runtime"
-- tapOn: "Open model library"
-- extendedWaitUntil:
-    visible: "Model library"
-    timeout: 30000
-- takeScreenshot: "cloud-model-management-split-library"
+- assertVisible: "Close"
+- assertNotVisible: "Load now"
+- assertNotVisible: "Offload"
+- takeScreenshot: "cloud-model-management-unified-library"

@@ -53,6 +53,7 @@ class AndroidInstrumentedLaneConfig(_StrictModel):
     requires_device: bool
     artifacts: ArtifactsConfig
     commands: list[CommandStep]
+    instrumentation_test_classes: list[str] = Field(default_factory=list)
 
 
 class MaestroLaneConfig(_StrictModel):

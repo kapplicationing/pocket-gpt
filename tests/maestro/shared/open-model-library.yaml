@@ -11,6 +11,20 @@ appId: com.pocketagent.android
     commands:
       - runFlow:
           when:
+            visible: "Setup"
+          commands:
+            - tapOn:
+                id: "send_button"
+      - runFlow:
+          when:
+            visible: "Get ready"
+          commands:
+            - tapOn: "Get ready"
+            - extendedWaitUntil:
+                visible: "Model library"
+                timeout: 20000
+      - runFlow:
+          when:
             visible:
               id: "open_model_library"
           commands:

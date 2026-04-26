@@ -40,13 +40,83 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn("- cloud-send", text)
         self.assertNotIn("- cloud-smoke", text)
 
-    def test_cloud_open_model_library_uses_unified_sheet_and_top_bar_entry(self) -> None:
-        helper_path = REPO_ROOT / "tests/maestro-cloud/shared/open-model-library.yaml"
+    def test_cloud_open_model_library_uses_text_contract_and_top_bar_entry(self) -> None:
+        helper_paths = (
+            REPO_ROOT / "tests/maestro-cloud/shared/open-model-library.yaml",
+            REPO_ROOT / "tests/maestro/shared/open-model-library.yaml",
+        )
+        for helper_path in helper_paths:
+            with self.subTest(helper=helper_path.relative_to(REPO_ROOT).as_posix()):
+                text = helper_path.read_text(encoding="utf-8")
+                self.assertIn('visible: "Model library"', text)
+                self.assertIn('notVisible: "Model library"', text)
+                self.assertIn('visible: "Get ready"', text)
+                self.assertIn('id: "open_model_library"', text)
+                self.assertIn('visible: "More models…"', text)
+                self.assertNotIn('id: "unified_model_sheet"', text)
+                self.assertNotIn('id: "advanced_sheet_button"', text)
+
+    def test_cloud_bootstrap_runtime_ready_uses_simple_first_setup_path(self) -> None:
+        helper_path = REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-cloud-startup.yaml"
         text = helper_path.read_text(encoding="utf-8")
-        self.assertIn('id: "unified_model_sheet"', text)
-        self.assertIn('id: "open_model_library"', text)
-        self.assertIn('visible: "More models…"', text)
+        self.assertIn('visible: "Get ready"', text)
+        self.assertIn('visible: "Model library"', text)
+        self.assertIn('visible: "Setup"', text)
+        self.assertIn('id: "send_button"', text)
+        self.assertIn('notVisible: "Setup"', text)
+        self.assertIn('id: "session_drawer_button"', text)
+
+    def test_ensure_runtime_loaded_uses_downloaded_models_load_path(self) -> None:
+        helper_expectations = (
+            (REPO_ROOT / "tests/maestro/shared/ensure-runtime-loaded.yaml", True),
+            (REPO_ROOT / "tests/maestro-cloud/shared/ensure-runtime-loaded.yaml", True),
+        )
+        for helper_path, expect_enabled_send in helper_expectations:
+            with self.subTest(helper=helper_path.relative_to(REPO_ROOT).as_posix()):
+                text = helper_path.read_text(encoding="utf-8")
+                self.assertIn('text: "Downloaded models"', text)
+                self.assertIn('visible: "Load"', text)
+                self.assertIn('visible: "Download"', text)
+                self.assertIn('notVisible: "Setup"', text)
+                self.assertIn('notVisible: "Retry"', text)
+                if expect_enabled_send:
+                    self.assertIn('enabled: true', text)
+                self.assertNotIn('text: "Active model"', text)
+                self.assertNotIn('notVisible: "Unloaded"', text)
+
+    def test_cloud_model_management_smoke_uses_unified_library_contract(self) -> None:
+        flow_path = REPO_ROOT / "tests/maestro-cloud/scenario-model-management-split-smoke.yaml"
+        text = flow_path.read_text(encoding="utf-8")
+        self.assertIn('assertVisible: "Model library"', text)
+        self.assertIn('assertVisible: "Search models"', text)
+        self.assertIn('assertVisible: "Downloaded models"', text)
+        self.assertIn('assertVisible: "Refresh"', text)
+        self.assertIn('text: "Close"', text)
+        self.assertIn('assertVisible: "Close"', text)
+        self.assertNotIn('assertVisible: "No downloaded models yet"', text)
+
+    def test_cloud_send_after_ready_waits_for_enabled_send_button(self) -> None:
+        flow_path = REPO_ROOT / "tests/maestro-cloud/scenario-send-after-ready-smoke.yaml"
+        text = flow_path.read_text(encoding="utf-8")
+        self.assertIn('notVisible: "Loading…"', text)
+        self.assertIn('notVisible: "Retry"', text)
+        self.assertIn('id: "send_button"', text)
+        self.assertIn('enabled: true', text)
+        self.assertIn('visible: "Send"', text)
+        self.assertIn('visible: "Loading…"', text)
+
+    def test_download_settings_smoke_uses_unified_model_library_path(self) -> None:
+        flow_path = REPO_ROOT / "tests/maestro/scenario-download-settings-smoke.yaml"
+        text = flow_path.read_text(encoding="utf-8")
+        self.assertIn('- runFlow: shared/open-model-library.yaml', text)
+        self.assertIn('assertVisible: "Model library"', text)
+        self.assertIn('assertVisible: "Search models"', text)
+        self.assertIn('assertVisible: "Downloaded models"', text)
+        self.assertIn('assertVisible: "Refresh"', text)
+        self.assertIn('text: "Close"', text)
+        self.assertIn('assertVisible: "Close"', text)
         self.assertNotIn('id: "advanced_sheet_button"', text)
+        self.assertNotIn('visible: "Advanced controls"', text)
 
 
 if __name__ == "__main__":

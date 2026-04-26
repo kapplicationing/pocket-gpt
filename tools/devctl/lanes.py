@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -135,6 +136,18 @@ class ScreenshotInventoryItem:
     candidates: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RealRuntimeRequiredArtifact:
+    artifact_id: str
+    model_id: str
+    role: str
+    file_name: str
+    expected_sha256: str
+    download_url: str
+    host_path: str
+    device_path: str
+
+
 def _now_stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -143,6 +156,8 @@ _DEFAULT_HEALTH_APP_PACKAGE = "com.pocketagent.android"
 _DEFAULT_HEALTH_TEST_PACKAGE = "com.pocketagent.android.test"
 _REMOTE_DIR_RETRY_ATTEMPTS = 3
 _REMOTE_DIR_RETRY_BACKOFF_SECONDS = 0.5
+_REMOTE_COPY_TIMEOUT_SECONDS = 30.0
+_ANDROID_INSTRUMENTED_SELECTOR_TIMEOUT_SECONDS = 300.0
 _SEND_CAPTURE_READY_GRACE_SECONDS = 5
 _SEND_CAPTURE_POST_TERMINAL_GRACE_SECONDS = 30
 _MODEL_SYNC_MANIFEST_FILE = "model-sync-v1.json"
@@ -158,6 +173,8 @@ _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "TimeoutException",
     "timed out while waiting for FUNCTIONFS_BIND",
     "TcpForwarder",
+    "UNAVAILABLE: io exception",
+    "Connection refused",
 )
 _MAESTRO_LAUNCH_APP_KEY = "launchApp"
 _MAESTRO_CLEAR_STATE_KEY = "clearState"
@@ -778,7 +795,13 @@ def _shell_single_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def _run_remote_shell_script(context: RuntimeContext, serial: str, script: str):
+def _run_remote_shell_script(
+    context: RuntimeContext,
+    serial: str,
+    script: str,
+    *,
+    timeout_seconds: float | None = None,
+):
     # Use a single adb shell script argument instead of `sh -c ...`.
     # Some device shells mis-handle tokenized `sh -c` argv and return syntax errors.
     return context.run(
@@ -786,13 +809,14 @@ def _run_remote_shell_script(context: RuntimeContext, serial: str, script: str):
         check=False,
         capture_output=True,
         env=context.env,
+        timeout_seconds=timeout_seconds,
     )
 
 
 def _is_tcpip_serial(serial: str) -> bool:
     # Wireless ADB serials are typically host:port. Emulator serials use the same separator,
     # but do not need adb connect/disconnect recovery.
-    return ":" in serial and not serial.startswith("emulator-")
+    return (":" in serial and not serial.startswith("emulator-")) or serial.endswith("._adb-tls-connect._tcp")
 
 
 def _run_maestro_transport_recovery(
@@ -904,6 +928,7 @@ def _copy_remote_file(
             f"(cp {quoted_source} {quoted_destination} 2>/dev/null || cat {quoted_source} > {quoted_destination}); "
             "fi"
         ),
+        timeout_seconds=_REMOTE_COPY_TIMEOUT_SECONDS,
     )
     if copy_result.returncode != 0:
         detail = "\n".join(
@@ -1074,6 +1099,266 @@ def _write_model_sync_manifest(
     return manifest_path
 
 
+def _load_real_runtime_catalog(repo_root: Path) -> dict[str, Any]:
+    catalog_path = repo_root / "apps/mobile-android/src/main/assets/model-distribution-catalog.json"
+    try:
+        return json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - broken local catalog should fail loudly in lane prep.
+        raise DevctlError("CONFIG_ERROR", f"Failed to load real-runtime catalog from {catalog_path}: {exc}") from exc
+
+
+def _resolve_real_runtime_required_artifacts(
+    *,
+    context: RuntimeContext,
+    model_id: str,
+    primary_host_path: str,
+    device_parent_dir: str,
+) -> list[RealRuntimeRequiredArtifact]:
+    catalog = _load_real_runtime_catalog(context.repo_root)
+    models = catalog.get("models")
+    if not isinstance(models, list):
+        return []
+
+    model_entry = next(
+        (
+            item
+            for item in models
+            if isinstance(item, dict) and str(item.get("modelId", "")).strip() == model_id
+        ),
+        None,
+    )
+    if model_entry is None:
+        return []
+
+    versions = model_entry.get("versions")
+    if not isinstance(versions, list):
+        return []
+
+    primary_file_name = Path(primary_host_path).name
+    selected_version: dict[str, Any] | None = None
+    for version in versions:
+        if not isinstance(version, dict):
+            continue
+        artifacts = version.get("artifacts")
+        if not isinstance(artifacts, list):
+            continue
+        primary_artifact = next(
+            (
+                artifact
+                for artifact in artifacts
+                if isinstance(artifact, dict) and str(artifact.get("role", "")).strip() == "PRIMARY_GGUF"
+            ),
+            None,
+        )
+        if primary_artifact is None:
+            continue
+        candidate_name = str(primary_artifact.get("fileName", "")).strip() or str(primary_artifact.get("downloadUrl", "")).strip().split("/")[-1]
+        if candidate_name == primary_file_name:
+            selected_version = version
+            break
+
+    if selected_version is None:
+        return []
+
+    artifacts = selected_version.get("artifacts")
+    if not isinstance(artifacts, list):
+        return []
+
+    resolved: list[RealRuntimeRequiredArtifact] = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        role = str(artifact.get("role", "")).strip()
+        required = bool(artifact.get("required", True))
+        if role == "PRIMARY_GGUF" or not required:
+            continue
+        file_name = str(artifact.get("fileName", "")).strip()
+        if not file_name:
+            continue
+        host_path = _resolve_or_download_real_runtime_artifact(
+            context=context,
+            primary_host_path=primary_host_path,
+            file_name=file_name,
+            download_url=str(artifact.get("downloadUrl", "")).strip(),
+            expected_sha256=str(artifact.get("expectedSha256", "")).strip().lower(),
+        )
+        resolved.append(
+            RealRuntimeRequiredArtifact(
+                artifact_id=str(artifact.get("artifactId", "")).strip() or f"{model_id}::{file_name}",
+                model_id=model_id,
+                role=role,
+                file_name=file_name,
+                expected_sha256=str(artifact.get("expectedSha256", "")).strip().lower(),
+                download_url=str(artifact.get("downloadUrl", "")).strip(),
+                host_path=host_path,
+                device_path=f"{device_parent_dir.rstrip('/')}/{file_name}",
+            )
+        )
+    return resolved
+
+
+def _resolve_or_download_real_runtime_artifact(
+    *,
+    context: RuntimeContext,
+    primary_host_path: str,
+    file_name: str,
+    download_url: str,
+    expected_sha256: str,
+) -> str:
+    primary_parent = Path(primary_host_path).resolve().parent
+    search_roots = [
+        primary_parent,
+        *[Path(os.path.expanduser(root)).resolve() for root in context.configs.lanes.lanes.real_runtime.cache_root_candidates],
+    ]
+    seen_candidates: set[str] = set()
+
+    def iter_candidates() -> list[Path]:
+        candidates: list[Path] = []
+        for root in search_roots:
+            if not root.exists():
+                continue
+            direct = root / file_name
+            if direct.exists() and direct.is_file():
+                direct_key = str(direct.resolve())
+                if direct_key not in seen_candidates:
+                    seen_candidates.add(direct_key)
+                    candidates.append(direct)
+            for candidate in root.rglob(file_name):
+                if not candidate.is_file():
+                    continue
+                candidate_key = str(candidate.resolve())
+                if candidate_key in seen_candidates:
+                    continue
+                seen_candidates.add(candidate_key)
+                candidates.append(candidate)
+        return candidates
+
+    for candidate in iter_candidates():
+        if expected_sha256:
+            candidate_sha = _compute_file_sha256(candidate)
+            if candidate_sha != expected_sha256:
+                continue
+        return str(candidate.resolve())
+
+    if not download_url:
+        raise DevctlError(
+            "ENVIRONMENT_ERROR",
+            f"Missing required companion artifact {file_name} for {Path(primary_host_path).name} and no download URL is available.",
+        )
+
+    destination = primary_parent / file_name
+    print_step(f"Hydrating required companion artifact {file_name} for {Path(primary_host_path).name}")
+    _download_real_runtime_artifact(
+        download_url=download_url,
+        destination=destination,
+        expected_sha256=expected_sha256,
+    )
+    return str(destination.resolve())
+
+
+def _download_real_runtime_artifact(
+    *,
+    download_url: str,
+    destination: Path,
+    expected_sha256: str,
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(delete=False, dir=destination.parent, suffix=".download") as handle:
+        temp_path = Path(handle.name)
+    try:
+        curl_path = shutil.which("curl")
+        if curl_path:
+            result = run_subprocess(
+                [
+                    curl_path,
+                    "-fL",
+                    "--retry",
+                    "3",
+                    "--retry-delay",
+                    "2",
+                    "-A",
+                    "PocketAgent-devctl/1.0",
+                    "-o",
+                    str(temp_path),
+                    download_url,
+                ],
+                check=False,
+                capture_output=True,
+                timeout_seconds=600,
+            )
+            if result.returncode != 0:
+                detail = "\n".join(
+                    part
+                    for part in [(result.stdout or "").strip(), (result.stderr or "").strip()]
+                    if part
+                ).strip()
+                raise DevctlError(
+                    "ENVIRONMENT_ERROR",
+                    f"Failed to download companion artifact from {download_url}.\n{detail or '<no-output>'}",
+                )
+        else:
+            digest = hashlib.sha256()
+            request = urllib.request.Request(
+                download_url,
+                headers={"User-Agent": "PocketAgent-devctl/1.0"},
+            )
+            with urllib.request.urlopen(request, timeout=300) as response, temp_path.open("wb") as output:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    output.write(chunk)
+        actual_sha256 = _compute_file_sha256(temp_path).lower()
+        if expected_sha256 and actual_sha256 != expected_sha256:
+            raise DevctlError(
+                "ENVIRONMENT_ERROR",
+                f"Downloaded companion artifact checksum mismatch for {destination.name}: expected {expected_sha256}, got {actual_sha256}",
+            )
+        temp_path.replace(destination)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _ensure_remote_real_runtime_artifact(
+    *,
+    context: RuntimeContext,
+    serial: str,
+    host_path: str,
+    device_path: str,
+    label: str,
+) -> int:
+    host_file = Path(host_path)
+    host_size = host_file.stat().st_size
+    host_sha256 = _compute_file_sha256(host_file)
+    remote_size = _remote_file_size_bytes(context, serial, device_path)
+    if remote_size == host_size:
+        remote_sha256 = _remote_file_sha256(context, serial, device_path)
+        if remote_sha256 is None or remote_sha256 == host_sha256:
+            return remote_size
+
+    remote_parent = device_path.rsplit("/", 1)[0]
+    _ensure_remote_dir(
+        context=context,
+        serial=serial,
+        path=remote_parent,
+        failure_label=f"Failed to prepare remote directory for {label}.",
+    )
+    context.run(
+        ["adb", "-s", serial, "push", host_path, device_path],
+        check=True,
+        env=context.env,
+    )
+    verified_size = _remote_file_size_bytes(context, serial, device_path)
+    if verified_size != host_size:
+        raise DevctlError(
+            "DEVICE_ERROR",
+            f"{label} is unavailable after push: {device_path}",
+        )
+    return verified_size
+
+
 def _resolve_available_instrumentation_runner(
     *,
     context: RuntimeContext,
@@ -1128,6 +1413,7 @@ def prepare_real_runtime_env(
     real_runtime_cfg = context.configs.lanes.lanes.real_runtime
     model_host_paths_by_id = _resolve_real_runtime_model_paths(context)
     model_device_paths_by_id: dict[str, str] = {}
+    model_required_artifacts_by_id: dict[str, list[dict[str, Any]]] = {}
 
     candidate_model_dirs = [real_runtime_cfg.device_model_dir, *_media_path_fallbacks(real_runtime_cfg.device_model_dir)]
     resolved_model_dir = _ensure_remote_dir(
@@ -1414,12 +1700,40 @@ def prepare_real_runtime_env(
                     print_step(f"Persistent cache mirror skipped for {model.model_id}: {exc.message}")
 
         model_device_paths_by_id[model.model_id] = resolved_device_path
+        required_artifacts = _resolve_real_runtime_required_artifacts(
+            context=context,
+            model_id=model.model_id,
+            primary_host_path=host_path,
+            device_parent_dir=str(Path(resolved_device_path).parent),
+        )
+        synced_required_artifacts: list[dict[str, Any]] = []
+        for artifact in required_artifacts:
+            remote_size = _ensure_remote_real_runtime_artifact(
+                context=context,
+                serial=device_serial,
+                host_path=artifact.host_path,
+                device_path=artifact.device_path,
+                label=f"required companion artifact {artifact.file_name}",
+            )
+            synced_required_artifacts.append(
+                {
+                    "artifact_id": artifact.artifact_id,
+                    "role": artifact.role,
+                    "file_name": artifact.file_name,
+                    "host_path": artifact.host_path,
+                    "device_path": artifact.device_path,
+                    "expected_sha256": artifact.expected_sha256,
+                    "device_size": remote_size,
+                }
+            )
+        model_required_artifacts_by_id[model.model_id] = synced_required_artifacts
         model_sync_records[model.model_id] = {
             "host_sha256": host_sha256,
             "host_size": host_size,
             "device_path": resolved_device_path,
             "device_size": resolved_device_size if resolved_device_size is not None else host_size,
             "last_verified_at": datetime.now().isoformat(timespec="seconds"),
+            "required_artifacts": synced_required_artifacts,
         }
         model_sync_decisions.append(
             {
@@ -1430,6 +1744,7 @@ def prepare_real_runtime_env(
                 "host_sha256": host_sha256,
                 "device_path": resolved_device_path,
                 "device_size": resolved_device_size if resolved_device_size is not None else host_size,
+                "required_artifacts": synced_required_artifacts,
             }
         )
 
@@ -1469,29 +1784,35 @@ def prepare_real_runtime_env(
             host_size = Path(host_path).stat().st_size
             device_path = model_device_paths_by_id[model.model_id]
             remote_size = _remote_file_size_bytes(context, device_serial, device_path)
-            if remote_size == host_size:
-                continue
-
-            print_step(
-                f"Model {model.model_id} missing/stale at {device_path}; re-pushing before provisioning probe."
-            )
-            remote_parent = device_path.rsplit("/", 1)[0]
-            _ensure_remote_dir(
-                context=context,
-                serial=device_serial,
-                path=remote_parent,
-                failure_label="Failed to ensure remote model directory before provisioning probe.",
-            )
-            context.run(
-                ["adb", "-s", device_serial, "push", host_path, device_path],
-                check=True,
-                env=context.env,
-            )
-            verified_size = _remote_file_size_bytes(context, device_serial, device_path)
-            if verified_size != host_size:
-                raise DevctlError(
-                    "DEVICE_ERROR",
-                    f"Model {model.model_id} is unavailable after pre-probe re-push: {device_path}",
+            if remote_size != host_size:
+                print_step(
+                    f"Model {model.model_id} missing/stale at {device_path}; re-pushing before provisioning probe."
+                )
+                remote_parent = device_path.rsplit("/", 1)[0]
+                _ensure_remote_dir(
+                    context=context,
+                    serial=device_serial,
+                    path=remote_parent,
+                    failure_label="Failed to ensure remote model directory before provisioning probe.",
+                )
+                context.run(
+                    ["adb", "-s", device_serial, "push", host_path, device_path],
+                    check=True,
+                    env=context.env,
+                )
+                verified_size = _remote_file_size_bytes(context, device_serial, device_path)
+                if verified_size != host_size:
+                    raise DevctlError(
+                        "DEVICE_ERROR",
+                        f"Model {model.model_id} is unavailable after pre-probe re-push: {device_path}",
+                    )
+            for artifact in model_required_artifacts_by_id.get(model.model_id, []):
+                _ensure_remote_real_runtime_artifact(
+                    context=context,
+                    serial=device_serial,
+                    host_path=str(artifact["host_path"]),
+                    device_path=str(artifact["device_path"]),
+                    label=f"required companion artifact {artifact['file_name']}",
                 )
 
     def _run_provisioning_probe() -> None:
@@ -1538,6 +1859,7 @@ def prepare_real_runtime_env(
                     "prepared_at": datetime.now().isoformat(timespec="seconds"),
                     "model_host_paths_by_id": model_host_paths_by_id,
                     "model_device_paths_by_id": model_device_paths_by_id,
+                    "model_required_artifacts_by_id": model_required_artifacts_by_id,
                     "instrumentation_runner": instrumentation_runner,
                     "model_sync": {
                         "schema": _MODEL_SYNC_MANIFEST_SCHEMA,
@@ -1875,6 +2197,96 @@ def _report_path(path: Path) -> str:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def _list_attached_devices(context: RuntimeContext, env: Mapping[str, str] | None = None) -> list[str]:
+    result = context.run(
+        ["adb", "devices", "-l"],
+        check=False,
+        capture_output=True,
+        env=env or context.env,
+    )
+    if result.returncode != 0:
+        return []
+    return [
+        line.strip()
+        for line in (result.stdout or "").splitlines()[1:]
+        if line.strip()
+    ]
+
+
+def _write_android_instrumented_report(
+    *,
+    artifact_root: Path,
+    serial: str,
+    selector_timeout_seconds: float,
+    selector_results: Sequence[Mapping[str, Any]],
+    status: str,
+    failure_message: str | None,
+    attached_devices: Sequence[str],
+    target_env: Mapping[str, str],
+    logcat_path: Path | None,
+) -> tuple[Path, Path]:
+    report_json_path = artifact_root / "android-instrumented-report.json"
+    report_md_path = artifact_root / "android-instrumented-report.md"
+    preflight_path = artifact_root / "real-runtime-preflight.json"
+
+    payload = {
+        "lane": "android-instrumented",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "status": status,
+        "serial": serial,
+        "selector_timeout_seconds": selector_timeout_seconds,
+        "failure": failure_message,
+        "targeting": {
+            "adb_serial_env": target_env.get("ADB_SERIAL"),
+            "android_serial_env": target_env.get("ANDROID_SERIAL"),
+        },
+        "attached_devices": list(attached_devices),
+        "selector_results": list(selector_results),
+        "real_runtime_preflight": _report_path(preflight_path) if preflight_path.exists() else None,
+        "logcat": _report_path(logcat_path) if logcat_path is not None and logcat_path.exists() else None,
+        "artifact_root": _report_path(artifact_root),
+    }
+    report_json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    lines = [
+        "# Android Instrumented Report",
+        "",
+        f"- Status: `{status}`",
+        f"- Serial: `{serial}`",
+        f"- Selector timeout: `{selector_timeout_seconds:.1f}s`",
+        f"- Artifact root: `{_report_path(artifact_root)}`",
+    ]
+    if target_env.get("ADB_SERIAL") or target_env.get("ANDROID_SERIAL"):
+        lines.append(
+            "- Targeting env: "
+            f"`ADB_SERIAL={target_env.get('ADB_SERIAL', '')}` "
+            f"`ANDROID_SERIAL={target_env.get('ANDROID_SERIAL', '')}`"
+        )
+    if attached_devices:
+        lines.append("- Attached devices:")
+        lines.extend(f"  - `{line}`" for line in attached_devices)
+    if preflight_path.exists():
+        lines.append(f"- Real-runtime preflight: `{_report_path(preflight_path)}`")
+    if logcat_path is not None and logcat_path.exists():
+        lines.append(f"- Logcat: `{_report_path(logcat_path)}`")
+    if failure_message:
+        lines.extend(["", "## Failure", "", "```text", failure_message, "```"])
+    lines.extend(["", "## Selectors", ""])
+    for item in selector_results:
+        lines.append(f"- `{item['selector']}`: `{item['status']}` ({item['duration_seconds']:.2f}s)")
+        output_path = item.get("output_path")
+        if output_path:
+            lines.append(f"  output: `{output_path}`")
+        error_message = item.get("error")
+        if error_message:
+            lines.append("  error:")
+            lines.append("  ```text")
+            lines.extend(f"  {line}" for line in str(error_message).splitlines())
+            lines.append("  ```")
+    report_md_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return report_json_path, report_md_path
 
 
 def _capture_device_screenshot(
@@ -3257,6 +3669,111 @@ def _derive_failed_send_capture_phase(failure_signature: str | None) -> str:
     return "error"
 
 
+def _write_maestro_report(
+    *,
+    artifact_root: Path,
+    serial: str,
+    steps: Sequence[JourneyStepResult],
+    status: str,
+    failure_message: str | None,
+    attached_devices: Sequence[str],
+    target_env: Mapping[str, str],
+    logcat_path: Path,
+    preflight_path: Path | None = None,
+) -> tuple[Path, Path]:
+    report_json_path = artifact_root / "maestro-report.json"
+    report_md_path = artifact_root / "maestro-report.md"
+    run_owner = os.environ.get("POCKETGPT_RUN_OWNER") or os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"
+    run_host = os.environ.get("HOSTNAME") or os.uname().nodename
+    runtime_signal_report = _write_runtime_log_signal_artifacts(logcat_path)
+    first_failed_step = next((step for step in steps if step.status != "passed"), None)
+    payload = {
+        "schema": "maestro-report-v1",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "status": status,
+        "failure_message": failure_message,
+        "flow_name": first_failed_step.name if first_failed_step is not None else None,
+        "failure_phase": first_failed_step.phase if first_failed_step is not None else None,
+        "failure_signature": first_failed_step.failure_signature if first_failed_step is not None else None,
+        "artifact_root": _report_path(artifact_root),
+        "serial": serial,
+        "run_owner": run_owner,
+        "run_host": run_host,
+        "attached_devices": list(attached_devices),
+        "target_env": {
+            "ADB_SERIAL": target_env.get("ADB_SERIAL"),
+            "ANDROID_SERIAL": target_env.get("ANDROID_SERIAL"),
+        },
+        "logcat": _report_path(logcat_path) if logcat_path.exists() else None,
+        "preflight": _report_path(preflight_path) if preflight_path is not None and preflight_path.exists() else None,
+        "runtime_log_signals": (
+            {
+                "json_report": runtime_signal_report[0],
+                "markdown_report": runtime_signal_report[1],
+                "status": runtime_signal_report[2]["status"],
+                "issue_count": runtime_signal_report[2]["issue_count"],
+            }
+            if runtime_signal_report is not None
+            else None
+        ),
+        "steps": [
+            {
+                "name": step.name,
+                "status": step.status,
+                "duration_seconds": round(step.duration_seconds, 2),
+                "details": step.details,
+                "screenshots": step.screenshots or [],
+                "failure_signature": step.failure_signature,
+                "phase": step.phase,
+                "elapsed_ms": step.elapsed_ms,
+            }
+            for step in steps
+        ],
+    }
+    report_json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    lines = [
+        "# Maestro Summary",
+        "",
+        f"- Device: `{serial}`",
+        f"- Status: `{status}`",
+        f"- Run owner: `{run_owner}`",
+        f"- Run host: `{run_host}`",
+        f"- Generated: `{payload['generated_at']}`",
+    ]
+    if failure_message:
+        lines.append(f"- Failure: `{failure_message}`")
+    if payload["preflight"]:
+        lines.append(f"- Preflight: `{payload['preflight']}`")
+    if payload["logcat"]:
+        lines.append(f"- Logcat: `{payload['logcat']}`")
+    if runtime_signal_report is not None:
+        lines.append(
+            f"- Runtime log signals: `{runtime_signal_report[1]}` (status={runtime_signal_report[2]['status']}, issues={runtime_signal_report[2]['issue_count']})",
+        )
+    lines.extend(
+        [
+            "",
+            "| Step | Status | Duration (s) | Phase | Failure signature |",
+            "|---|---|---|---|---|",
+        ]
+    )
+    for step in steps:
+        lines.append(
+            "| "
+            f"{step.name} | {step.status} | {step.duration_seconds:.2f} | {step.phase or '-'} | {step.failure_signature or '-'} |"
+        )
+        if step.details:
+            lines.append(f"- Details: {step.details}")
+        if step.screenshots:
+            lines.append("- Screenshots:")
+            for shot in step.screenshots:
+                lines.append(f"  - `{shot}`")
+        lines.append("")
+    report_md_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return report_json_path, report_md_path
+
+
 def _normalize_test_mode(mode: str, context: RuntimeContext) -> str:
     canonical = mode.strip().lower()
     aliases = context.configs.test_profiles.aliases
@@ -3478,39 +3995,119 @@ def _lane_android_instrumented_impl(raw_args: Sequence[str], context: RuntimeCon
     serial = _ensure_serial(context)
     with _device_lock(serial, owner="lane:android-instrumented"):
         device_env = _with_target_device_env(resolved_env, serial)
+        print_step(f"android-instrumented target device: {serial}")
         _run_device_health_preflight(context, serial)
         lane_cfg = context.configs.lanes.lanes.android_instrumented
         artifact_root = _resolve_lane_artifact_dir(lane_cfg.artifacts.output_dir_template, serial, "android-instrumented")
         artifact_root.mkdir(parents=True, exist_ok=True)
         print_step(f"android-instrumented artifacts: {artifact_root}")
+        logcat_path = artifact_root / context.configs.lanes.lanes.real_runtime.logcat_file_name
+        attached_devices = _list_attached_devices(context, env=device_env)
+        selector_results: list[dict[str, Any]] = []
+        failure_message: str | None = None
         runner_args: dict[str, str] = {}
         preflight_prepared = False
-
-        for step in lane_cfg.commands:
-            command = _append_native_build_flag(step.argv, env=device_env)
-            if _run_serialized_gradle_install_step(
-                context=context,
-                command=command,
-                serial=serial,
-                env=device_env,
-            ):
-                continue
-            is_connected_step = "connected" in step.name.lower() or any(
-                "connected" in token and "androidtest" in token.lower()
-                for token in command
+        instrumented_selectors = tuple(lane_cfg.instrumentation_test_classes)
+        if instrumented_selectors:
+            print_step(
+                "android-instrumented selectors: " + ", ".join(instrumented_selectors)
             )
-            if not is_connected_step:
+
+        try:
+            for step in lane_cfg.commands:
+                command = _append_native_build_flag(step.argv, env=device_env)
+                if _run_serialized_gradle_install_step(
+                    context=context,
+                    command=command,
+                    serial=serial,
+                    env=device_env,
+                ):
+                    continue
+                is_connected_step = "connected" in step.name.lower() or any(
+                    "connected" in token and "androidtest" in token.lower()
+                    for token in command
+                )
+                if not is_connected_step:
+                    context.run(command, check=True, env=device_env)
+                    continue
+
+                if not preflight_prepared:
+                    preflight = prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
+                    runner_args = _instrumentation_args_from_model_paths(preflight.model_device_paths_by_id)
+                    preflight_prepared = True
+                if instrumented_selectors:
+                    real_runtime_cfg = context.configs.lanes.lanes.real_runtime
+                    instrumentation_runner = preflight.instrumentation_runner or _resolve_available_instrumentation_runner(
+                        context=context,
+                        serial=serial,
+                        preferred_runner=real_runtime_cfg.instrumentation_runner,
+                        app_package=real_runtime_cfg.app_package,
+                    )
+                    for selector in instrumented_selectors:
+                        selector_args = dict(runner_args)
+                        if selector == real_runtime_cfg.provisioning_test_class:
+                            selector_args["stage2_enable_provisioning_test"] = "true"
+                        if selector == real_runtime_cfg.journey_test_class:
+                            selector_args["stage2_enable_journey_test"] = "true"
+                        print_step(f"android-instrumented running selector: {selector}")
+                        selector_output_path = artifact_root / f"{_sanitize_file_token(selector)}.txt"
+                        started = time.monotonic()
+                        try:
+                            result = _run_instrumentation_class(
+                                context=context,
+                                serial=serial,
+                                test_class=selector,
+                                runner=instrumentation_runner,
+                                args=selector_args,
+                                timeout_seconds=_ANDROID_INSTRUMENTED_SELECTOR_TIMEOUT_SECONDS,
+                            )
+                            selector_output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+                            selector_output_path.write_text(
+                                selector_output + ("\n" if selector_output else ""),
+                                encoding="utf-8",
+                            )
+                            selector_results.append(
+                                {
+                                    "selector": selector,
+                                    "status": "passed",
+                                    "duration_seconds": time.monotonic() - started,
+                                    "output_path": _report_path(selector_output_path),
+                                }
+                            )
+                        except DevctlError as exc:
+                            selector_output_path.write_text(exc.message.rstrip() + "\n", encoding="utf-8")
+                            selector_results.append(
+                                {
+                                    "selector": selector,
+                                    "status": "failed",
+                                    "duration_seconds": time.monotonic() - started,
+                                    "output_path": _report_path(selector_output_path),
+                                    "error": exc.message,
+                                }
+                            )
+                            failure_message = exc.message
+                            raise
+                    continue
+                command = _append_gradle_instrumentation_args(command, runner_args)
                 context.run(command, check=True, env=device_env)
-                continue
-
-            if not preflight_prepared:
-                preflight = prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
-                runner_args = _instrumentation_args_from_model_paths(preflight.model_device_paths_by_id)
-                preflight_prepared = True
-            command = _append_gradle_instrumentation_args(command, runner_args)
-            context.run(command, check=True, env=device_env)
-
-        _capture_logcat(context, serial, artifact_root / context.configs.lanes.lanes.real_runtime.logcat_file_name)
+        except DevctlError as exc:
+            failure_message = failure_message or exc.message
+            raise
+        finally:
+            _capture_logcat(context, serial, logcat_path)
+            report_json_path, report_md_path = _write_android_instrumented_report(
+                artifact_root=artifact_root,
+                serial=serial,
+                selector_timeout_seconds=_ANDROID_INSTRUMENTED_SELECTOR_TIMEOUT_SECONDS,
+                selector_results=selector_results,
+                status="failed" if failure_message else "passed",
+                failure_message=failure_message,
+                attached_devices=attached_devices,
+                target_env=device_env,
+                logcat_path=logcat_path,
+            )
+            print_step(f"android-instrumented report: {report_json_path}")
+            print_step(f"android-instrumented markdown: {report_md_path}")
 
 
 def _run_maestro_flow(
@@ -3551,11 +4148,16 @@ def _run_maestro_flow(
             cwd=debug_output_dir,
         )
         combined = ((run_result.stdout or "") + "\n" + (run_result.stderr or "")).strip()
-        attempt_outputs.append(f"=== attempt {attempt + 1} ===\n{combined}\n")
+        maestro_log = _latest_maestro_log_text(debug_output_dir)
+        attempt_block = [f"=== attempt {attempt + 1} ===", combined]
+        if maestro_log:
+            attempt_block.extend(["--- maestro.log ---", maestro_log])
+        attempt_outputs.append("\n".join(part for part in attempt_block if part).rstrip() + "\n")
         result = run_result
         if run_result.returncode == 0:
             break
-        if attempt == 0 and any(marker in combined for marker in _MAESTRO_TRANSIENT_FAILURE_MARKERS):
+        retry_source = f"{combined}\n{maestro_log}".strip()
+        if attempt == 0 and any(marker in retry_source for marker in _MAESTRO_TRANSIENT_FAILURE_MARKERS):
             print_step(f"maestro flow {flow_path.stem} hit transient launch failure; retrying once.")
             _run_maestro_transport_recovery(context=context, serial=serial, env=run_env)
             time.sleep(1.5)
@@ -3571,7 +4173,12 @@ def _run_maestro_flow(
     failure_signature: str | None = None
     if result.returncode != 0:
         combined = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
-        failure_signature = combined.splitlines()[-1] if combined else f"exit={result.returncode}"
+        maestro_log = _latest_maestro_log_text(debug_output_dir)
+        failure_signature = _extract_maestro_failure_signature(
+            combined=combined,
+            maestro_log=maestro_log,
+            returncode=result.returncode,
+        )
         device_failure_path = f"/sdcard/{_sanitize_file_token(flow_path.stem)}-failure.png"
         local_failure_path = debug_output_dir / "failure-screenshot.png"
         context.run(
@@ -3600,6 +4207,36 @@ def _run_maestro_flow(
         phase="completed" if status == "passed" else "error",
         elapsed_ms=int(duration * 1000),
     )
+
+
+def _latest_maestro_log_text(debug_output_dir: Path) -> str:
+    logs = sorted(debug_output_dir.rglob("maestro.log"))
+    if not logs:
+        return ""
+    return logs[-1].read_text(encoding="utf-8", errors="replace")
+
+
+def _extract_maestro_failure_signature(*, combined: str, maestro_log: str, returncode: int) -> str:
+    combined_lines = [line.strip() for line in combined.splitlines() if line.strip()]
+    log_lines = [line.strip() for line in maestro_log.splitlines() if line.strip()]
+    for line in combined_lines + log_lines:
+        if any(marker in line for marker in _MAESTRO_TRANSIENT_FAILURE_MARKERS):
+            return line
+    for marker in ("Assertion is false", "Element not found", "CommandFailed:", "No view found"):
+        for line in combined_lines + log_lines:
+            if marker in line:
+                return line
+    for line in reversed(combined_lines):
+        if line.startswith("==== Debug output"):
+            continue
+        if line.startswith("/") and len(line.split()) == 1:
+            continue
+        return line
+    for line in reversed(log_lines):
+        if line.startswith("at "):
+            continue
+        return line
+    return f"exit={returncode}"
 
 
 def _maestro_flow_clears_app_state(flow_path: Path) -> bool:
@@ -3725,87 +4362,110 @@ def _lane_maestro_impl(raw_args: Sequence[str], context: RuntimeContext, strict:
         device_env = _with_target_device_env(context.env, serial)
         lane_cfg = context.configs.lanes.lanes.maestro
         real_runtime_cfg = context.configs.lanes.lanes.real_runtime
-        _run_device_health_preflight(context, serial, app_package=real_runtime_cfg.app_package)
         artifact_root = _resolve_lane_artifact_dir(lane_cfg.artifacts.output_dir_template, serial, "maestro")
         artifact_root.mkdir(parents=True, exist_ok=True)
         debug_root = artifact_root / real_runtime_cfg.maestro_debug_dir_name
         debug_root.mkdir(parents=True, exist_ok=True)
         print_step(f"maestro artifacts: {artifact_root}")
+        logcat_path = artifact_root / real_runtime_cfg.logcat_file_name
+        preflight_path = artifact_root / "real-runtime-preflight.json"
+        attached_devices = _list_attached_devices(context, env=device_env)
+        flow_results: list[JourneyStepResult] = []
+        failure_message: str | None = None
 
-        # Ensure instrumentation package exists before real-runtime provisioning sanity probe.
-        install_test_command = _append_native_build_flag(
-            ["./gradlew", "--no-daemon", ":apps:mobile-android:installDebugAndroidTest"],
-            env=device_env,
-        )
-        if not _run_serialized_gradle_install_step(
-            context=context,
-            command=install_test_command,
-            serial=serial,
-            env=device_env,
-        ):
-            context.run(install_test_command, check=True, env=device_env)
+        try:
+            _run_device_health_preflight(context, serial, app_package=real_runtime_cfg.app_package)
 
-        for command in lane_cfg.preflight_commands:
-            prepared = _append_native_build_flag(command, env=device_env)
-            if _run_serialized_gradle_install_step(
+            # Ensure instrumentation package exists before real-runtime provisioning sanity probe.
+            install_test_command = _append_native_build_flag(
+                ["./gradlew", "--no-daemon", ":apps:mobile-android:installDebugAndroidTest"],
+                env=device_env,
+            )
+            if not _run_serialized_gradle_install_step(
                 context=context,
-                command=prepared,
+                command=install_test_command,
                 serial=serial,
                 env=device_env,
             ):
-                continue
-            context.run(prepared, check=True, env=device_env)
+                context.run(install_test_command, check=True, env=device_env)
 
-        selected_flows = _resolve_maestro_flow_selection(lane_cfg.flows, args.flows)
-        selected_flow_paths = [REPO_ROOT / flow for flow in selected_flows]
-        selected_flow_paths = _filter_maestro_flows_by_tags(
-            selected_flow_paths,
-            include_tags=args.include_tags,
-            exclude_tags=args.exclude_tags,
-        )
-        if not selected_flow_paths:
-            raise DevctlError("CONFIG_ERROR", "No Maestro flows selected.")
-
-        real_runtime_prepared = False
-        for flow_path in selected_flow_paths:
-            if not flow_path.exists():
-                raise DevctlError("CONFIG_ERROR", f"Missing Maestro flow: {flow_path}")
-            flow_to_run = flow_path
-            debug_output_dir = debug_root / flow_path.stem
-            if _maestro_flow_clears_app_state(flow_path):
-                _clear_app_state_before_seeded_maestro(
+            for command in lane_cfg.preflight_commands:
+                prepared = _append_native_build_flag(command, env=device_env)
+                if _run_serialized_gradle_install_step(
                     context=context,
+                    command=prepared,
+                    serial=serial,
+                    env=device_env,
+                ):
+                    continue
+                context.run(prepared, check=True, env=device_env)
+
+            selected_flows = _resolve_maestro_flow_selection(lane_cfg.flows, args.flows)
+            selected_flow_paths = [REPO_ROOT / flow for flow in selected_flows]
+            selected_flow_paths = _filter_maestro_flows_by_tags(
+                selected_flow_paths,
+                include_tags=args.include_tags,
+                exclude_tags=args.exclude_tags,
+            )
+            if not selected_flow_paths:
+                raise DevctlError("CONFIG_ERROR", "No Maestro flows selected.")
+
+            real_runtime_prepared = False
+            for flow_path in selected_flow_paths:
+                if not flow_path.exists():
+                    raise DevctlError("CONFIG_ERROR", f"Missing Maestro flow: {flow_path}")
+                flow_to_run = flow_path
+                debug_output_dir = debug_root / flow_path.stem
+                if _maestro_flow_clears_app_state(flow_path):
+                    _clear_app_state_before_seeded_maestro(
+                        context=context,
+                        serial=serial,
+                        app_package=real_runtime_cfg.app_package,
+                        env=device_env,
+                    )
+                    prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
+                    real_runtime_prepared = True
+                    flow_to_run = _materialize_maestro_flow_without_clear_state(
+                        flow_path,
+                        output_dir=debug_output_dir / "seeded-flow",
+                    )
+                elif not real_runtime_prepared:
+                    prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
+                    real_runtime_prepared = True
+                _prepare_device_for_maestro(context=context, serial=serial, env=device_env)
+                step = _run_maestro_flow(
+                    context=context,
+                    maestro_bin=maestro_bin,
                     serial=serial,
                     app_package=real_runtime_cfg.app_package,
+                    flow_path=flow_to_run,
+                    debug_output_dir=debug_output_dir,
                     env=device_env,
                 )
-                prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
-                real_runtime_prepared = True
-                flow_to_run = _materialize_maestro_flow_without_clear_state(
-                    flow_path,
-                    output_dir=debug_output_dir / "seeded-flow",
-                )
-            elif not real_runtime_prepared:
-                prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
-                real_runtime_prepared = True
-            _prepare_device_for_maestro(context=context, serial=serial, env=device_env)
-            step = _run_maestro_flow(
-                context=context,
-                maestro_bin=maestro_bin,
+                flow_results.append(step)
+                if step.status != "passed":
+                    raise DevctlError(
+                        "DEVICE_ERROR",
+                        f"Maestro flow failed: {flow_path}. Failure signature: {step.failure_signature}",
+                    )
+        except DevctlError as exc:
+            failure_message = exc.message
+            raise
+        finally:
+            _capture_logcat(context, serial, logcat_path)
+            report_json_path, report_md_path = _write_maestro_report(
+                artifact_root=artifact_root,
                 serial=serial,
-                app_package=real_runtime_cfg.app_package,
-                flow_path=flow_to_run,
-                debug_output_dir=debug_output_dir,
-                env=device_env,
+                steps=flow_results,
+                status="failed" if failure_message else "passed",
+                failure_message=failure_message,
+                attached_devices=attached_devices,
+                target_env=device_env,
+                logcat_path=logcat_path,
+                preflight_path=preflight_path if preflight_path.exists() else None,
             )
-            if step.status != "passed":
-                _capture_logcat(context, serial, artifact_root / real_runtime_cfg.logcat_file_name)
-                raise DevctlError(
-                    "DEVICE_ERROR",
-                    f"Maestro flow failed: {flow_path}. Failure signature: {step.failure_signature}",
-                )
-
-        _capture_logcat(context, serial, artifact_root / real_runtime_cfg.logcat_file_name)
+            print_step(f"maestro report: {report_json_path}")
+            print_step(f"maestro markdown: {report_md_path}")
 
 
 def _lane_screenshot_pack_impl(raw_args: Sequence[str], context: RuntimeContext) -> None:

@@ -101,7 +101,8 @@ API_STATUS_FILES=()
 for api_level in "${API_LEVELS[@]}"; do
   api_dir="${RUN_ROOT}/api-${api_level}"
   mkdir -p "${api_dir}"
-  api_manifest="$(API_LEVEL_VALUE="${api_level}" APK_PATH_VALUE="${APK_PATH}" JUNIT_PATH_VALUE="${api_dir}/junit.xml" API_DIR_VALUE="${api_dir}" STARTED_AT_VALUE="$(timestamp_utc)" python3 - <<'PY'
+  api_started_at="$(timestamp_utc)"
+  api_manifest="$(API_LEVEL_VALUE="${api_level}" APK_PATH_VALUE="${APK_PATH}" JUNIT_PATH_VALUE="${api_dir}/junit.xml" API_DIR_VALUE="${api_dir}" STARTED_AT_VALUE="${api_started_at}" python3 - <<'PY'
 import json
 import os
 
@@ -149,6 +150,42 @@ PY
     --completed-at "$(timestamp_utc)" \
     --junit "${api_dir}/junit.xml")"
   write_json_file "${api_dir}/status.json" "${api_status_payload}"
+  updated_api_manifest="$(API_LEVEL_VALUE="${api_level}" APK_PATH_VALUE="${APK_PATH}" JUNIT_PATH_VALUE="${api_dir}/junit.xml" API_DIR_VALUE="${api_dir}" STARTED_AT_VALUE="${api_started_at}" STATUS_PAYLOAD_VALUE="${api_status_payload}" python3 - <<'PY'
+import json
+import os
+
+status_payload = json.loads(os.environ["STATUS_PAYLOAD_VALUE"])
+print(json.dumps({
+    "android_api_level": os.environ["API_LEVEL_VALUE"],
+    "apk_path": os.environ["APK_PATH_VALUE"],
+    "app_binary_id": status_payload.get("app_binary_id"),
+    "app_id": status_payload.get("app_id"),
+    "blocker_key": status_payload.get("blocker_key"),
+    "cli_exit_code": status_payload.get("cli_exit_code"),
+    "command": [
+        "maestro", "cloud",
+        "--android-api-level", os.environ["API_LEVEL_VALUE"],
+        "--device-locale", "en_US",
+        "--app-file", os.environ["APK_PATH_VALUE"],
+        "--flows", "tests/maestro-cloud/",
+        "--include-tags", "cloud-smoke",
+        "--format", "junit",
+        "--output", os.environ["JUNIT_PATH_VALUE"],
+    ],
+    "completed_at_utc": status_payload.get("completed_at_utc"),
+    "flows_root": "tests/maestro-cloud/",
+    "include_tags": ["cloud-smoke"],
+    "junit_path": os.environ["JUNIT_PATH_VALUE"],
+    "run_dir": os.environ["API_DIR_VALUE"],
+    "started_at_utc": os.environ["STARTED_AT_VALUE"],
+    "status": status_payload.get("status"),
+    "status_path": f"{os.environ['API_DIR_VALUE']}/status.json",
+    "upload_id": status_payload.get("upload_id"),
+    "upload_url": status_payload.get("upload_url"),
+}, sort_keys=True))
+PY
+)"
+  write_json_file "${api_dir}/run-manifest.json" "${updated_api_manifest}"
   API_STATUS_FILES+=("${api_dir}/status.json")
 done
 

@@ -117,6 +117,40 @@ class CloudArtifactsTest(unittest.TestCase):
             self.assertTrue(payload["waiting_for_completion"])
             self.assertFalse(payload["junit_present"])
 
+    def test_build_api_run_status_marks_partial_results_plus_status_fetch_failure_as_infra_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_path = root / "cli-output.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "Visit Maestro Cloud for more details about this upload:",
+                        "https://app.maestro.dev/project/proj_123/maestro-test/app/app_456/upload/mupload_789",
+                        "App binary id: binary_abc",
+                        "Waiting for runs to be completed...",
+                        "[Passed] scenario-session-drawer-smoke (18.001s)",
+                        "Failed to fetch the status of an upload mupload_789. Status code = null",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            payload = cloud_artifacts.build_api_run_status(
+                android_api_level="34",
+                cli_exit_code=1,
+                cli_output_path=log_path,
+                completed_at_utc="2026-04-26T00:00:00Z",
+                junit_path=root / "junit.xml",
+            )
+
+            self.assertEqual("infra_status_fetch_failed", payload["status"])
+            self.assertEqual("maestro_cloud_status_fetch_failed", payload["blocker_key"])
+            self.assertEqual("mupload_789", payload["upload_id"])
+            self.assertEqual("null", payload["status_fetch_status_code"])
+            self.assertEqual("scenario-session-drawer-smoke", payload["passed_flows"][0]["name"])
+            self.assertEqual("scenario-session-drawer-smoke", payload["last_reported_flow"]["name"])
+            self.assertIn("partial hosted results", payload["blocker_message"])
+
     def test_aggregate_api_run_statuses_prefers_failed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -143,6 +177,73 @@ class CloudArtifactsTest(unittest.TestCase):
             self.assertEqual("failed", payload["status"])
             self.assertEqual("scenario-runtime-ready-smoke", payload["first_failed_flow"]["name"])
             self.assertEqual(["mupload_1", "mupload_2"], payload["upload_ids"])
+
+    def test_build_api_run_status_prefers_failed_flow_over_status_fetch_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_path = root / "cli-output.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "Visit Maestro Cloud for more details about this upload:",
+                        "https://app.maestro.dev/project/proj_123/maestro-test/app/app_456/upload/mupload_789",
+                        "App binary id: binary_abc",
+                        "Waiting for runs to be completed...",
+                        "[Failed] scenario-send-after-ready-smoke (5m 44.787s) (Assertion is false: id: message_bubble_assistant_complete is visible)",
+                        "Failed to fetch the status of an upload mupload_789. Status code = null",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            payload = cloud_artifacts.build_api_run_status(
+                android_api_level="34",
+                cli_exit_code=1,
+                cli_output_path=log_path,
+                completed_at_utc="2026-04-26T00:00:00Z",
+                junit_path=root / "junit.xml",
+            )
+
+            self.assertEqual("failed", payload["status"])
+            self.assertEqual("scenario-send-after-ready-smoke", payload["first_failed_flow"]["name"])
+            self.assertTrue(payload["status_fetch_failed"])
+            self.assertIn("First failing flow", payload["blocker_message"])
+
+    def test_aggregate_api_run_statuses_prefers_failed_over_infra(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "api-34-status.json"
+            second = root / "api-35-status.json"
+            first.write_text(
+                json.dumps(
+                    {
+                        "passed_flows": [{"name": "scenario-session-drawer-smoke"}],
+                        "status": "infra_status_fetch_failed",
+                        "upload_id": "mupload_infra",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            second.write_text(
+                json.dumps(
+                    {
+                        "first_failed_flow": {"name": "scenario-send-after-ready-smoke"},
+                        "status": "failed",
+                        "upload_id": "mupload_fail",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            payload = cloud_artifacts.aggregate_api_run_statuses(
+                completed_at_utc="2026-04-26T00:00:00Z",
+                run_root="tmp/maestro-cloud-smoke/example",
+                status_paths=[first, second],
+            )
+
+            self.assertEqual("failed", payload["status"])
+            self.assertEqual("scenario-send-after-ready-smoke", payload["first_failed_flow"]["name"])
+            self.assertEqual(["mupload_infra", "mupload_fail"], payload["upload_ids"])
 
 
 if __name__ == "__main__":

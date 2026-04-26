@@ -20,6 +20,9 @@ _FLOW_RESULT_RE = re.compile(
     r"^\[(?P<status>Passed|Failed)\]\s+(?P<name>\S+)\s+\((?P<duration>[^)]+)\)(?:\s+\((?P<message>.*)\))?$"
 )
 _PROCESS_EXIT_RE = re.compile(r"Process will exit with code (?P<code>\d+) \((?P<label>[^)]+)\)")
+_STATUS_FETCH_FAILURE_RE = re.compile(
+    r"Failed to fetch the status of an upload\s+(?P<upload_id>\S+)\.\s+Status code = (?P<status_code>\S+)"
+)
 
 
 def _read_text(path: Path) -> str:
@@ -45,6 +48,8 @@ def parse_cli_output(text: str) -> dict[str, Any]:
         "process_exit_code": None,
         "process_exit_label": None,
         "project_id": None,
+        "status_fetch_failed": False,
+        "status_fetch_status_code": None,
         "upload_id": None,
         "upload_url": None,
         "waiting_for_completion": "Waiting for runs to be completed..." in text,
@@ -80,10 +85,20 @@ def parse_cli_output(text: str) -> dict[str, Any]:
         if process_exit_match:
             payload["process_exit_code"] = int(process_exit_match.group("code"))
             payload["process_exit_label"] = process_exit_match.group("label").lower()
+            continue
+        status_fetch_match = _STATUS_FETCH_FAILURE_RE.search(stripped)
+        if status_fetch_match:
+            payload["status_fetch_failed"] = True
+            payload["status_fetch_status_code"] = status_fetch_match.group("status_code")
+            if not payload["upload_id"]:
+                payload["upload_id"] = status_fetch_match.group("upload_id")
 
     failed_flows = [item for item in payload["flow_results"] if item["status"] == "failed"]
+    passed_flows = [item for item in payload["flow_results"] if item["status"] == "passed"]
     payload["failed_flows"] = failed_flows
     payload["first_failed_flow"] = failed_flows[0] if failed_flows else None
+    payload["passed_flows"] = passed_flows
+    payload["last_reported_flow"] = payload["flow_results"][-1] if payload["flow_results"] else None
     return payload
 
 
@@ -148,6 +163,25 @@ def build_api_run_status(
         )
     elif cli_summary["failed_flows"] or junit_summary["failures"] > 0:
         status = "failed"
+    elif (
+        cli_summary["status_fetch_failed"]
+        and not cli_summary["failed_flows"]
+        and junit_summary["failures"] == 0
+    ):
+        status = "infra_status_fetch_failed"
+        blocker_key = "maestro_cloud_status_fetch_failed"
+        if cli_summary["passed_flows"]:
+            passed_flow_names = ", ".join(item["name"] for item in cli_summary["passed_flows"])
+            blocker_message = (
+                "Maestro Cloud upload status polling failed after partial hosted results were returned. "
+                f"Completed flows before polling failed: {passed_flow_names}. "
+                f"Upload id: {cli_summary['upload_id']} (status code {cli_summary['status_fetch_status_code']})."
+            )
+        else:
+            blocker_message = (
+                "Maestro Cloud upload status polling failed before hosted results were returned. "
+                f"Upload id: {cli_summary['upload_id']} (status code {cli_summary['status_fetch_status_code']})."
+            )
     elif cli_summary["waiting_for_completion"] and cli_summary["process_exit_code"] is None and not junit_summary["junit_present"]:
         status = "running"
     elif cli_summary["upload_id"] and cli_summary["process_exit_code"] is None and not cli_summary["flow_results"]:
@@ -175,12 +209,16 @@ def build_api_run_status(
         "failed_flows": cli_summary["failed_flows"],
         "first_failed_flow": cli_summary["first_failed_flow"],
         "flow_results": cli_summary["flow_results"],
+        "last_reported_flow": cli_summary["last_reported_flow"],
         "junit_failures": junit_summary["failures"],
         "junit_path": str(junit_path),
         "junit_present": junit_summary["junit_present"],
         "junit_tests": junit_summary["tests"],
+        "passed_flows": cli_summary["passed_flows"],
         "process_exit_code": cli_summary["process_exit_code"],
         "project_id": cli_summary["project_id"],
+        "status_fetch_failed": cli_summary["status_fetch_failed"],
+        "status_fetch_status_code": cli_summary["status_fetch_status_code"],
         "status": status,
         "upload_id": cli_summary["upload_id"],
         "upload_url": cli_summary["upload_url"],
@@ -194,6 +232,8 @@ def aggregate_api_run_statuses(*, completed_at_utc: str, run_root: str, status_p
 
     if "failed" in statuses:
         overall_status = "failed"
+    elif "infra_status_fetch_failed" in statuses:
+        overall_status = "infra_status_fetch_failed"
     elif "blocked_external_account_setup" in statuses:
         overall_status = "blocked_external_account_setup"
     elif "running" in statuses:

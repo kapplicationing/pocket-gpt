@@ -77,6 +77,20 @@ appId: com.pocketagent.android
       visible: "Get ready"
     commands:
       - tapOn: "Get ready"
+      - extendedWaitUntil:
+          visible: "Model library"
+          timeout: 20000
+- runFlow:
+    when:
+      visible: "Setup"
+    commands:
+      - tapOn:
+          id: "send_button"
+- runFlow:
+    when:
+      visible: "Load last used"
+    commands:
+      - tapOn: "Load last used"
 - runFlow:
     when:
       visible:
@@ -84,3 +98,15 @@ appId: com.pocketagent.android
     commands:
       - tapOn:
           id: "refresh_button"
+- extendedWaitUntil:
+    notVisible: "Setup"
+    timeout: 300000
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - back
+- extendedWaitUntil:
+    visible:
+      id: "session_drawer_button"
+    timeout: 20000

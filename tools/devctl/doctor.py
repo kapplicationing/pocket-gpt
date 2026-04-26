@@ -7,6 +7,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
 
+from tools.maestro_android.adb_serial import (
+    merge_mdns_aliases,
+    parse_adb_devices_output,
+    parse_adb_mdns_services_output,
+    resolve_requested_serial,
+)
 from tools.devctl.subprocess_utils import REPO_ROOT, format_command, run_subprocess
 
 
@@ -55,22 +61,53 @@ def _check_device(env: Mapping[str, str]) -> tuple[bool, str, str]:
     if devices.returncode != 0:
         return False, "", (devices.stderr or "adb devices failed").strip()
 
-    lines = [line.strip() for line in (devices.stdout or "").splitlines()[1:] if line.strip()]
-    if not lines:
+    parsed_devices = merge_mdns_aliases(
+        parse_adb_devices_output(devices.stdout or ""),
+        _load_mdns_services(env),
+    )
+    if not parsed_devices:
         return False, "", "No adb devices detected"
 
-    authorized = [line for line in lines if " device " in f" {line} "]
+    requested_serial = env.get("ADB_SERIAL") or env.get("ANDROID_SERIAL") or ""
+    requested_serial = requested_serial.strip()
+
+    authorized = [device for device in parsed_devices if device.authorized]
     if not authorized:
-        first = lines[0]
-        serial = first.split()[0]
-        state = first.split()[1] if len(first.split()) > 1 else "unknown"
+        first = parsed_devices[0]
+        serial = first.serial
+        state = first.state
         return False, serial, f"Device {serial} is in state '{state}'"
+
+    if requested_serial:
+        matched = resolve_requested_serial(requested_serial, authorized)
+        if matched is None:
+            return False, requested_serial, f"Requested device {requested_serial} is not connected and authorized"
+        if matched.serial != requested_serial:
+            return True, matched.serial, f"Requested device {requested_serial} resolved to {matched.serial} and is connected and authorized"
+        return True, matched.serial, f"Device {matched.serial} is connected and authorized"
 
     if len(authorized) > 1:
         return False, "", "Multiple adb devices detected; set ADB_SERIAL"
 
-    serial = authorized[0].split()[0]
+    serial = authorized[0].serial
     return True, serial, f"Device {serial} is connected and authorized"
+
+
+def _load_mdns_services(env: Mapping[str, str]) -> list:
+    mdns = run_subprocess(["adb", "mdns", "services"], check=False, capture_output=True, env=env)
+    return parse_adb_mdns_services_output(mdns.stdout or "")
+
+
+def _check_transport(serial: str, env: Mapping[str, str]) -> tuple[bool, str]:
+    get_state = run_subprocess(["adb", "-s", serial, "get-state"], check=False, capture_output=True, env=env)
+    state_output = (get_state.stdout or get_state.stderr or "").strip()
+    if get_state.returncode != 0 or state_output != "device":
+        return False, state_output or f"adb get-state failed ({get_state.returncode})"
+    shell = run_subprocess(["adb", "-s", serial, "shell", "echo", "doctor-ok"], check=False, capture_output=True, env=env)
+    shell_output = ((shell.stdout or "") + (shell.stderr or "")).strip()
+    if shell.returncode != 0:
+        return False, shell_output or f"adb shell probe failed ({shell.returncode})"
+    return True, "adb get-state=device and shell probe succeeded"
 
 
 def run_doctor(env: Mapping[str, str] | None = None, repo_root: Path = REPO_ROOT) -> DoctorReport:
@@ -144,6 +181,20 @@ def run_doctor(env: Mapping[str, str] | None = None, repo_root: Path = REPO_ROOT
         )
     )
 
+    transport_ok = False
+    transport_detail = "Skipped: device selection failed"
+    if device_ok:
+        transport_ok, transport_detail = _check_transport(serial, effective_env)
+    checks.append(
+        DoctorCheck(
+            name="adb_transport",
+            ok=transport_ok,
+            required=True,
+            detail=transport_detail,
+            fix="For wireless devices, reconnect the selected serial with `adb connect <ip:port>` and verify `adb -s <serial> get-state` before running Maestro.",
+        )
+    )
+
     install_ok = False
     install_detail = "Skipped: prerequisites not met"
     launch_ok = False
@@ -152,11 +203,16 @@ def run_doctor(env: Mapping[str, str] | None = None, repo_root: Path = REPO_ROOT
     prereqs_ok = all(
         check.ok
         for check in checks
-        if check.name in {"android_sdk", "adb", "adb_device", "gradle_wrapper"}
+        if check.name in {"android_sdk", "adb", "adb_device", "adb_transport", "gradle_wrapper"}
     )
 
     if prereqs_ok:
-        install_cmd = ["./gradlew", "--no-daemon", ":apps:mobile-android:installDebug"]
+        install_cmd = [
+            "./gradlew",
+            f"-Pandroid.injected.device.serial={serial}",
+            "--no-daemon",
+            ":apps:mobile-android:installDebug",
+        ]
         install_result = run_subprocess(
             install_cmd,
             check=False,

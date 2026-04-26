@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -22,6 +23,7 @@ from tools.devctl.lanes import (
     _extract_first_session_progress,
     _extract_instrumentation_failure,
     _extract_ui_runtime_fields,
+    _is_tcpip_serial,
     _media_path_fallbacks,
     _maestro_flow_clears_app_state,
     _materialize_maestro_flow_without_clear_state,
@@ -40,6 +42,7 @@ from tools.devctl.lanes import (
     _parse_stage2_args,
     _run_device_health_preflight,
     _run_maestro_flow,
+    _copy_remote_file,
     _run_serialized_gradle_install_step,
     _select_gradle_tasks_for_changed_files,
     _ensure_serial,
@@ -66,6 +69,17 @@ def _extract_shell_script(cmd: list[str]) -> str | None:
 
 
 class LanesTest(unittest.TestCase):
+    @contextmanager
+    def _disable_required_real_runtime_artifacts(self):
+        from tools.devctl import lanes
+
+        original = lanes._resolve_real_runtime_required_artifacts
+        try:
+            lanes._resolve_real_runtime_required_artifacts = lambda **_kwargs: []
+            yield
+        finally:
+            lanes._resolve_real_runtime_required_artifacts = original
+
     def test_append_native_build_flag_uses_provided_device_env_for_serial(self) -> None:
         command = _append_native_build_flag(
             ["./gradlew", "--no-daemon", ":apps:mobile-android:connectedDebugAndroidTest"],
@@ -87,6 +101,36 @@ class LanesTest(unittest.TestCase):
         self.assertIn("-Ppocketgpt.enableNativeBuild=true", command)
         self.assertEqual(1, sum(1 for token in command if token.startswith("-Pandroid.injected.device.serial=")))
         self.assertIn("-Pandroid.injected.device.serial=SER999", command)
+
+    def test_is_tcpip_serial_accepts_adb_tls_mdns_serial(self) -> None:
+        self.assertTrue(_is_tcpip_serial("192.168.1.5:5555"))
+        self.assertTrue(_is_tcpip_serial("adb-RFCT2178PDV-nZWer7._adb-tls-connect._tcp"))
+        self.assertFalse(_is_tcpip_serial("emulator-5554"))
+
+    def test_copy_remote_file_uses_timeout_guard(self) -> None:
+        observed_timeout: float | None = None
+
+        def fake_run(command, **kwargs):
+            nonlocal observed_timeout
+            observed_timeout = kwargs.get("timeout_seconds")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        context = RuntimeContext(
+            repo_root=REPO_ROOT,
+            configs=load_devctl_configs(REPO_ROOT),
+            env={},
+            run=fake_run,
+        )
+
+        _copy_remote_file(
+            context=context,
+            serial="SER123",
+            source_path="/sdcard/source.bin",
+            destination_path="/sdcard/destination.bin",
+            failure_label="copy failed",
+        )
+
+        self.assertEqual(30.0, observed_timeout)
 
     def test_build_artifact_dir_is_deterministic(self) -> None:
         path = build_artifact_dir(
@@ -904,6 +948,98 @@ class LanesTest(unittest.TestCase):
             issued_commands,
         )
 
+    def test_run_maestro_flow_retries_when_transient_marker_only_exists_in_maestro_log(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        maestro_attempts = 0
+
+        def fake_run(command, **_kwargs):
+            nonlocal maestro_attempts
+            cmd = list(command)
+            if cmd and cmd[0] == "maestro":
+                maestro_attempts += 1
+                debug_dir = Path(_kwargs["cwd"])
+                log_dir = debug_dir / ".maestro/tests/2026-04-26_000000"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                if maestro_attempts == 1:
+                    (log_dir / "maestro.log").write_text(
+                        "io.grpc.StatusRuntimeException: UNAVAILABLE: io exception\n",
+                        encoding="utf-8",
+                    )
+                    return Result(returncode=1, stdout="Waiting for flows to complete...\n[Failed]\n", stderr="")
+                (log_dir / "maestro.log").write_text("flow passed\n", encoding="utf-8")
+                return Result(returncode=0, stdout="flow passed", stderr="")
+            return Result(returncode=0, stdout="", stderr="")
+
+        context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "tools.devctl.lanes._collect_maestro_screenshots", return_value=[]
+        ), mock.patch(
+            "tools.devctl.lanes.time.sleep", return_value=None
+        ):
+            flow_path = Path(tmpdir) / "scenario-a.yaml"
+            flow_path.write_text("appId: com.pocketagent.android\n---\n- launchApp\n", encoding="utf-8")
+            debug_output = Path(tmpdir) / "maestro-debug"
+            result = _run_maestro_flow(
+                context=context,
+                maestro_bin="maestro",
+                serial="SER123",
+                flow_path=flow_path,
+                debug_output_dir=debug_output,
+            )
+            output = (debug_output / "maestro-output.txt").read_text(encoding="utf-8")
+
+        self.assertEqual("passed", result.status)
+        self.assertEqual(2, maestro_attempts)
+        self.assertIn("UNAVAILABLE: io exception", output)
+        self.assertIn("=== attempt 2 ===", output)
+
+    def test_run_maestro_flow_failure_signature_ignores_debug_output_path(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def fake_run(command, **_kwargs):
+            cmd = list(command)
+            if cmd and cmd[0] == "maestro":
+                return Result(
+                    returncode=1,
+                    stdout=(
+                        "Running on SER123\n"
+                        "io.grpc.StatusRuntimeException: UNAVAILABLE: io exception\n"
+                        "==== Debug output (logs & screenshots) ====\n"
+                        "/tmp/debug-path\n"
+                    ),
+                    stderr="",
+                )
+            return Result(returncode=0, stdout="", stderr="")
+
+        context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "tools.devctl.lanes._collect_maestro_screenshots", return_value=[]
+        ):
+            flow_path = Path(tmpdir) / "scenario-a.yaml"
+            flow_path.write_text("appId: com.pocketagent.android\n---\n- launchApp\n", encoding="utf-8")
+            result = _run_maestro_flow(
+                context=context,
+                maestro_bin="maestro",
+                serial="SER123",
+                flow_path=flow_path,
+                debug_output_dir=Path(tmpdir) / "maestro-debug",
+            )
+
+        self.assertEqual("io.grpc.StatusRuntimeException: UNAVAILABLE: io exception", result.failure_signature)
+
     def test_extract_ui_runtime_fields_detects_assistant_text(self) -> None:
         dump = (
             '<hierarchy>'
@@ -1386,6 +1522,94 @@ class LanesTest(unittest.TestCase):
         self.assertEqual(1, len(clear_commands))
         self.assertLess(issued_commands.index(clear_commands[0]), issued_commands.index(maestro_calls[0]))
 
+    def test_lane_maestro_writes_report_when_flow_fails(self) -> None:
+        from tools.devctl import lanes
+
+        original_which = lanes.shutil.which
+        original_prepare = lanes.prepare_real_runtime_env
+        original_health_preflight = lanes._run_device_health_preflight
+        original_serialized_install = lanes._run_serialized_gradle_install_step
+        original_capture_logcat = lanes._capture_logcat
+        original_run_maestro_flow = lanes._run_maestro_flow
+        original_write_runtime_log_signal_artifacts = lanes._write_runtime_log_signal_artifacts
+        configs = load_devctl_configs(REPO_ROOT)
+        ensure_command = configs.device.preflight.ensure_device_command
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def fake_run(command, **_kwargs):
+            if list(command) == list(ensure_command):
+                return Result(returncode=0, stdout="SER123\n")
+            return Result(returncode=0, stdout="", stderr="")
+
+        def fake_prepare(_context, device_serial: str, artifact_root=None):
+            if artifact_root is not None:
+                (artifact_root / "real-runtime-preflight.json").write_text('{"ok":true}\n', encoding="utf-8")
+            return lanes.RealRuntimePreparedEnv(
+                serial=device_serial,
+                model_device_paths_by_id={
+                    "qwen3.5-0.8b-q4": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
+                },
+                model_host_paths_by_id={
+                    "qwen3.5-0.8b-q4": "/tmp/qwen3.5-0.8b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/tmp/qwen3-1.7b-q4_k_m.gguf",
+                },
+            )
+
+        def fake_capture_logcat(_context, _serial, output_path):
+            Path(output_path).write_text("I/PocketAgentApp: logcat\n", encoding="utf-8")
+
+        def fake_run_maestro_flow(**kwargs):
+            return JourneyStepResult(
+                name=f"maestro:{Path(kwargs['flow_path']).stem}",
+                status="failed",
+                duration_seconds=1.25,
+                details="debug output",
+                failure_signature="Assertion is false: send button not enabled",
+                phase="error",
+                elapsed_ms=1250,
+            )
+
+        try:
+            lanes.shutil.which = lambda name: "/usr/bin/maestro" if name == "maestro" else None
+            lanes.prepare_real_runtime_env = fake_prepare
+            lanes._run_device_health_preflight = lambda *_args, **_kwargs: None
+            lanes._run_serialized_gradle_install_step = lambda **_kwargs: False
+            lanes._capture_logcat = fake_capture_logcat
+            lanes._run_maestro_flow = fake_run_maestro_flow
+            lanes._write_runtime_log_signal_artifacts = lambda _path: None
+            with tempfile.TemporaryDirectory() as tmpdir:
+                configs.lanes.lanes.maestro.artifacts.output_dir_template = str(
+                    Path(tmpdir) / "{device}" / "{label}" / "{stamp}"
+                )
+                context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+                with self.assertRaises(DevctlError) as raised:
+                    lane_maestro([], context)
+                self.assertEqual("DEVICE_ERROR", raised.exception.code)
+                report_dir = next((Path(tmpdir) / "SER123" / "maestro").iterdir())
+                report_json = json.loads((report_dir / "maestro-report.json").read_text(encoding="utf-8"))
+                self.assertEqual("failed", report_json["status"])
+                self.assertEqual("SER123", report_json["serial"])
+                self.assertEqual("maestro:scenario-onboarding", report_json["flow_name"])
+                self.assertEqual("error", report_json["failure_phase"])
+                self.assertEqual("Assertion is false: send button not enabled", report_json["failure_signature"])
+                self.assertEqual(str(report_dir), report_json["artifact_root"])
+                self.assertEqual(1, len(report_json["steps"]))
+                self.assertTrue((report_dir / "maestro-report.md").exists())
+        finally:
+            lanes.shutil.which = original_which
+            lanes.prepare_real_runtime_env = original_prepare
+            lanes._run_device_health_preflight = original_health_preflight
+            lanes._run_serialized_gradle_install_step = original_serialized_install
+            lanes._capture_logcat = original_capture_logcat
+            lanes._run_maestro_flow = original_run_maestro_flow
+            lanes._write_runtime_log_signal_artifacts = original_write_runtime_log_signal_artifacts
+
     def test_maestro_flow_clears_app_state_detects_clear_state_true(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             flow = Path(tmpdir) / "flow.yaml"
@@ -1565,7 +1789,8 @@ class LanesTest(unittest.TestCase):
                     return Result()
 
                 context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
-                prepared = lanes.prepare_real_runtime_env(context, "SER123")
+                with self._disable_required_real_runtime_artifacts():
+                    prepared = lanes.prepare_real_runtime_env(context, "SER123")
 
                 model_push_calls = [
                     cmd
@@ -1663,7 +1888,8 @@ class LanesTest(unittest.TestCase):
 
                 context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
                 artifact_root = tmp_path / "artifacts"
-                lanes.prepare_real_runtime_env(context, "SER123", artifact_root=artifact_root)
+                with self._disable_required_real_runtime_artifacts():
+                    lanes.prepare_real_runtime_env(context, "SER123", artifact_root=artifact_root)
 
                 model_push_calls = [
                     cmd
@@ -1741,7 +1967,8 @@ class LanesTest(unittest.TestCase):
                     env={"POCKETGPT_FORCE_MODEL_SYNC": "1"},
                     run=fake_run,
                 )
-                lanes.prepare_real_runtime_env(context, "SER123")
+                with self._disable_required_real_runtime_artifacts():
+                    lanes.prepare_real_runtime_env(context, "SER123")
 
                 model_push_calls = [
                     cmd
@@ -1752,6 +1979,129 @@ class LanesTest(unittest.TestCase):
         finally:
             lanes._resolve_real_runtime_model_paths = original_resolve
             lanes._run_instrumentation_class = original_run_instrumentation
+
+    def test_prepare_real_runtime_env_syncs_required_companion_artifact(self) -> None:
+        from tools.devctl import lanes
+
+        original_resolve = lanes._resolve_real_runtime_model_paths
+        original_run_instrumentation = lanes._run_instrumentation_class
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                model_0_8b = tmp_path / "Qwen3.5-0.8B-Q4_0.gguf"
+                model_2b = tmp_path / "Qwen3-1.7B-Q4_K_M.gguf"
+                mmproj = tmp_path / "mmproj-F16.gguf"
+                expected_mmproj_sha = "56e4c6cfe73b0c82e3e82bc518d7591997e61d81f723fc41a586f4fa69ea2453"
+                model_0_8b.write_bytes(b"abc")
+                model_2b.write_bytes(b"12345")
+                mmproj.write_bytes(b"projector")
+
+                lanes._resolve_real_runtime_model_paths = lambda _context: {
+                    "qwen3.5-0.8b-q4": str(model_0_8b),
+                    "qwen3-1.7b-q4_k_m": str(model_2b),
+                }
+                lanes._run_instrumentation_class = lambda **_kwargs: subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout="ok",
+                    stderr="",
+                )
+
+                configs = load_devctl_configs(REPO_ROOT)
+                issued_commands: list[list[str]] = []
+                remote_sizes: dict[str, int] = {
+                    "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf": 3,
+                    "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf": 5,
+                }
+
+                class Result:
+                    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                        self.returncode = returncode
+                        self.stdout = stdout
+                        self.stderr = stderr
+
+                def fake_run(command, **_kwargs):
+                    cmd = list(command)
+                    issued_commands.append(cmd)
+                    if cmd[:4] == ["adb", "-s", "SER123", "shell"] and cmd[4:7] == ["pm", "list", "instrumentation"]:
+                        return Result(
+                            stdout=(
+                                "instrumentation:com.pocketagent.android.standard.test/"
+                                "androidx.test.runner.AndroidJUnitRunner "
+                                "(target=com.pocketagent.android.standard)\n"
+                            )
+                        )
+                    if len(cmd) >= 6 and cmd[:4] == ["adb", "-s", "SER123", "push"]:
+                        remote_sizes[cmd[-1]] = Path(cmd[4]).stat().st_size
+                        return Result()
+                    script = _extract_shell_script(cmd)
+                    if script is not None:
+                        if "mmproj-F16.gguf" in script and "wc -c" in script:
+                            size = remote_sizes.get("/sdcard/Android/media/com.pocketagent.android/models/mmproj-F16.gguf", 0)
+                            return Result(stdout=f"{size}\n")
+                        if "qwen3.5-0.8b-q4.gguf" in script and "wc -c" in script:
+                            size = remote_sizes.get("/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf", 0)
+                            return Result(stdout=f"{size}\n")
+                        if "qwen3-1.7b-q4_k_m.gguf" in script and "wc -c" in script:
+                            size = remote_sizes.get("/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf", 0)
+                            return Result(stdout=f"{size}\n")
+                        if "mmproj-F16.gguf" in script and "sha256sum" in script:
+                            return Result(stdout=f"{expected_mmproj_sha}  /sdcard/Android/media/com.pocketagent.android/models/mmproj-F16.gguf\n")
+                        return Result(stdout="")
+                    return Result()
+
+                artifact_root = tmp_path / "artifacts"
+                context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+                original_compute_sha = lanes._compute_file_sha256
+                try:
+                    lanes._compute_file_sha256 = (
+                        lambda path: expected_mmproj_sha
+                        if Path(path).resolve() == mmproj.resolve()
+                        else original_compute_sha(path)
+                    )
+                    lanes.prepare_real_runtime_env(context, "SER123", artifact_root=artifact_root)
+                finally:
+                    lanes._compute_file_sha256 = original_compute_sha
+
+                mmproj_push_calls = [
+                    cmd
+                    for cmd in issued_commands
+                    if len(cmd) >= 4 and cmd[:4] == ["adb", "-s", "SER123", "push"] and cmd[-1].endswith("mmproj-F16.gguf")
+                ]
+                self.assertEqual(1, len(mmproj_push_calls))
+
+                metadata = json.loads((artifact_root / "real-runtime-preflight.json").read_text(encoding="utf-8"))
+                required = metadata["model_required_artifacts_by_id"]["qwen3.5-0.8b-q4"]
+                self.assertEqual("mmproj-F16.gguf", required[0]["file_name"])
+                self.assertEqual(
+                    "/sdcard/Android/media/com.pocketagent.android/models/mmproj-F16.gguf",
+                    required[0]["device_path"],
+                )
+        finally:
+            lanes._resolve_real_runtime_model_paths = original_resolve
+            lanes._run_instrumentation_class = original_run_instrumentation
+
+    def test_download_real_runtime_artifact_persists_verified_file(self) -> None:
+        from tools.devctl import lanes
+
+        payload = b"projector-bytes"
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "mmproj-F16.gguf"
+            def fake_run_subprocess(command, **_kwargs):
+                output_index = list(command).index("-o") + 1
+                Path(command[output_index]).write_bytes(payload)
+                return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+            with mock.patch("tools.devctl.lanes.run_subprocess", side_effect=fake_run_subprocess):
+                lanes._download_real_runtime_artifact(
+                    download_url="https://example.test/mmproj-F16.gguf",
+                    destination=destination,
+                    expected_sha256=expected_sha,
+                )
+
+            self.assertEqual(payload, destination.read_bytes())
 
     def test_prepare_real_runtime_env_self_heals_corrupt_sync_manifest(self) -> None:
         from tools.devctl import lanes
@@ -1809,7 +2159,8 @@ class LanesTest(unittest.TestCase):
                     return Result()
 
                 context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
-                lanes.prepare_real_runtime_env(context, "SER123")
+                with self._disable_required_real_runtime_artifacts():
+                    lanes.prepare_real_runtime_env(context, "SER123")
 
                 model_push_calls = [
                     cmd
@@ -1916,7 +2267,8 @@ class LanesTest(unittest.TestCase):
                     return Result()
 
                 context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
-                lanes.prepare_real_runtime_env(context, "SER123")
+                with self._disable_required_real_runtime_artifacts():
+                    lanes.prepare_real_runtime_env(context, "SER123")
 
                 model_push_calls = [
                     cmd
@@ -2018,7 +2370,8 @@ class LanesTest(unittest.TestCase):
                     return Result()
 
                 context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
-                prepared = lanes.prepare_real_runtime_env(context, "SER123")
+                with self._disable_required_real_runtime_artifacts():
+                    prepared = lanes.prepare_real_runtime_env(context, "SER123")
 
                 self.assertEqual(primary_0, prepared.model_device_paths_by_id["qwen3.5-0.8b-q4"])
                 self.assertEqual(primary_2, prepared.model_device_paths_by_id["qwen3-1.7b-q4_k_m"])
@@ -2106,11 +2459,113 @@ class LanesTest(unittest.TestCase):
                     return Result()
 
                 context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
-                lanes.prepare_real_runtime_env(context, "SER123")
+                with self._disable_required_real_runtime_artifacts():
+                    lanes.prepare_real_runtime_env(context, "SER123")
                 self.assertEqual(2, probe_calls)
         finally:
             lanes._resolve_real_runtime_model_paths = original_resolve
             lanes._run_instrumentation_class = original_run_instrumentation
+
+    def test_android_instrumented_lane_limits_connected_suite_to_configured_selectors(self) -> None:
+        from tools.devctl import lanes
+
+        configs = load_devctl_configs(REPO_ROOT)
+        issued_commands: list[list[str]] = []
+        instrumentation_calls: list[tuple[str, dict[str, str]]] = []
+        original_resolve_android_env = lanes._resolve_android_env
+        original_ensure_serial = lanes._ensure_serial
+        original_prepare_real_runtime_env = lanes.prepare_real_runtime_env
+        original_capture_logcat = lanes._capture_logcat
+        original_run_device_health_preflight = lanes._run_device_health_preflight
+        original_run_serialized_gradle_install_step = lanes._run_serialized_gradle_install_step
+        original_device_lock = lanes._device_lock
+        original_run_instrumentation_class = lanes._run_instrumentation_class
+        original_resolve_lane_artifact_dir = lanes._resolve_lane_artifact_dir
+        try:
+            lanes._resolve_android_env = lambda _env: (True, {})
+            lanes._ensure_serial = lambda _context: "SER123"
+            lanes.prepare_real_runtime_env = lambda *_args, **_kwargs: lanes.RealRuntimePreparedEnv(
+                serial="SER123",
+                model_device_paths_by_id={
+                    "qwen3.5-0.8b-q4": "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
+                    "qwen3-1.7b-q4_k_m": "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
+                },
+                model_host_paths_by_id={},
+                instrumentation_runner="com.pocketagent.android.test/androidx.test.runner.AndroidJUnitRunner",
+            )
+            lanes._capture_logcat = lambda *_args, **_kwargs: None
+            lanes._run_device_health_preflight = lambda *_args, **_kwargs: None
+            lanes._run_serialized_gradle_install_step = lambda **_kwargs: False
+            lanes._run_instrumentation_class = lambda **kwargs: (
+                instrumentation_calls.append((kwargs["test_class"], dict(kwargs["args"]))),
+                subprocess.CompletedProcess(args=[], returncode=0, stdout="OK", stderr=""),
+            )[1]
+            temp_dir = Path(tempfile.mkdtemp(prefix="android-instrumented-artifacts-"))
+            lanes._resolve_lane_artifact_dir = lambda *_args, **_kwargs: temp_dir
+
+            @contextmanager
+            def fake_device_lock(*_args, **_kwargs):
+                yield
+
+            lanes._device_lock = fake_device_lock
+
+            def fake_run(command, **_kwargs):
+                issued_commands.append(list(command))
+                if list(command) == ["adb", "devices", "-l"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=(
+                            "List of devices attached\n"
+                            "SER123 device product:a model:PhoneA device:a transport_id:1\n"
+                            "SER999 device product:b model:PhoneB device:b transport_id:2\n"
+                        ),
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+            lanes._lane_android_instrumented_impl([], context)
+        finally:
+            lanes._resolve_android_env = original_resolve_android_env
+            lanes._ensure_serial = original_ensure_serial
+            lanes.prepare_real_runtime_env = original_prepare_real_runtime_env
+            lanes._capture_logcat = original_capture_logcat
+            lanes._run_device_health_preflight = original_run_device_health_preflight
+            lanes._run_serialized_gradle_install_step = original_run_serialized_gradle_install_step
+            lanes._device_lock = original_device_lock
+            lanes._run_instrumentation_class = original_run_instrumentation_class
+            lanes._resolve_lane_artifact_dir = original_resolve_lane_artifact_dir
+
+        connected_commands = [
+            cmd
+            for cmd in issued_commands
+            if ":apps:mobile-android:connectedDebugAndroidTest" in cmd
+        ]
+        self.assertEqual([], connected_commands)
+        self.assertEqual(
+            [
+                "com.pocketagent.android.MainActivityAuthoritativeOnboardingInstrumentationTest#onboardingFlowCompletesIntoChatSurface",
+                "com.pocketagent.android.ui.ModelManagementSheetComposeContractTest#productionModelSheetRendersAndDispatchesRefreshEvent",
+            ],
+            [test_class for test_class, _ in instrumentation_calls],
+        )
+        self.assertEqual(
+            "/sdcard/Android/media/com.pocketagent.android/models/qwen3.5-0.8b-q4.gguf",
+            instrumentation_calls[0][1]["stage2_model_0_8b_path"],
+        )
+        self.assertEqual(
+            "/sdcard/Android/media/com.pocketagent.android/models/qwen3-1.7b-q4_k_m.gguf",
+            instrumentation_calls[0][1]["stage2_model_1_7b_path"],
+        )
+        self.assertNotIn("stage2_enable_provisioning_test", instrumentation_calls[0][1])
+        self.assertNotIn("stage2_enable_provisioning_test", instrumentation_calls[1][1])
+        report_json = json.loads((temp_dir / "android-instrumented-report.json").read_text(encoding="utf-8"))
+        self.assertEqual("passed", report_json["status"])
+        self.assertEqual("SER123", report_json["serial"])
+        self.assertEqual(2, len(report_json["selector_results"]))
+        self.assertEqual(2, len(report_json["attached_devices"]))
+        self.assertTrue((temp_dir / "android-instrumented-report.md").exists())
 
     def test_run_device_health_preflight_happy_path(self) -> None:
         configs = load_devctl_configs(REPO_ROOT)

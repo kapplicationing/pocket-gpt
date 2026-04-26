@@ -79,6 +79,9 @@ lanes:
     requires_device: true
     artifacts:
       output_dir_template: scripts/benchmarks/runs/{date}/{device}/android-instrumented/{stamp}
+    instrumentation_test_classes:
+      - com.pocketagent.android.MainActivityAuthoritativeOnboardingInstrumentationTest#onboardingFlowCompletesIntoChatSurface
+      - com.pocketagent.android.ui.ModelManagementSheetComposeContractTest#productionModelSheetRendersAndDispatchesRefreshEvent
     commands:
       - name: install_debug
         argv:

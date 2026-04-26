@@ -11,6 +11,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
+from tools.maestro_android.adb_serial import (
+    AdbDeviceRecord,
+    is_mdns_tls_serial,
+    is_network_serial,
+    merge_mdns_aliases,
+    parse_adb_devices_output,
+    parse_adb_mdns_services_output,
+    resolve_requested_serial,
+)
 from tools.maestro_android.common import (
     REPO_ROOT,
     MaestroAndroidError,
@@ -34,6 +43,14 @@ _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "TcpForwarder",
     "UNAVAILABLE: io exception",
     "Connection refused",
+)
+
+_PRODUCT_UI_FAILURE_MARKERS = (
+    "Element not found",
+    "Assertion",
+    "No view found",
+    "Flow Failed",
+    "failed to execute step",
 )
 
 
@@ -64,6 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     lane = subparsers.add_parser("lane", help="run a configured Maestro lane")
     lane.add_argument("name", help="lane name")
+    lane.add_argument("--device", default="", help="device serial")
     lane.add_argument("args", nargs=argparse.REMAINDER, help="extra lane args")
 
     scoped = subparsers.add_parser("scoped", help="run the scoped repro loop")
@@ -113,33 +131,75 @@ def _parse_csv(raw: str) -> list[str]:
 
 
 def _resolve_serial(explicit: str) -> str:
-    if explicit:
-        return explicit
-    env_serial = os.environ.get("ADB_SERIAL") or os.environ.get("ANDROID_SERIAL")
-    if env_serial:
-        return env_serial
-    completed = run_subprocess(["adb", "devices"], capture_output=True, check=False)
-    devices = [line.split()[0] for line in (completed.stdout or "").splitlines()[1:] if "\tdevice" in line]
-    if not devices:
+    requested = explicit.strip()
+    if not requested:
+        requested = (os.environ.get("ADB_SERIAL") or os.environ.get("ANDROID_SERIAL") or "").strip()
+
+    devices = _list_devices()
+    authorized = [device for device in devices if device["state"] == "device"]
+    if requested:
+        matched = _resolve_serial_record(requested, authorized)
+        if matched is not None:
+            resolved = matched["serial"]
+            if resolved != requested:
+                print_step(f"Resolved requested serial {requested} to adb transport {resolved}")
+            return resolved
+        if is_network_serial(requested):
+            run_subprocess(["adb", "connect", requested], check=False, capture_output=True)
+            matched = _resolve_serial_record(requested, _list_devices())
+            if matched is not None and matched["state"] == "device":
+                resolved = matched["serial"]
+                if resolved != requested:
+                    print_step(f"Resolved requested serial {requested} to adb transport {resolved}")
+                return resolved
+        return requested
+
+    device_serials = [device["serial"] for device in authorized]
+    if not device_serials:
         raise MaestroAndroidError("DEVICE_ERROR", "No connected adb device detected.")
-    if len(devices) > 1:
+    if len(device_serials) > 1:
         raise MaestroAndroidError("DEVICE_ERROR", "Multiple adb devices detected; pass --device.")
-    return devices[0]
+    return device_serials[0]
 
 
 def _list_devices() -> list[dict[str, str]]:
+    return [
+        {
+            "serial": device.serial,
+            "state": device.state,
+            "details": device.details,
+            "aliases": list(device.aliases),
+        }
+        for device in _collect_devices()
+    ]
+
+
+def _collect_devices() -> list[AdbDeviceRecord]:
     completed = run_subprocess(["adb", "devices", "-l"], capture_output=True, check=False)
-    devices: list[dict[str, str]] = []
-    for line in (completed.stdout or "").splitlines()[1:]:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        parts = stripped.split()
-        serial = parts[0]
-        state = parts[1] if len(parts) > 1 else "unknown"
-        details = " ".join(parts[2:]) if len(parts) > 2 else ""
-        devices.append({"serial": serial, "state": state, "details": details})
-    return devices
+    devices = parse_adb_devices_output(completed.stdout or "")
+    mdns = run_subprocess(["adb", "mdns", "services"], capture_output=True, check=False)
+    return merge_mdns_aliases(devices, parse_adb_mdns_services_output(mdns.stdout or ""))
+
+
+def _resolve_serial_record(requested: str, devices: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    records = [
+        AdbDeviceRecord(
+            serial=str(device["serial"]),
+            state=str(device["state"]),
+            details=str(device.get("details", "")),
+            aliases=tuple(str(alias) for alias in device.get("aliases", [])),
+        )
+        for device in devices
+    ]
+    matched = resolve_requested_serial(requested, records)
+    if matched is None:
+        return None
+    return {
+        "serial": matched.serial,
+        "state": matched.state,
+        "details": matched.details,
+        "aliases": list(matched.aliases),
+    }
 
 
 def _resolve_apk(config: MaestroAndroidConfig) -> Path:
@@ -157,7 +217,7 @@ def _device_env(serial: str) -> dict[str, str]:
 
 
 def _is_tcpip_serial(serial: str) -> bool:
-    return ":" in serial and not serial.startswith("emulator-")
+    return is_network_serial(serial)
 
 
 def _run_maestro_transport_recovery(serial: str, *, env: dict[str, str]) -> None:
@@ -215,6 +275,47 @@ def _run_maestro_test_with_retry(
         break
     assert result is not None
     return result, "".join(attempt_outputs)
+
+
+def _probe_adb_transport(serial: str, *, env: dict[str, str]) -> dict[str, Any]:
+    get_state = run_subprocess(["adb", "-s", serial, "get-state"], capture_output=True, check=False, env=env)
+    shell = run_subprocess(["adb", "-s", serial, "shell", "echo", "maestro-android-ok"], capture_output=True, check=False, env=env)
+    get_state_output = (get_state.stdout or get_state.stderr or "").strip()
+    shell_output = ((shell.stdout or "") + (shell.stderr or "")).strip()
+    return {
+        "get_state_returncode": get_state.returncode,
+        "get_state_output": get_state_output,
+        "shell_returncode": shell.returncode,
+        "shell_output": shell_output,
+        "transport_ok": get_state.returncode == 0 and get_state_output == "device" and shell.returncode == 0,
+    }
+
+
+def _classify_failure(
+    *,
+    returncode: int,
+    output_text: str,
+    transport: dict[str, Any],
+) -> str:
+    if returncode == 0:
+        return "passed"
+    if not transport.get("transport_ok", False):
+        return "adb_transport"
+    if _is_transient_maestro_failure(output_text):
+        return "maestro_server_bootstrap"
+    lowered = output_text.lower()
+    if any(marker.lower() in lowered for marker in _PRODUCT_UI_FAILURE_MARKERS):
+        return "product_ui_or_flow"
+    return "product_ui_or_flow"
+
+
+def _failure_suggestion(phase: str) -> str:
+    return {
+        "passed": "No action needed.",
+        "adb_transport": "Re-establish the adb transport first. For wireless devices, prefer a direct ip:port serial and verify `adb -s <serial> get-state` before rerunning Maestro.",
+        "maestro_server_bootstrap": "The adb transport survived, but Maestro failed before product evidence. Retry after transport recovery or inspect the Maestro debug bundle for gRPC/bootstrap faults.",
+        "product_ui_or_flow": "The transport was healthy and Maestro reached product steps. Treat this as a UI/flow issue until proven otherwise.",
+    }[phase]
 
 
 def _is_app_installed(serial: str, app_id: str) -> bool:
@@ -313,7 +414,8 @@ def _write_trace(path: Path, manifest: dict[str, Any]) -> None:
 
 
 def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
-    serial = _resolve_serial(parsed.device)
+    requested_serial = parsed.device.strip()
+    serial = _resolve_serial(requested_serial)
     device_env = _device_env(serial)
     explicit_flows = list(parsed.flows) + _parse_csv(parsed.flow_csv)
     include_tags = _parse_csv(parsed.include_tags)
@@ -351,6 +453,7 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
         stderr_path = flow_dir / "maestro-stderr.log"
         stdout_path = flow_dir / "maestro-stdout.log"
         output_path = flow_dir / "maestro-output.txt"
+        diagnostics_path = flow_dir / "diagnostics.json"
         output_path.write_text(attempt_output, encoding="utf-8")
         if parsed.format == "junit":
             junit_path.write_text(completed.stdout or "", encoding="utf-8")
@@ -359,17 +462,42 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
         stderr_path.write_text(completed.stderr or "", encoding="utf-8")
         logcat_path = flow_dir / "logcat.txt"
         _capture_logcat(serial, logcat_path)
+        transport = _probe_adb_transport(serial, env=device_env)
+        failure_output = "\n".join(
+            part for part in [attempt_output, completed.stdout or "", completed.stderr or ""] if part
+        )
+        failure_phase = _classify_failure(
+            returncode=completed.returncode,
+            output_text=failure_output,
+            transport=transport,
+        )
+        diagnostics = {
+            "requested_serial": requested_serial or None,
+            "resolved_serial": serial,
+            "failure_phase": failure_phase,
+            "returncode": completed.returncode,
+            "transport": transport,
+            "suggestion": _failure_suggestion(failure_phase),
+        }
+        _write_json(diagnostics_path, diagnostics)
+        if completed.returncode != 0:
+            print_step(
+                f"Flow {flow.stem} failed as {failure_phase}; diagnostics: "
+                f"{diagnostics_path.relative_to(artifact_root)}"
+            )
 
         flow_results.append(
             {
                 "flow": str(flow.relative_to(REPO_ROOT)) if flow.is_relative_to(REPO_ROOT) else str(flow),
                 "status": "passed" if completed.returncode == 0 else "failed",
                 "returncode": completed.returncode,
+                "failure_phase": failure_phase,
                 "junit": str(junit_path.relative_to(artifact_root)) if junit_path.exists() else None,
                 "stderr": str(stderr_path.relative_to(artifact_root)),
                 "stdout": str(stdout_path.relative_to(artifact_root)) if stdout_path.exists() else None,
                 "logcat": str(logcat_path.relative_to(artifact_root)),
                 "debug_output": str(debug_dir.relative_to(artifact_root)),
+                "diagnostics": str(diagnostics_path.relative_to(artifact_root)),
             }
         )
 
@@ -385,7 +513,7 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
 
     failed = [flow for flow in flow_results if flow["status"] != "passed"]
     if failed:
-        names = ", ".join(flow["flow"] for flow in failed)
+        names = ", ".join(f'{flow["flow"]} [{flow["failure_phase"]}]' for flow in failed)
         raise MaestroAndroidError("DEVICE_ERROR", f"Flow run failed: {names}")
 
 
@@ -402,7 +530,29 @@ def _run_lane(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
         command = ["python3", "tools/devctl/main.py", "lane", lane.name, *extra_args]
     else:
         command = [*lane.argv, *extra_args]
-    run_subprocess(command)
+    resolved_device = _resolve_serial(parsed.device) if parsed.device else ""
+    lane_env = _device_env(resolved_device) if resolved_device else None
+    run_subprocess(command, env=lane_env)
+
+
+def _normalize_lane_args(parsed: argparse.Namespace) -> None:
+    if parsed.command != "lane":
+        return
+    args = list(parsed.args)
+    normalized: list[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--device":
+            if index + 1 >= len(args):
+                raise MaestroAndroidError("CONFIG_ERROR", "lane --device requires a serial value")
+            if not parsed.device:
+                parsed.device = args[index + 1]
+            index += 2
+            continue
+        normalized.append(token)
+        index += 1
+    parsed.args = normalized
 
 
 def _validate_scoped_flow(flow_path: Path, config: MaestroAndroidConfig) -> None:
@@ -435,7 +585,7 @@ def _run_scoped(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> Non
     command = list(config.scoped.command_prefix)
     command.extend(["--flow", str(flow_path)])
     if parsed.device:
-        command.extend(["--serial", parsed.device])
+        command.extend(["--serial", _resolve_serial(parsed.device)])
     if parsed.no_build:
         command.append("--no-build")
     if parsed.no_install:
@@ -549,7 +699,9 @@ def _run_devices() -> None:
         return
     for device in devices:
         detail = f" {device['details']}" if device["details"] else ""
-        print(f"{device['serial']} [{device['state']}] {detail}".rstrip())
+        aliases = [alias for alias in device.get("aliases", []) if alias != device["serial"]]
+        alias_detail = f" aliases={','.join(sorted(aliases))}" if aliases else ""
+        print(f"{device['serial']} [{device['state']}] {detail}{alias_detail}".rstrip())
 
 
 def _run_start_device(parsed: argparse.Namespace) -> None:
@@ -572,6 +724,7 @@ def _run_start_device(parsed: argparse.Namespace) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     parsed = parser.parse_args(list(argv) if argv is not None else None)
+    _normalize_lane_args(parsed)
 
     try:
         config = load_config(explicit_path=parsed.config)

@@ -24,45 +24,17 @@ tags:
       - hideKeyboard
       - tapOn: "Get started"
 - assertVisible: "Offline-first"
-- tapOn:
-    id: "advanced_sheet_button"
-- extendedWaitUntil:
-    visible: "Advanced controls"
-    timeout: 20000
-- assertVisible: "Downloads"
-- assertVisible: "Wi-Fi only for large downloads"
-- tapOn: "Wi-Fi only for large downloads"
-- tapOn: "Wi-Fi only for large downloads"
-- takeScreenshot: "download-settings-smoke"
+- runFlow: shared/open-model-library.yaml
+- assertVisible: "Model library"
+- assertVisible: "Search models"
+- assertVisible: "Downloaded models"
+- assertVisible: "Refresh"
 - scrollUntilVisible:
     element:
-      text: "Open model library"
+      text: "Close"
     direction: DOWN
     timeout: 20000
-- assertVisible: "Open runtime controls"
-- tapOn: "Open model library"
-- extendedWaitUntil:
-    visible: "Model library"
-    timeout: 30000
-- assertVisible: "Refresh all"
-- assertVisible: "Downloaded models"
-- assertVisible: "Available models"
+- assertVisible: "Close"
 - assertNotVisible: "Load now"
 - assertNotVisible: "Offload"
-- scrollUntilVisible:
-    element:
-      text: "Open runtime controls"
-    direction: DOWN
-    timeout: 20000
-- tapOn: "Open runtime controls"
-- extendedWaitUntil:
-    visible: "Runtime model"
-    timeout: 30000
-- assertVisible: "Runtime load state"
-- assertVisible: "No installed models yet"
-- assertNotVisible: "Downloaded models"
-- assertNotVisible: "Start download"
-- tapOn: "Open model library"
-- extendedWaitUntil:
-    visible: "Model library"
-    timeout: 30000
+- takeScreenshot: "download-settings-smoke"

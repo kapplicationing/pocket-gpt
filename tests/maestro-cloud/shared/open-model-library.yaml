@@ -2,16 +2,27 @@ appId: com.pocketagent.android
 ---
 - runFlow:
     when:
-      visible:
-        id: "unified_model_sheet"
+      visible: "Model library"
     commands:
-      - assertVisible:
-          id: "unified_model_sheet"
+      - assertVisible: "Model library"
 - runFlow:
     when:
-      notVisible:
-        id: "unified_model_sheet"
+      notVisible: "Model library"
     commands:
+      - runFlow:
+          when:
+            visible: "Setup"
+          commands:
+            - tapOn:
+                id: "send_button"
+      - runFlow:
+          when:
+            visible: "Get ready"
+          commands:
+            - tapOn: "Get ready"
+            - extendedWaitUntil:
+                visible: "Model library"
+                timeout: 20000
       - runFlow:
           when:
             visible:
@@ -35,6 +46,5 @@ appId: com.pocketagent.android
           commands:
             - tapOn: "Fix model library"
 - extendedWaitUntil:
-    visible:
-      id: "unified_model_sheet"
+    visible: "Model library"
     timeout: 30000

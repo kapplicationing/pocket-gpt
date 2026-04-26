@@ -41,7 +41,7 @@ internal fun ChatViewModel.sendMessageInternal() {
         )
         return
     }
-    val attachedImages = snapshot.composer.attachedImages
+    val attachedImages = launchSafeSingleImagePaths(snapshot.composer.attachedImages)
     val userMessage = createMessage(
         role = MessageRole.USER,
         content = prompt,

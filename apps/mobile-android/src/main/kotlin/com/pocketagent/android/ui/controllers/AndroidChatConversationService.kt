@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui.controllers
 
+import com.pocketagent.android.ui.launchSafeSingleImagePaths
 import com.pocketagent.android.ui.clearError
 import com.pocketagent.android.ui.state.ChatSessionUiModel
 import com.pocketagent.android.ui.state.ChatUiState
@@ -77,7 +78,7 @@ class AndroidChatConversationService(
             composer = state.composer.copy(
                 text = message.content,
                 editingMessageId = messageId,
-                attachedImages = launchSafeAttachedImages(
+                attachedImages = launchSafeSingleImagePaths(
                     imagePaths = message.imagePaths,
                     legacyImagePath = message.imagePath,
                 ),
@@ -140,7 +141,7 @@ class AndroidChatConversationService(
             }.copy(
                 composer = state.composer.copy(
                     text = userMessage.content,
-                    attachedImages = launchSafeAttachedImages(
+                    attachedImages = launchSafeSingleImagePaths(
                         imagePaths = userMessage.imagePaths,
                         legacyImagePath = userMessage.imagePath,
                     ),
@@ -148,18 +149,6 @@ class AndroidChatConversationService(
             ),
             shouldPersist = true,
         )
-    }
-
-    private fun launchSafeAttachedImages(
-        imagePaths: List<String>,
-        legacyImagePath: String? = null,
-    ): List<String> {
-        val firstImage = (imagePaths + listOfNotNull(legacyImagePath))
-            .asSequence()
-            .map(String::trim)
-            .firstOrNull { it.isNotBlank() }
-            ?: return emptyList()
-        return listOf(firstImage)
     }
 
     internal fun createSession(

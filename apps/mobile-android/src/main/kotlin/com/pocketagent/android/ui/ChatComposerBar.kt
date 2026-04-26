@@ -96,6 +96,7 @@ internal fun ComposerBar(
 ) {
     val haptic = LocalHapticFeedback.current
     val isEditing = editingMessageId != null
+    val launchSafeAttachedImages = launchSafeSingleImagePaths(attachedImages)
     val focusRequester = remember { FocusRequester() }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -184,7 +185,7 @@ internal fun ComposerBar(
                     }
                 }
             }
-            if (attachedImages.isNotEmpty()) {
+            if (launchSafeAttachedImages.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -192,7 +193,7 @@ internal fun ComposerBar(
                         .padding(bottom = compactSpacing),
                     horizontalArrangement = Arrangement.spacedBy(compactSpacing),
                 ) {
-                    attachedImages.forEachIndexed { index, path ->
+                    launchSafeAttachedImages.forEachIndexed { index, path ->
                         val attachmentLabel = Uri.parse(path).lastPathSegment
                             ?.takeIf { it.isNotBlank() }
                             ?: File(path).name.ifBlank { path }

@@ -120,6 +120,8 @@ class ChatStreamCoordinatorTest {
         assertTrue(runtime.cancelByRequestCalls > 0)
         assertNotNull(terminalState)
         assertEquals("timeout", terminalState?.finishReason)
+        assertEquals("UI-RUNTIME-001", terminalState?.uiError?.code)
+        assertEquals(true, terminalState?.terminalEventSeen)
     }
 
     @Test

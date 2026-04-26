@@ -118,25 +118,25 @@ class MainActivityUiSmokeTest {
     @Test
     fun onboardingFlowCanProgressAndComplete() {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Welcome to Pocket GPT").fetchSemanticsNodes().isNotEmpty() ||
+            composeRule.onAllNodesWithText("Welcome").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithTag("composer_input").fetchSemanticsNodes().isNotEmpty()
         }
-        if (composeRule.onAllNodesWithText("Welcome to Pocket GPT").fetchSemanticsNodes().isEmpty()) {
+        if (composeRule.onAllNodesWithText("Welcome").fetchSemanticsNodes().isEmpty()) {
             composeRule.waitForRuntimeReady()
             composeRule.onNodeWithTag("composer_input").assertIsDisplayed()
             return
         }
-        composeRule.onNodeWithText("Welcome to Pocket GPT").assertIsDisplayed()
+        composeRule.onNodeWithText("Welcome").assertIsDisplayed()
         composeRule.captureScreenshotIfEnabled("ui-01-onboarding-page-1")
         composeRule.onNodeWithText("Next").performClick()
-        composeRule.onNodeWithText("Step 2 of 3").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Step 2 of 3").assertIsDisplayed()
         composeRule.captureScreenshotIfEnabled("ui-02-onboarding-page-2")
         composeRule.onNodeWithText("Next").performClick()
-        composeRule.onNodeWithText("Step 3 of 3").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Step 3 of 3").assertIsDisplayed()
         composeRule.captureScreenshotIfEnabled("ui-03-onboarding-page-3")
         composeRule.onNodeWithText("Get started").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithText("Welcome to Pocket GPT").fetchSemanticsNodes().isEmpty()
+            composeRule.onAllNodesWithText("Welcome").fetchSemanticsNodes().isEmpty()
         }
     }
 
@@ -199,6 +199,7 @@ class MainActivityUiSmokeTest {
         composeRule.onNodeWithTag("advanced_sheet_button").performClick()
         composeRule.onNodeWithText("Open model library").performClick()
         composeRule.onNodeWithText("Model library").assertIsDisplayed()
+        composeRule.captureScreenshotIfEnabled("ui-10-model-provisioning-sheet")
         composeRule.onNodeWithText("Downloaded models").assertIsDisplayed()
         composeRule.onNodeWithText("Qwen 3.5 0.8B (Q4)").assertIsDisplayed()
         composeRule.onNodeWithText("Qwen3 1.7B Instruct (Q4_K_M)").assertIsDisplayed()
@@ -330,7 +331,7 @@ class MainActivityUiSmokeTest {
         waitUntil(timeoutMillis = 10_000) {
             hasSendButtonLabel("Send") ||
                 hasSendButtonLabel("Setup") ||
-                hasNodeWithText("Welcome to Pocket GPT")
+                hasNodeWithText("Welcome")
         }
         bootstrapRuntimeIfNeeded()
         waitUntil(timeoutMillis = 30_000) {

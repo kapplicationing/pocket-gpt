@@ -191,7 +191,7 @@ object ModelCatalog : ModelSpecProvider {
             interactionFeatures = setOf("TOOL_CALL_XML", "THINKING_TAGS"),
             includeAutoRoutingMode = true,
             explicitRoutingModes = setOf(RoutingMode.QWEN_0_8B),
-            mmProjFileName = "qwen3.5-0.8b-mmproj-q8_0.gguf",
+            mmProjFileName = "mmproj-F16.gguf",
         ),
     )
 

@@ -61,8 +61,13 @@ class AndroidRuntimeProvisioningStore(
             val versionResult = readInstalledVersionsWithDiagnostics(spec)
             versionResult.signal?.let { corruptionSignals += it }
             val versions = versionResult.versions
-            val activeVersion = prefs.readOptional(activeVersionKey(spec))
-            val active = versions.firstOrNull { it.version == activeVersion }
+            val activeVersionKey = activeVersionKey(spec)
+            val activeVersion = prefs.readOptional(activeVersionKey)
+            val active = selectRuntimeConfigDescriptor(activeVersion, versions)
+            if (active != null && active.version != activeVersion) {
+                prefs.edit().putString(activeVersionKey, active.version).apply()
+            }
+            val resolvedActiveVersion = active?.version ?: activeVersion
             staleActiveVersionSignal(
                 modelId = spec.modelId,
                 activeVersion = activeVersion,
@@ -74,7 +79,7 @@ class AndroidRuntimeProvisioningStore(
                 ?.let { file -> !file.exists() || !file.isFile }
                 ?: false
             val fallbackAliasPath = if (localFileMissing && activePath.isNotBlank()) {
-                resolveFallbackModelPath(spec = spec, missingPath = activePath)
+                resolveFallbackModelPath(spec = spec, version = active?.version, missingPath = activePath)
             } else {
                 null
             }
@@ -108,7 +113,7 @@ class AndroidRuntimeProvisioningStore(
             val pathOrigin = active?.let { descriptor ->
                 versionPathOrigins[descriptor.version]
             } ?: resolvePathOriginForVersion(
-                version = activeVersion,
+                version = resolvedActiveVersion,
                 absolutePath = activePath,
             )
             val resolvedPathOrigin = pathOrigin ?: ModelPathOrigin.MANAGED
@@ -119,7 +124,7 @@ class AndroidRuntimeProvisioningStore(
                 absolutePath = activePath.ifBlank { null },
                 sha256 = active?.sha256,
                 importedAtEpochMs = active?.importedAtEpochMs,
-                activeVersion = activeVersion,
+                activeVersion = resolvedActiveVersion,
                 installedVersions = versions,
                 pathOrigin = resolvedPathOrigin,
                 versionPathOrigins = versionPathOrigins,
@@ -388,15 +393,18 @@ class AndroidRuntimeProvisioningStore(
         return withModelLock(modelId) {
             ensureMigrated()
             val versions = readStoredVersionEntries(spec).toMutableList()
-            val installedDescriptors = readInstalledVersions(spec)
             val activeVersion = prefs.readOptional(activeVersionKey(spec))
             if (activeVersion == version) {
                 return@withModelLock false
             }
             val target = versions.firstOrNull { it.version == version } ?: return@withModelLock false
+            val installedDescriptors = readInstalledVersions(spec)
             val targetDescriptor = installedDescriptors.firstOrNull { descriptor -> descriptor.version == version }
             versions.removeIf { it.version == version }
             writeStoredVersionEntries(spec, versions)
+            if (prefs.readOptional(activeVersionKey(spec)) == version) {
+                prefs.edit().remove(activeVersionKey(spec)).apply()
+            }
             deleteManagedFileIfOrphaned(
                 absolutePath = target.absolutePath,
                 remainingEntries = versions,
@@ -497,8 +505,12 @@ class AndroidRuntimeProvisioningStore(
 
         allModelSpecs().forEach { spec ->
             val versions = readInstalledVersions(spec)
-            val activeVersion = prefs.readOptional(activeVersionKey(spec))
-            val active = versions.firstOrNull { it.version == activeVersion }
+            val activeVersionKey = activeVersionKey(spec)
+            val activeVersion = prefs.readOptional(activeVersionKey)
+            val active = selectRuntimeConfigDescriptor(activeVersion, versions)
+            if (active != null && active.version != activeVersion) {
+                prefs.edit().putString(activeVersionKey, active.version).apply()
+            }
 
             val path = active?.absolutePath?.trim().orEmpty()
             val sha = active?.sha256?.takeIf { it.isNotBlank() }.orEmpty()
@@ -549,6 +561,36 @@ class AndroidRuntimeProvisioningStore(
     }
 
     fun expectedRuntimeCompatibilityTag(): String = PROVISIONING_RUNTIME_COMPATIBILITY_TAG
+
+    internal fun artifactSearchDirectories(anchorPath: String? = null): List<File> {
+        val directories = linkedMapOf<String, File>()
+
+        fun register(dir: File?) {
+            val resolved = dir?.takeIf { candidate -> candidate.path.isNotBlank() } ?: return
+            directories.putIfAbsent(normalizeAbsolutePath(resolved.absolutePath), resolved)
+        }
+
+        anchorPath
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { path -> register(File(path).parentFile) }
+        register(managedModelDirectory())
+        context.getExternalFilesDir(null)?.let { root ->
+            register(File(root, PROVISIONING_MANAGED_MODELS_DIR_NAME))
+        }
+        appOwnedArtifactDirectories().forEach(::register)
+        return directories.values.toList()
+    }
+
+    internal fun appOwnedArtifactDirectories(): List<File> {
+        val packageName = context.packageName
+        return listOf(
+            File("/storage/emulated/0/Android/media/$packageName/models"),
+            File("/storage/emulated/0/Download/$packageName/models"),
+            File("/sdcard/Android/media/$packageName/models"),
+            File("/sdcard/Download/$packageName/models"),
+        )
+    }
 
     private fun upsertInstalledVersion(
         spec: ModelSpec,
@@ -617,19 +659,11 @@ class AndroidRuntimeProvisioningStore(
         if (fileName.isBlank()) {
             return null
         }
-        val managedFile = File(managedModelDirectory(), fileName)
-        if (managedFile.exists() && managedFile.isFile) {
-            return managedFile.absolutePath
-        }
-        val externalRoots = arrayOf(context.getExternalFilesDir(null))
-        for (root in externalRoots) {
-            if (root == null) continue
-            val candidate = File(root, "$PROVISIONING_MANAGED_MODELS_DIR_NAME/$fileName")
-            if (candidate.exists() && candidate.isFile) {
-                return candidate.absolutePath
-            }
-        }
-        return null
+        return artifactSearchDirectories()
+            .asSequence()
+            .map { directory -> File(directory, fileName) }
+            .firstOrNull { candidate -> candidate.exists() && candidate.isFile }
+            ?.absolutePath
     }
 
     private fun readInstalledVersionsWithDiagnostics(spec: ModelSpec): VersionReadResult {
@@ -709,6 +743,12 @@ class AndroidRuntimeProvisioningStore(
                 prefs.edit().putString(activeVersionKey, replacement).apply()
             }
         }
+        val repairedActive = selectRuntimeConfigEntry(activeVersion = prefs.readOptional(activeVersionKey), entries = deduped)
+        val currentActive = prefs.readOptional(activeVersionKey)
+        if (repairedActive != null && repairedActive.version != currentActive) {
+            changed = true
+            prefs.edit().putString(activeVersionKey, repairedActive.version).apply()
+        }
 
         if (changed) {
             writeStoredVersionEntries(spec, deduped)
@@ -716,26 +756,34 @@ class AndroidRuntimeProvisioningStore(
         return readResult.copy(entries = deduped)
     }
 
-    private fun resolveFallbackModelPath(spec: ModelSpec, missingPath: String): String? {
+    private fun resolveFallbackModelPath(spec: ModelSpec, version: String?, missingPath: String): String? {
         val packageName = context.packageName
-        val fileName = spec.fileName
+        val candidateFileNames = buildList {
+            File(missingPath).name.takeIf { it.isNotBlank() }?.let { add(it) }
+            version?.trim()?.takeIf { it.isNotBlank() }?.let { add(fileNameForVersion(spec, it)) }
+            add(spec.fileName)
+        }.distinct()
         // Generation 1: internal filesDir (oldest path scheme)
-        val gen1Candidates = listOf(
-            "${context.filesDir.absolutePath}/${PROVISIONING_LEGACY_MODEL_DIR_NAME}/$fileName",
-            "${context.filesDir.absolutePath}/models/$fileName",
-            "${context.cacheDir.absolutePath}/models/$fileName",
-        )
+        val gen1Candidates = candidateFileNames.flatMap { fileName ->
+            listOf(
+                "${context.filesDir.absolutePath}/${PROVISIONING_LEGACY_MODEL_DIR_NAME}/$fileName",
+                "${context.filesDir.absolutePath}/models/$fileName",
+                "${context.cacheDir.absolutePath}/models/$fileName",
+            )
+        }
         // Generation 2: external media and downloads
-        val gen2Candidates = listOf(
-            "/storage/emulated/0/Android/media/$packageName/models/$fileName",
-            "/storage/emulated/0/Download/$packageName/models/$fileName",
-            "/sdcard/Android/media/$packageName/models/$fileName",
-            "/sdcard/Download/$packageName/models/$fileName",
-        )
+        val gen2Candidates = candidateFileNames.flatMap { fileName ->
+            listOf(
+                "/storage/emulated/0/Android/media/$packageName/models/$fileName",
+                "/storage/emulated/0/Download/$packageName/models/$fileName",
+                "/sdcard/Android/media/$packageName/models/$fileName",
+                "/sdcard/Download/$packageName/models/$fileName",
+            )
+        }
         // Generation 3: current managed storage root
-        val gen3Candidates = listOf(
-            "${managedModelDirectory().absolutePath}/$fileName",
-        )
+        val gen3Candidates = candidateFileNames.map { fileName ->
+            "${managedModelDirectory().absolutePath}/$fileName"
+        }
         // Alias-based candidates (swap between media and download directories)
         val aliasCandidates = listOf(
             missingPath.replace("/Android/media/", "/Download/"),
@@ -797,7 +845,11 @@ class AndroidRuntimeProvisioningStore(
                 }
                 entry
             } else {
-                val fallbackPath = resolveFallbackModelPath(spec, entry.absolutePath) ?: return@map entry
+                val fallbackPath = resolveFallbackModelPath(
+                    spec = spec,
+                    version = entry.version,
+                    missingPath = entry.absolutePath,
+                ) ?: return@map entry
                 changed = true
                 val fallbackFile = File(fallbackPath)
                 entry.copy(
@@ -1313,4 +1365,48 @@ internal fun staleActiveVersionSignal(
         message = "Active model version pointer is stale for $modelId. Re-activate an installed version.",
         technicalDetail = "model=$modelId;active_version=$normalizedActiveVersion;installed_versions=${installedVersions.joinToString(separator = ",") { version -> version.version }}",
     )
+}
+
+internal fun selectRuntimeConfigDescriptor(
+    activeVersion: String?,
+    versions: List<ModelVersionDescriptor>,
+): ModelVersionDescriptor? {
+    val normalizedActiveVersion = activeVersion?.trim().orEmpty()
+    return versions.firstOrNull { descriptor ->
+        descriptor.version == normalizedActiveVersion && descriptor.isRuntimeConfigEligible()
+    } ?: versions
+        .filter { descriptor -> descriptor.isRuntimeConfigEligible() }
+        .maxByOrNull { descriptor -> descriptor.importedAtEpochMs }
+}
+
+internal fun selectRuntimeConfigEntry(
+    activeVersion: String?,
+    entries: List<StoredVersionEntry>,
+): StoredVersionEntry? {
+    val normalizedActiveVersion = activeVersion?.trim().orEmpty()
+    return entries.firstOrNull { entry ->
+        entry.version == normalizedActiveVersion && entry.isRuntimeConfigEligible()
+    } ?: entries
+        .filter { entry -> entry.isRuntimeConfigEligible() }
+        .maxByOrNull { entry -> entry.importedAtEpochMs }
+}
+
+private fun ModelVersionDescriptor.isRuntimeConfigEligible(): Boolean {
+    val file = File(absolutePath.trim())
+    return file.exists() &&
+        file.isFile &&
+        sha256.isNotBlank() &&
+        provenanceIssuer.isNotBlank() &&
+        provenanceSignature.isNotBlank() &&
+        runtimeCompatibility == PROVISIONING_RUNTIME_COMPATIBILITY_TAG
+}
+
+private fun StoredVersionEntry.isRuntimeConfigEligible(): Boolean {
+    val file = File(absolutePath.trim())
+    return file.exists() &&
+        file.isFile &&
+        sha256.isNotBlank() &&
+        provenanceIssuer.isNotBlank() &&
+        provenanceSignature.isNotBlank() &&
+        runtimeCompatibility == PROVISIONING_RUNTIME_COMPATIBILITY_TAG
 }

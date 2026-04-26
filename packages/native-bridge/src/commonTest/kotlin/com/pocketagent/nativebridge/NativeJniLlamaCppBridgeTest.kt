@@ -10,13 +10,29 @@ import kotlin.test.assertTrue
 
 class NativeJniLlamaCppBridgeTest {
     @Test
-    fun `auto native library selection falls back to baseline artifact`() {
+    fun `auto native library selection uses conservative baseline first`() {
         val attemptedLibraries = mutableListOf<String>()
         val bridge = NativeJniLlamaCppBridge(
             nativeApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "native hello"),
             libraryLoader = { library ->
                 attemptedLibraries += library
-                if (library != "pocket_llama") {
+            },
+            fallbackBridge = FakeFallbackBridge(),
+            fallbackEnabled = false,
+        )
+
+        assertTrue(bridge.isReady())
+        assertEquals(listOf("pocket_llama"), attemptedLibraries)
+    }
+
+    @Test
+    fun `auto native library selection falls back to armv8 baseline when default artifact is missing`() {
+        val attemptedLibraries = mutableListOf<String>()
+        val bridge = NativeJniLlamaCppBridge(
+            nativeApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "native hello"),
+            libraryLoader = { library ->
+                attemptedLibraries += library
+                if (library == "pocket_llama") {
                     error("missing $library")
                 }
             },
@@ -25,8 +41,7 @@ class NativeJniLlamaCppBridgeTest {
         )
 
         assertTrue(bridge.isReady())
-        assertEquals("pocket_llama", attemptedLibraries.last())
-        assertTrue(attemptedLibraries.contains("pocket_llama_v8"))
+        assertEquals(listOf("pocket_llama", "pocket_llama_v8"), attemptedLibraries)
     }
 
     @Test

@@ -5,6 +5,9 @@ import com.pocketagent.android.runtime.RuntimeDomainException
 import com.pocketagent.android.runtime.RuntimeErrorCodes
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.inference.ModelCatalog
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -273,6 +276,58 @@ class ModelDistributionManifestProviderTest {
         assertTrue(manifest.models.isEmpty())
         assertTrue(manifest.lastError?.contains("Dropped") == true)
     }
+
+    @Test
+    fun `bundled asset provisions required mmproj for launch vision variants`() = runTest {
+        val provider = ModelDistributionManifestProvider(
+            context = null,
+            endpointOverride = "",
+            bundledManifestLoader = { bundledAssetManifestJson() },
+        )
+
+        val manifest = provider.loadManifest()
+        val versionById = manifest.models
+            .first { it.modelId == ModelCatalog.QWEN_3_5_0_8B_Q4 }
+            .versions
+            .associateBy { it.version }
+        val expectedMmProjFileName = ModelCatalog.mmProjFileNameFor(ModelCatalog.QWEN_3_5_0_8B_Q4)
+
+        listOf("q4_0", "ud_iq2_xxs").forEach { version ->
+            val artifacts = versionById.getValue(version).artifacts
+            assertTrue(
+                artifacts.any { artifact ->
+                    artifact.role == ModelArtifactRole.MMPROJ &&
+                        artifact.required &&
+                        artifact.fileName == expectedMmProjFileName
+                },
+                "Expected $version to carry a required MMPROJ artifact.",
+            )
+            assertTrue(
+                artifacts.any { artifact ->
+                    artifact.role == ModelArtifactRole.PRIMARY_GGUF &&
+                        artifact.verificationPolicy == DownloadVerificationPolicy.PROVENANCE_STRICT
+                },
+                "Expected $version to preserve strict verification on the primary GGUF.",
+            )
+        }
+    }
+}
+
+private fun bundledAssetManifestJson(): String {
+    val repoRoot = findRepoRoot()
+    val catalogPath = repoRoot.resolve("apps/mobile-android/src/main/assets/model-distribution-catalog.json")
+    return catalogPath.toFile().readText()
+}
+
+private fun findRepoRoot(): Path {
+    var current: Path? = Path.of("").toAbsolutePath().normalize()
+    while (current != null) {
+        if (Files.exists(current.resolve("settings.gradle.kts"))) {
+            return current
+        }
+        current = current.parent
+    }
+    error("Could not locate pocket-gpt repo root.")
 }
 
 private fun bundledManifestJson(): String {

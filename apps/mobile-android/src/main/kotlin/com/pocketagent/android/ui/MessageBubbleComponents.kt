@@ -41,6 +41,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -106,6 +107,7 @@ internal fun MessageBubble(
             tonalElevation = 1.dp,
             color = messageBubbleColor(message.role),
             modifier = Modifier
+                .messageBubbleTestTag(message)
                 .clip(bubbleShape)
                 .fillMaxWidth(0.9f)
                 .widthIn(max = 600.dp),
@@ -221,6 +223,15 @@ internal fun MessageBubble(
                 )
             }
         }
+    }
+}
+
+private fun Modifier.messageBubbleTestTag(message: MessageUiModel): Modifier {
+    return when {
+        message.role == MessageRole.USER -> testTag("message_bubble_user")
+        message.isStreaming -> testTag("message_bubble_assistant_streaming")
+        message.content.isBlank() -> testTag("message_bubble_assistant_pending")
+        else -> testTag("message_bubble_assistant_complete")
     }
 }
 

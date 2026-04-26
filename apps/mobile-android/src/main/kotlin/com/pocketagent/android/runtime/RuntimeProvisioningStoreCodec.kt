@@ -80,7 +80,10 @@ internal fun AndroidRuntimeProvisioningStore.writeManagedMetadataIfApplicable(
                 artifactId = artifact.artifactId,
                 role = artifact.role,
                 fileName = fileName,
-                absolutePath = resolveSiblingArtifactPath(fileName),
+                absolutePath = resolveSiblingArtifactPath(
+                    primaryAbsolutePath = entry.absolutePath,
+                    fileName = fileName,
+                ),
                 expectedSha256 = artifact.sha256,
                 runtimeCompatibility = artifact.runtimeCompatibility,
                 fileSizeBytes = artifact.fileSizeBytes,
@@ -118,17 +121,18 @@ internal fun AndroidRuntimeProvisioningStore.metadataFileFor(absolutePath: Strin
     return File("$absolutePath$PROVISIONING_METADATA_SUFFIX")
 }
 
-private fun AndroidRuntimeProvisioningStore.resolveSiblingArtifactPath(fileName: String): String? {
+private fun AndroidRuntimeProvisioningStore.resolveSiblingArtifactPath(
+    primaryAbsolutePath: String,
+    fileName: String,
+): String? {
     if (fileName.isBlank()) {
         return null
     }
-    val candidates = buildList {
-        add(File(managedModelDirectory(), fileName))
-        context.getExternalFilesDir(null)?.let { root ->
-            add(File(root, "$PROVISIONING_MANAGED_MODELS_DIR_NAME/$fileName"))
-        }
-    }
-    return candidates.firstOrNull { candidate -> candidate.exists() && candidate.isFile }?.absolutePath
+    return artifactSearchDirectories(anchorPath = primaryAbsolutePath)
+        .asSequence()
+        .map { directory -> File(directory, fileName) }
+        .firstOrNull { candidate -> candidate.exists() && candidate.isFile }
+        ?.absolutePath
 }
 
 private fun AndroidRuntimeProvisioningStore.isMetadataSidecarEligiblePath(target: File): Boolean {

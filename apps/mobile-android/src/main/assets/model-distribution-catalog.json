@@ -60,9 +60,35 @@
           "provenanceSignature": "c28b899147e60e4c0f974e4d11f5f1bd3417d7aafb326d9f28b5e54266a0a1e0",
           "verificationPolicy": "PROVENANCE_STRICT",
           "runtimeCompatibility": "android-arm64-v8a",
-          "fileSizeBytes": 507154688
-        }
-        ,
+          "fileSizeBytes": 507154688,
+          "artifacts": [
+            {
+              "artifactId": "qwen3.5-0.8b-q4::q4_0::primary",
+              "role": "PRIMARY_GGUF",
+              "fileName": "Qwen3.5-0.8B-Q4_0.gguf",
+              "downloadUrl": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf",
+              "expectedSha256": "444406ddd926550c724ec18d5120a9d40ded44908a063b0e66e9a7e5464c652c",
+              "provenanceIssuer": "huggingface/unsloth",
+              "provenanceSignature": "c28b899147e60e4c0f974e4d11f5f1bd3417d7aafb326d9f28b5e54266a0a1e0",
+              "verificationPolicy": "PROVENANCE_STRICT",
+              "runtimeCompatibility": "android-arm64-v8a",
+              "fileSizeBytes": 507154688
+            },
+            {
+              "artifactId": "qwen3.5-0.8b-q4::q4_0::mmproj",
+              "role": "MMPROJ",
+              "fileName": "mmproj-F16.gguf",
+              "downloadUrl": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/mmproj-F16.gguf",
+              "expectedSha256": "56e4c6cfe73b0c82e3e82bc518d7591997e61d81f723fc41a586f4fa69ea2453",
+              "provenanceIssuer": "huggingface/unsloth",
+              "provenanceSignature": "",
+              "verificationPolicy": "INTEGRITY_ONLY",
+              "runtimeCompatibility": "android-arm64-v8a",
+              "fileSizeBytes": 204987232,
+              "required": true
+            }
+          ]
+        },
         {
           "version": "ud_iq2_xxs",
           "downloadUrl": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-IQ2_XXS.gguf",
@@ -71,7 +97,34 @@
           "provenanceSignature": "ef42b8e64526a2827b03c21ff6020d32bd5c19e107853413229b81b922cdc331",
           "verificationPolicy": "PROVENANCE_STRICT",
           "runtimeCompatibility": "android-arm64-v8a",
-          "fileSizeBytes": 338227456
+          "fileSizeBytes": 338227456,
+          "artifacts": [
+            {
+              "artifactId": "qwen3.5-0.8b-q4::ud_iq2_xxs::primary",
+              "role": "PRIMARY_GGUF",
+              "fileName": "Qwen3.5-0.8B-UD-IQ2_XXS.gguf",
+              "downloadUrl": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-IQ2_XXS.gguf",
+              "expectedSha256": "a369165c8ec45a92d55cbad98b5377e2c32ca8dfc824c899d9d05b33b6b53e54",
+              "provenanceIssuer": "huggingface/unsloth",
+              "provenanceSignature": "ef42b8e64526a2827b03c21ff6020d32bd5c19e107853413229b81b922cdc331",
+              "verificationPolicy": "PROVENANCE_STRICT",
+              "runtimeCompatibility": "android-arm64-v8a",
+              "fileSizeBytes": 338227456
+            },
+            {
+              "artifactId": "qwen3.5-0.8b-q4::ud_iq2_xxs::mmproj",
+              "role": "MMPROJ",
+              "fileName": "mmproj-F16.gguf",
+              "downloadUrl": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/mmproj-F16.gguf",
+              "expectedSha256": "56e4c6cfe73b0c82e3e82bc518d7591997e61d81f723fc41a586f4fa69ea2453",
+              "provenanceIssuer": "huggingface/unsloth",
+              "provenanceSignature": "",
+              "verificationPolicy": "INTEGRITY_ONLY",
+              "runtimeCompatibility": "android-arm64-v8a",
+              "fileSizeBytes": 204987232,
+              "required": true
+            }
+          ]
         }
       ]
     }

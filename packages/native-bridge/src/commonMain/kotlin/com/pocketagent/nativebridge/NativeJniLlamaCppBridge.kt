@@ -18,6 +18,7 @@ class NativeJniLlamaCppBridge(
     private val fallbackBridge: LlamaCppRuntimeBridge = AdbDeviceLlamaCppBridge(),
     private val fallbackEnabled: Boolean = defaultFallbackEnabled(),
     private val gpuOffloadAllowed: Boolean = defaultGpuOffloadEnabled(),
+    private val optimizedNativeLibrariesEnabled: Boolean = defaultOptimizedNativeLibrariesEnabled(),
     private val openClQualificationProvider: (() -> OpenClQualificationSnapshot?)? = null,
 ) : LlamaCppRuntimeBridge {
     private val lifecycleLock = Any()
@@ -1011,6 +1012,9 @@ class NativeJniLlamaCppBridge(
         if (libraryName != DEFAULT_NATIVE_LIBRARY_NAME) {
             return listOf(libraryName)
         }
+        if (!optimizedNativeLibrariesEnabled) {
+            return listOf(DEFAULT_NATIVE_LIBRARY_NAME, LIBRARY_V8)
+        }
         val features = detectCpuFeatures()
         val candidates = linkedSetOf<String>()
         if (features.hasDotProd && features.hasI8mm) {
@@ -1025,8 +1029,8 @@ class NativeJniLlamaCppBridge(
         if (features.hasFp16) {
             candidates += LIBRARY_V8_2
         }
-        candidates += LIBRARY_V8
         candidates += DEFAULT_NATIVE_LIBRARY_NAME
+        candidates += LIBRARY_V8
         return candidates.toList()
     }
 
@@ -1976,6 +1980,7 @@ class NativeJniLlamaCppBridge(
         private const val CPU_INFO_PATH = "/proc/cpuinfo"
         const val ENABLE_ADB_FALLBACK_ENV: String = "POCKETGPT_ENABLE_ADB_FALLBACK"
         const val ENABLE_GPU_OFFLOAD_ENV: String = "POCKETGPT_ENABLE_GPU_OFFLOAD"
+        const val ENABLE_OPTIMIZED_NATIVE_LIBRARIES_ENV: String = "POCKETGPT_ENABLE_OPTIMIZED_NATIVE_LIBRARIES"
         private val COMPILED_BACKEND_REGEX = "\"compiled_backend\"\\s*:\\s*\"([^\"]*)\"".toRegex(
             option = RegexOption.IGNORE_CASE,
         )
@@ -2024,6 +2029,14 @@ class NativeJniLlamaCppBridge(
                 ?.lowercase()
                 ?: return true
             return raw !in setOf("0", "false", "no", "off")
+        }
+
+        private fun defaultOptimizedNativeLibrariesEnabled(): Boolean {
+            val raw = System.getenv(ENABLE_OPTIMIZED_NATIVE_LIBRARIES_ENV)
+                ?.trim()
+                ?.lowercase()
+                ?: return false
+            return raw in setOf("1", "true", "yes", "on")
         }
 
         private const val LOAD_PROGRESS_EMIT_INTERVAL_MS = 250L

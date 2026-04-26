@@ -81,6 +81,45 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
     }
 
     @Test
+    fun importModelResolvesVisionMmprojFromAppDownloadsDirectory() = runBlocking {
+        val source = writeTempFile(
+            dir = appContext.cacheDir,
+            fileName = "vision-import-source.gguf",
+            content = "vision-import-source-content",
+        )
+        val mmProjFileName = ModelCatalog.mmProjFileNameFor(ModelCatalog.QWEN_3_5_0_8B_Q4)
+            ?: throw AssertionError("Expected mmproj filename for vision model.")
+        val downloadsDir = File("/sdcard/Download/${appContext.packageName}/models").apply { mkdirs() }
+        val mmProj = writeTempFile(
+            dir = downloadsDir,
+            fileName = mmProjFileName,
+            content = "vision-mmproj-content",
+        )
+
+        store.importModel(
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            sourceUri = android.net.Uri.fromFile(source),
+            version = "vision-import-v1",
+        )
+
+        assertEquals(
+            normalizePath(mmProj.absolutePath),
+            normalizePath(store.resolveMmProjPath(ModelCatalog.QWEN_3_5_0_8B_Q4).orEmpty()),
+        )
+        assertEquals(
+            normalizePath(mmProj.absolutePath),
+            normalizePath(
+                store.listInstalledVersions(ModelCatalog.QWEN_3_5_0_8B_Q4)
+                    .single()
+                    .artifacts
+                    .first { artifact -> artifact.role == com.pocketagent.core.model.ModelArtifactRole.MMPROJ }
+                    .absolutePath
+                    .orEmpty(),
+            ),
+        )
+    }
+
+    @Test
     fun removeInactiveSeededVersionDoesNotDeleteExternalSourcePath() = runBlocking {
         val oldSource = writeTempFile(
             dir = appContext.cacheDir,

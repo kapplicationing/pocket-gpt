@@ -1,6 +1,11 @@
 package com.pocketagent.android.runtime
 
 import com.pocketagent.android.runtime.modelmanager.InstalledArtifactDescriptor
+import com.pocketagent.android.runtime.modelmanager.DownloadVerificationPolicy
+import com.pocketagent.android.runtime.modelmanager.ModelDistributionArtifact
+import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
+import com.pocketagent.android.runtime.modelmanager.ModelDistributionModel
+import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelspec.DefaultNormalizedModelCatalogRegistry
 import com.pocketagent.android.runtime.modelspec.HuggingFaceFileRecord
@@ -45,6 +50,91 @@ class ModelRuntimeLaunchPlannerTest {
 
         assertTrue(plan.loadBlocked)
         assertTrue(plan.missingRequiredArtifacts.any { artifact -> artifact.contains("mmproj") })
+    }
+
+    @Test
+    fun `launch planner blocks manifest q4_0 variant when required mmproj is missing`() {
+        val registry = DefaultNormalizedModelCatalogRegistry(
+            manifestProvider = {
+                ModelDistributionManifest(
+                    models = listOf(
+                        ModelDistributionModel(
+                            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+                            displayName = "Qwen 3.5 0.8B",
+                            versions = listOf(
+                                ModelDistributionVersion(
+                                    modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+                                    version = "q4_0",
+                                    downloadUrl = "https://example.test/Qwen3.5-0.8B-Q4_0.gguf",
+                                    expectedSha256 = "a".repeat(64),
+                                    provenanceIssuer = "huggingface/unsloth",
+                                    provenanceSignature = "b".repeat(64),
+                                    runtimeCompatibility = "android-arm64-v8a",
+                                    fileSizeBytes = 507_154_688L,
+                                    verificationPolicy = DownloadVerificationPolicy.PROVENANCE_STRICT,
+                                    sourceKind = ModelSourceKind.REMOTE_MANIFEST,
+                                    artifacts = listOf(
+                                        ModelDistributionArtifact(
+                                            artifactId = "primary",
+                                            role = ModelArtifactRole.PRIMARY_GGUF,
+                                            fileName = "Qwen3.5-0.8B-Q4_0.gguf",
+                                            downloadUrl = "https://example.test/Qwen3.5-0.8B-Q4_0.gguf",
+                                            expectedSha256 = "a".repeat(64),
+                                            provenanceIssuer = "huggingface/unsloth",
+                                            provenanceSignature = "b".repeat(64),
+                                            runtimeCompatibility = "android-arm64-v8a",
+                                            fileSizeBytes = 507_154_688L,
+                                            verificationPolicy = DownloadVerificationPolicy.PROVENANCE_STRICT,
+                                        ),
+                                        ModelDistributionArtifact(
+                                            artifactId = "mmproj",
+                                            role = ModelArtifactRole.MMPROJ,
+                                            fileName = ModelCatalog.mmProjFileNameFor(ModelCatalog.QWEN_3_5_0_8B_Q4).orEmpty(),
+                                            downloadUrl = "https://example.test/mmproj-F16.gguf",
+                                            expectedSha256 = "c".repeat(64),
+                                            provenanceIssuer = "huggingface/unsloth",
+                                            provenanceSignature = "",
+                                            runtimeCompatibility = "android-arm64-v8a",
+                                            fileSizeBytes = 204_987_232L,
+                                            required = true,
+                                            verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            },
+        )
+        val planner = DefaultModelRuntimeLaunchPlanner(registry)
+        val descriptor = ModelVersionDescriptor(
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            version = "q4_0",
+            displayName = "Qwen",
+            absolutePath = "/tmp/qwen-q4_0.gguf",
+            sha256 = "a".repeat(64),
+            provenanceIssuer = "issuer",
+            provenanceSignature = "sig",
+            runtimeCompatibility = "android-arm64-v8a",
+            fileSizeBytes = 123L,
+            importedAtEpochMs = 1L,
+            isActive = true,
+            sourceKind = ModelSourceKind.BUILT_IN,
+            artifacts = listOf(
+                InstalledArtifactDescriptor(
+                    artifactId = "primary",
+                    role = ModelArtifactRole.PRIMARY_GGUF,
+                    fileName = "qwen-q4_0.gguf",
+                    absolutePath = "/tmp/qwen-q4_0.gguf",
+                ),
+            ),
+        )
+
+        val plan = planner.planInstalledModel(descriptor)
+
+        assertTrue(plan.loadBlocked)
+        assertEquals(listOf("mmproj-F16.gguf"), plan.missingRequiredArtifacts)
     }
 
     @Test

@@ -55,6 +55,24 @@ class VoiceActivationTest {
     }
 
     @Test
+    fun `enable voice activation blocks missing models and preserves support copy`() {
+        val store = VoiceActivationSettingsStore(VoiceActivationTestStorage())
+
+        val result = enableVoiceActivation(
+            settingsStore = store,
+            betaContract = VoiceBetaContract(blockingIssue = VoiceBetaBlockingIssue.MODELS_MISSING),
+            startRuntime = { error("should not start") },
+        )
+
+        assertEquals(VoiceActivationEnableResult.BLOCKED_MODELS_MISSING, result)
+        assertFalse(store.state().enabled)
+        assertEquals(
+            "Voice beta needs local voice model files before always-on listening can start.",
+            store.state().lastError,
+        )
+    }
+
+    @Test
     fun `enable voice activation rolls back when service start fails`() {
         val store = VoiceActivationSettingsStore(VoiceActivationTestStorage())
 

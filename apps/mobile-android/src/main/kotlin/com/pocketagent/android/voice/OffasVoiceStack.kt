@@ -176,6 +176,13 @@ internal fun resolveOffasTranscriptOutcome(
     )
 }
 
+internal fun shouldContinueVoiceService(
+    nextServiceState: VoiceServiceState,
+    voiceActivationEnabled: Boolean,
+): Boolean {
+    return voiceActivationEnabled && nextServiceState == VoiceServiceState.LISTENING
+}
+
 internal class SherpaOnnxOffasVoiceEngine(
     private val appContext: Context,
 ) : OffasVoiceEngine {
@@ -645,9 +652,10 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun handleEmptyTranscript(directCapture: Boolean) {
-        settingsStore.updateServiceState(stateAfterEmptyTranscript())
+        val nextState = stateAfterEmptyTranscript()
+        settingsStore.updateServiceState(nextState)
         updateNotification("Offas is listening")
-        if (settingsStore.state().enabled && !directCapture) {
+        if (shouldContinueVoiceService(nextState, settingsStore.state().enabled)) {
             startServiceLoop(directCapture = false)
         } else {
             stopForeground(STOP_FOREGROUND_DETACH)
@@ -677,7 +685,7 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
         settingsStore.setLastError(null)
         speak(outcome.spokenResponse)
         updateNotification(outcome.spokenResponse)
-        if (outcome.nextServiceState == VoiceServiceState.LISTENING && !directCapture) {
+        if (shouldContinueVoiceService(outcome.nextServiceState, settingsStore.state().enabled)) {
             startServiceLoop(directCapture = false)
         } else {
             stopForeground(STOP_FOREGROUND_DETACH)

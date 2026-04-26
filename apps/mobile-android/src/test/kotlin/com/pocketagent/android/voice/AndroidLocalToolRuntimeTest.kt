@@ -12,10 +12,31 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertContentEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AndroidLocalToolRuntimeTest {
+    @Test
+    fun `lists bounded voice tools alongside base tools`() {
+        val runtime = AndroidLocalToolRuntime(
+            context = TestToolRuntimeContext(),
+            base = RecordingToolModule(),
+        )
+
+        assertContentEquals(
+            listOf(
+                AndroidLocalToolRuntime.TOOL_ALARM_SET,
+                AndroidLocalToolRuntime.TOOL_APP_OPEN,
+                "calculator",
+                AndroidLocalToolRuntime.TOOL_FLASHLIGHT_TOGGLE,
+                AndroidLocalToolRuntime.TOOL_TIMER_SET,
+                AndroidLocalToolRuntime.TOOL_VOLUME_SET,
+            ),
+            runtime.listEnabledTools(),
+        )
+    }
+
     @Test
     fun `legacy custom validation preserves primitive coercion`() {
         val runtime = AndroidLocalToolRuntime(context = TestToolRuntimeContext())

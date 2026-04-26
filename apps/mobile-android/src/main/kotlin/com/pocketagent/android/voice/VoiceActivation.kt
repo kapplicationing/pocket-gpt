@@ -76,6 +76,7 @@ enum class VoiceActivationEnableResult {
     DISABLED,
     BLOCKED_MICROPHONE_PERMISSION,
     BLOCKED_MODELS_MISSING,
+    START_FAILED,
 }
 
 enum class OemBatteryGuide(
@@ -165,10 +166,19 @@ class VoiceActivationSettingsStore private constructor(
     fun observe(): StateFlow<VoiceActivationSettings> = stateFlow.asStateFlow()
 
     fun setEnabled(enabled: Boolean) {
-        save(read().copy(enabled = enabled, voiceServiceState = if (enabled) VoiceServiceState.STARTING else VoiceServiceState.DISABLED))
+        save(
+            read().copy(
+                enabled = enabled,
+                voiceServiceState = if (enabled) VoiceServiceState.STARTING else VoiceServiceState.DISABLED,
+                lastError = null,
+            ),
+        )
     }
 
-    fun updateServiceState(state: VoiceServiceState, error: String? = stateFlow.value.lastError) {
+    fun updateServiceState(
+        state: VoiceServiceState,
+        error: String? = if (state == VoiceServiceState.ERROR) stateFlow.value.lastError else null,
+    ) {
         save(read().copy(voiceServiceState = state, lastError = error))
     }
 
@@ -237,24 +247,13 @@ class VoiceActivationController(
             return VoiceActivationEnableResult.DISABLED
         }
 
-        return when (val blockingIssue = computeState().betaContract.blockingIssue) {
-            VoiceBetaBlockingIssue.MICROPHONE_PERMISSION -> {
-                settingsStore.disableWithError("Microphone permission is required before voice beta can start.")
-                refresh()
-                VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION
-            }
-            VoiceBetaBlockingIssue.MODELS_MISSING -> {
-                settingsStore.disableWithError("Voice beta needs local voice model files before always-on listening can start.")
-                refresh()
-                VoiceActivationEnableResult.BLOCKED_MODELS_MISSING
-            }
-            null -> {
-                settingsStore.setEnabled(true)
-                OffasRuntime.start(appContext)
-                refresh()
-                VoiceActivationEnableResult.ENABLED
-            }
-        }
+        val result = enableVoiceActivation(
+            settingsStore = settingsStore,
+            betaContract = computeState().betaContract,
+            startRuntime = { OffasRuntime.start(appContext) },
+        )
+        refresh()
+        return result
     }
 
     fun silenceTimeoutSeconds(): Int = settingsStore.state().silenceTimeoutSeconds
@@ -336,6 +335,52 @@ internal fun evaluateVoiceBetaContract(
         needsBatteryGuidance = !batteryOptimizationIgnored,
         needsAssistantRole = assistantRoleSupported && !assistantRoleHeld,
     )
+}
+
+internal fun enableVoiceActivation(
+    settingsStore: VoiceActivationSettingsStore,
+    betaContract: VoiceBetaContract,
+    startRuntime: () -> Unit,
+): VoiceActivationEnableResult {
+    val blockingIssue = betaContract.blockingIssue
+    if (blockingIssue != null) {
+        settingsStore.disableWithError(blockingIssue.enableBlockedMessage())
+        return blockingIssue.toEnableResult()
+    }
+
+    settingsStore.setEnabled(true)
+    return runCatching {
+        startRuntime()
+        VoiceActivationEnableResult.ENABLED
+    }.getOrElse { error ->
+        settingsStore.disableWithError(voiceActivationStartFailureMessage(error))
+        VoiceActivationEnableResult.START_FAILED
+    }
+}
+
+internal fun voiceActivationStartFailureMessage(error: Throwable): String {
+    val detail = error.message?.trim().orEmpty()
+    return if (detail.isBlank()) {
+        "Voice beta could not start. Try again after checking microphone permission and local voice models."
+    } else {
+        "Voice beta could not start: $detail"
+    }
+}
+
+private fun VoiceBetaBlockingIssue.toEnableResult(): VoiceActivationEnableResult {
+    return when (this) {
+        VoiceBetaBlockingIssue.MICROPHONE_PERMISSION -> VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION
+        VoiceBetaBlockingIssue.MODELS_MISSING -> VoiceActivationEnableResult.BLOCKED_MODELS_MISSING
+    }
+}
+
+private fun VoiceBetaBlockingIssue.enableBlockedMessage(): String {
+    return when (this) {
+        VoiceBetaBlockingIssue.MICROPHONE_PERMISSION ->
+            "Microphone permission is required before voice beta can start."
+        VoiceBetaBlockingIssue.MODELS_MISSING ->
+            "Voice beta needs local voice model files before always-on listening can start."
+    }
 }
 
 class AssistActivity : ComponentActivity() {

@@ -2,6 +2,8 @@ package com.pocketagent.android.voice
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class OffasTranscriptOutcomeTest {
     @Test
@@ -38,5 +40,31 @@ class OffasTranscriptOutcomeTest {
 
         assertEquals("Done.", outcome.spokenResponse)
         assertEquals(VoiceServiceState.DISABLED, outcome.nextServiceState)
+    }
+
+    @Test
+    fun `voice service continues while always on listening is enabled`() {
+        assertTrue(
+            shouldContinueVoiceService(
+                nextServiceState = VoiceServiceState.LISTENING,
+                voiceActivationEnabled = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `voice service stops when next state is not listening or beta is off`() {
+        assertFalse(
+            shouldContinueVoiceService(
+                nextServiceState = VoiceServiceState.DISABLED,
+                voiceActivationEnabled = true,
+            ),
+        )
+        assertFalse(
+            shouldContinueVoiceService(
+                nextServiceState = VoiceServiceState.LISTENING,
+                voiceActivationEnabled = false,
+            ),
+        )
     }
 }

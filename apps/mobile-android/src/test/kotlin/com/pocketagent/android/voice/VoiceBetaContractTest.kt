@@ -39,6 +39,20 @@ class VoiceBetaContractTest {
     }
 
     @Test
+    fun `microphone blocker wins when microphone and models are both missing`() {
+        val contract = evaluateVoiceBetaContract(
+            microphonePermissionGranted = false,
+            assistantRoleSupported = true,
+            assistantRoleHeld = false,
+            batteryOptimizationIgnored = false,
+            modelsReady = false,
+        )
+
+        assertEquals(VoiceBetaBlockingIssue.MICROPHONE_PERMISSION, contract.blockingIssue)
+        assertFalse(contract.canEnableAlwaysOnListening)
+    }
+
+    @Test
     fun `ready beta keeps assistant and battery follow up advisory only`() {
         val contract = evaluateVoiceBetaContract(
             microphonePermissionGranted = true,
@@ -52,6 +66,22 @@ class VoiceBetaContractTest {
         assertTrue(contract.canEnableAlwaysOnListening)
         assertTrue(contract.needsAssistantRole)
         assertTrue(contract.needsBatteryGuidance)
+    }
+
+    @Test
+    fun `assistant role unsupported does not block ready beta`() {
+        val contract = evaluateVoiceBetaContract(
+            microphonePermissionGranted = true,
+            assistantRoleSupported = false,
+            assistantRoleHeld = false,
+            batteryOptimizationIgnored = true,
+            modelsReady = true,
+        )
+
+        assertEquals(null, contract.blockingIssue)
+        assertTrue(contract.canEnableAlwaysOnListening)
+        assertFalse(contract.needsAssistantRole)
+        assertFalse(contract.needsBatteryGuidance)
     }
 
     @Test

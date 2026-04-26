@@ -31,7 +31,7 @@ class VoiceActivationSettingsStoreTest {
     }
 
     @Test
-    fun `setEnabled persists enabled flag and startup state`() {
+    fun `setEnabled clears stale error and persists startup state`() {
         val storage = FakeVoiceActivationSettingsStorage(
             stringValues = mutableMapOf("last_error" to "stale error"),
         )
@@ -41,20 +41,21 @@ class VoiceActivationSettingsStoreTest {
 
         assertEquals(true, store.state().enabled)
         assertEquals(VoiceServiceState.STARTING, store.state().voiceServiceState)
-        assertEquals("stale error", store.state().lastError)
+        assertNull(store.state().lastError)
         assertEquals(true, storage.booleanValues["enabled"])
         assertEquals(VoiceServiceState.STARTING.name, storage.stringValues["service_state"])
+        assertNull(storage.stringValues["last_error"])
     }
 
     @Test
-    fun `updateServiceState preserves existing error unless replaced`() {
+    fun `updateServiceState clears stale error on healthy states and replaces on error`() {
         val storage = FakeVoiceActivationSettingsStorage(
             stringValues = mutableMapOf("last_error" to "microphone missing"),
         )
         val store = VoiceActivationSettingsStore(storage)
 
         store.updateServiceState(VoiceServiceState.CAPTURING)
-        assertEquals("microphone missing", store.state().lastError)
+        assertNull(store.state().lastError)
 
         store.updateServiceState(VoiceServiceState.ERROR, error = "models missing")
         assertEquals(VoiceServiceState.ERROR, store.state().voiceServiceState)
@@ -93,6 +94,24 @@ class VoiceActivationSettingsStoreTest {
         assertEquals("Voice models missing.", store.state().lastError)
         assertEquals(false, storage.booleanValues["enabled"])
         assertEquals(VoiceServiceState.DISABLED.name, storage.stringValues["service_state"])
+    }
+
+    @Test
+    fun `manual disable clears stale error`() {
+        val storage = FakeVoiceActivationSettingsStorage(
+            booleanValues = mutableMapOf("enabled" to true),
+            stringValues = mutableMapOf(
+                "service_state" to VoiceServiceState.ERROR.name,
+                "last_error" to "stale error",
+            ),
+        )
+        val store = VoiceActivationSettingsStore(storage)
+
+        store.setEnabled(false)
+
+        assertEquals(false, store.state().enabled)
+        assertEquals(VoiceServiceState.DISABLED, store.state().voiceServiceState)
+        assertNull(store.state().lastError)
     }
 }
 

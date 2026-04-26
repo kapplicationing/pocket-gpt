@@ -6,17 +6,17 @@ appId: com.pocketagent.android
     when:
       visible: "Skip"
     commands:
-      - tapOn:
-          id: "onboarding_skip"
+      - hideKeyboard
+      - tapOn: "Skip"
 - runFlow:
     when:
       visible: "Get started"
     commands:
-      - tapOn:
-          id: "onboarding_get_started"
+      - hideKeyboard
+      - tapOn: "Get started"
 - assertVisible: "Offline-first"
-- runFlow: shared/open-advanced-controls.yaml
-- runFlow: shared/open-model-library.yaml
+- runFlow: open-advanced-controls.yaml
+- runFlow: open-model-library.yaml
 - scrollUntilVisible:
     element:
       text: "__TARGET_DOWNLOAD_START__"

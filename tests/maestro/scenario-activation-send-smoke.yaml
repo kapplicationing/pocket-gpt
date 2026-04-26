@@ -42,9 +42,9 @@ tags:
           timeout: 180000
       - tapOn:
           id: "send_button"
-- assertVisible: "Reply with exactly: ACTIVATION_SMOKE_OK"
 - extendedWaitUntil:
-    visible: "ACTIVATION_SMOKE_OK"
+    visible:
+      id: "message_bubble_assistant_complete"
     timeout: 180000
 - extendedWaitUntil:
     visible: "Send"

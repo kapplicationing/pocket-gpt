@@ -8,26 +8,21 @@ tags:
     clearState: true
 - runFlow:
     when:
-      visible: "Welcome to Pocket GPT"
+      visible: "Welcome"
     commands:
-      - tapOn:
-          id: "onboarding_next"
-      - extendedWaitUntil:
-          visible: "Step 2 of 3"
-          timeout: 20000
-      - tapOn:
-          id: "onboarding_next"
-      - extendedWaitUntil:
-          visible: "Step 3 of 3"
-          timeout: 20000
-      - tapOn:
-          id: "onboarding_get_started"
+      - hideKeyboard
+      - tapOn: "Skip"
 - runFlow:
     when:
-      visible: "Skip"
+      visible: "Privacy first"
     commands:
-      - tapOn:
-          id: "onboarding_skip"
+      - tapOn: "Skip"
+- runFlow:
+    when:
+      visible: "Get started"
+    commands:
+      - hideKeyboard
+      - tapOn: "Get started"
 - assertVisible: "Offline-first"
 - tapOn:
     id: "advanced_sheet_button"

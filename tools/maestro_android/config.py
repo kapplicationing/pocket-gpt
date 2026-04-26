@@ -34,6 +34,9 @@ class DoctorConfig(_StrictModel):
     delegate_command: list[str] = Field(
         default_factory=lambda: ["python3", "tools/devctl/main.py", "doctor"]
     )
+    required_commands: list[str] | None = None
+    optional_commands: list[str] | None = None
+    require_gradlew: bool | None = None
 
 
 class ArtifactsConfig(_StrictModel):

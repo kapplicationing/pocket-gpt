@@ -1,6 +1,6 @@
 # Maestro Android Companion CLI
 
-Android-focused companion CLI for Maestro workflows in this repository.
+Android-focused companion CLI for Maestro workflows in this repository. This is the canonical repo-local reference.
 
 Run it with:
 

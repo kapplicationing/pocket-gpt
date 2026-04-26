@@ -138,6 +138,29 @@ def _resolve_apk(config: MaestroAndroidConfig) -> Path:
     return candidates[0]
 
 
+def _device_env(serial: str) -> dict[str, str]:
+    env = dict(os.environ)
+    env["ANDROID_SERIAL"] = serial
+    env["ADB_SERIAL"] = serial
+    return env
+
+
+def _is_app_installed(serial: str, app_id: str) -> bool:
+    completed = run_subprocess(
+        ["adb", "-s", serial, "shell", "pm", "path", app_id],
+        capture_output=True,
+        check=False,
+    )
+    return completed.returncode == 0 and bool((completed.stdout or "").strip())
+
+
+def _ensure_app_installed(serial: str, app_id: str, *, allow_install_hint: bool) -> None:
+    if _is_app_installed(serial, app_id):
+        return
+    suffix = " Rerun without --no-install or install the app first." if allow_install_hint else ""
+    raise MaestroAndroidError("DEVICE_ERROR", f"App {app_id} is not installed on {serial}.{suffix}")
+
+
 def _normalize_artifact_root(base_root: Path, serial: str, label: str) -> Path:
     date_value = datetime.now().strftime("%Y-%m-%d")
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -227,7 +250,8 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
     if not parsed.no_build:
         run_subprocess(config.project.build_command)
     if not parsed.no_install:
-        run_subprocess(config.project.install_command)
+        run_subprocess(config.project.install_command, env=_device_env(serial))
+    _ensure_app_installed(serial, config.project.app_id, allow_install_hint=parsed.no_install)
     apk_path = _resolve_apk(config)
 
     artifact_root = _normalize_artifact_root(REPO_ROOT / config.artifacts.scratch_root, serial, "raw")

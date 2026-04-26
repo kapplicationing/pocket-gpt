@@ -196,6 +196,67 @@ class GatesTest(unittest.TestCase):
             self.assertTrue(captured_metadata["stage2_quick_required"])
             self.assertEqual("optimization-sensitive-path", captured_metadata["stage2_quick_reason"])
 
+    def test_run_merge_unblock_uses_hardened_lifecycle_lane(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parsed = gates._parse_gate_args(
+                [
+                    "merge-unblock",
+                    "--report-path",
+                    str(Path(tmp) / "merge-unblock-report.json"),
+                    "--risk-label",
+                    "risk:runtime",
+                ]
+            )
+            original_collect_changed_files = gates._collect_changed_files
+            original_run_gate_command = gates._run_gate_command
+            original_write_report = gates._write_report
+            captured_steps: list[gates.GateStepResult] = []
+            captured_metadata: dict[str, object] = {}
+            try:
+                gates._collect_changed_files = lambda: []
+
+                def _fake_run_gate_command(*, name, command, env, allow_harness_noise):  # type: ignore[no-untyped-def]
+                    return gates.GateStepResult(
+                        name=name,
+                        command=list(command),
+                        started_at="2026-04-25T00:00:00",
+                        duration_seconds=0.1,
+                        status="passed",
+                        correctness="pass",
+                        blocking=False,
+                    )
+
+                def _fake_write_report(*, gate_name, steps, report_path, metadata):  # type: ignore[no-untyped-def]
+                    captured_steps.extend(steps)
+                    captured_metadata.update(metadata)
+
+                gates._run_gate_command = _fake_run_gate_command
+                gates._write_report = _fake_write_report
+
+                gates._run_merge_unblock(parsed)
+            finally:
+                gates._collect_changed_files = original_collect_changed_files
+                gates._run_gate_command = original_run_gate_command
+                gates._write_report = original_write_report
+
+            lifecycle_step = next(step for step in captured_steps if step.name == "lifecycle-e2e-first-run")
+            self.assertEqual(
+                [
+                    "python3",
+                    "tools/devctl/main.py",
+                    "lane",
+                    "maestro",
+                    "--flows",
+                    str(gates._LIFECYCLE_FLOW_PATH),
+                ],
+                lifecycle_step.command,
+            )
+            self.assertTrue(captured_metadata["lifecycle_required"])
+            self.assertEqual(
+                "devctl lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml",
+                captured_metadata["lifecycle_execution_path"],
+            )
+
     def test_run_promotion_skips_stage2_quick_for_low_risk_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             parsed = gates._parse_gate_args(["promotion", "--report-path", str(Path(tmp) / "promotion-report.json")])

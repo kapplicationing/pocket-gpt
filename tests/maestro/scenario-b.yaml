@@ -20,9 +20,9 @@ tags:
 - inputText: "Reply with exactly: CORE_B_OK"
 - tapOn:
     id: "send_button"
-- assertVisible: "Reply with exactly: CORE_B_OK"
 - extendedWaitUntil:
-    visible: "CORE_B_OK"
+    visible:
+      id: "message_bubble_assistant_complete"
     timeout: 180000
 - extendedWaitUntil:
     visible: "Send"

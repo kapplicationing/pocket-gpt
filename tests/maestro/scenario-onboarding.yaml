@@ -8,6 +8,6 @@ tags:
 - launchApp:
     clearState: true
 - runFlow: shared/bootstrap-to-ready.yaml
-- assertNotVisible: "Welcome to Pocket GPT"
+- assertNotVisible: "Welcome"
 - assertNotVisible: "UI-STARTUP-001"
 - takeScreenshot: "scenario-onboarding-ready"

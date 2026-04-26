@@ -2,5 +2,5 @@ appId: com.pocketagent.android
 ---
 - launchApp:
     clearState: false
-- runFlow: shared/bootstrap-to-ready.yaml
+- runFlow: bootstrap-to-ready.yaml
 - assertNotVisible: "UI-STARTUP-001"

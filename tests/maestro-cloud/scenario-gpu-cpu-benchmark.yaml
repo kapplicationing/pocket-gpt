@@ -8,14 +8,18 @@ tags:
     clearState: true
 - runFlow:
     when:
-      visible: "Skip"
+      visible:
+        text: "Skip"
     commands:
-      - tapOn: "Skip"
+      - tapOn:
+          text: "Skip"
 - runFlow:
     when:
-      visible: "Get started"
+      visible:
+        text: "Get started"
     commands:
-      - tapOn: "Get started"
+      - tapOn:
+          text: "Get started"
 - assertVisible: "Offline-first"
 - runFlow:
     when:
@@ -92,7 +96,8 @@ tags:
           visible: "Runtime: Ready"
           timeout: 900000
 - assertNotVisible: "Runtime: Error"
-- tapOn: "Advanced"
+- tapOn:
+    id: "advanced_sheet_button"
 - assertVisible: "Advanced controls"
 - extendedWaitUntil:
     visible: "Enable GPU acceleration"
@@ -102,13 +107,15 @@ tags:
 - tapOn: "Enable GPU acceleration"
 - back
 - assertVisible: "Speed & Battery: Balanced (GPU enabled)"
-- tapOn: "Message"
+- tapOn:
+    id: "composer_input"
 - eraseText
 - inputText: "Benchmark alpha. Reply with exactly sixty short one-word items about rivers and mountains, separated by single spaces, with no numbering, no punctuation, and no intro or outro."
 - hideKeyboard
 - evalScript: ${output.gpu_elapsed_ms = null}
 - evalScript: ${output.gpu_started_ms = Date.now()}
-- tapOn: "Send"
+- tapOn:
+    id: "send_button"
 - extendedWaitUntil:
     visible: "Cancel"
     timeout: 30000
@@ -117,26 +124,31 @@ tags:
     timeout: 300000
 - evalScript: ${output.gpu_elapsed_ms = Date.now() - output.gpu_started_ms}
 - assertNotVisible: "UI-RUNTIME-001"
-- tapOn: "Advanced"
+- tapOn:
+    id: "advanced_sheet_button"
 - assertVisible: "Advanced controls"
 - takeScreenshot: "cloud-gpu-benchmark-gpu"
 - back
 - tapOn:
     id: "session_drawer_button"
-- tapOn: "Create session"
-- tapOn: "Advanced"
+- tapOn:
+    id: "create_session_button"
+- tapOn:
+    id: "advanced_sheet_button"
 - assertVisible: "Advanced controls"
 - assertVisible: "Enable GPU acceleration"
 - tapOn: "Enable GPU acceleration"
 - back
 - assertVisible: "Speed & Battery: Balanced (GPU off)"
-- tapOn: "Message"
+- tapOn:
+    id: "composer_input"
 - eraseText
 - inputText: "Benchmark beta. Reply with exactly sixty short one-word items about rivers and mountains, separated by single spaces, with no numbering, no punctuation, and no intro or outro."
 - hideKeyboard
 - evalScript: ${output.cpu_elapsed_ms = null}
 - evalScript: ${output.cpu_started_ms = Date.now()}
-- tapOn: "Send"
+- tapOn:
+    id: "send_button"
 - extendedWaitUntil:
     visible: "Cancel"
     timeout: 30000
@@ -145,7 +157,8 @@ tags:
     timeout: 300000
 - evalScript: ${output.cpu_elapsed_ms = Date.now() - output.cpu_started_ms}
 - assertNotVisible: "UI-RUNTIME-001"
-- tapOn: "Advanced"
+- tapOn:
+    id: "advanced_sheet_button"
 - assertVisible: "Advanced controls"
 - takeScreenshot: "cloud-gpu-benchmark-cpu"
 - runScript: assert_gpu_faster.js

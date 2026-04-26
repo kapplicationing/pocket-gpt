@@ -10,14 +10,14 @@ tags:
     when:
       visible: "Skip"
     commands:
-      - tapOn:
-          id: "onboarding_skip"
+      - hideKeyboard
+      - tapOn: "Skip"
 - runFlow:
     when:
       visible: "Get started"
     commands:
-      - tapOn:
-          id: "onboarding_get_started"
+      - hideKeyboard
+      - tapOn: "Get started"
 - assertVisible: "Offline-first"
 - runFlow:
     when:
@@ -85,12 +85,7 @@ tags:
 - extendedWaitUntil:
     notVisible: "Setup"
     timeout: 900000
-- extendedWaitUntil:
-    notVisible: "Loading…"
-    timeout: 900000
-- extendedWaitUntil:
-    visible: "Send"
-    timeout: 60000
+- runFlow: shared/ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"
 - runFlow: shared/open-advanced-controls.yaml
 - runFlow:

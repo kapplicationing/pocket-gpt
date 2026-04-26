@@ -1,0 +1,63 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible: "Load last used"
+    commands:
+      - tapOn: "Load last used"
+- runFlow:
+    when:
+      visible:
+        id: "refresh_button"
+    commands:
+      - tapOn:
+          id: "refresh_button"
+- runFlow:
+    when:
+      visible: "Unloaded"
+    commands:
+      - tapOn:
+          id: "refresh_button"
+- runFlow:
+    when:
+      visible: "Unloaded"
+    commands:
+      - runFlow: open-model-library.yaml
+      - runFlow:
+          when:
+            visible: "Load last used"
+          commands:
+            - tapOn: "Load last used"
+      - runFlow:
+          when:
+            visible: "Retry"
+          commands:
+            - tapOn: "Retry"
+      - runFlow:
+          when:
+            visible: "Load"
+          commands:
+            - tapOn: "Load"
+      - runFlow:
+          when:
+            visible: "Loaded"
+          commands:
+            - back
+- extendedWaitUntil:
+    notVisible: "Unloaded"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Refresh"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Loading…"
+    timeout: 180000
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - back
+- extendedWaitUntil:
+    visible:
+      id: "send_button"
+    timeout: 60000

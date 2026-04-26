@@ -14,6 +14,7 @@ from tools.devctl.governance import (
     docs_drift_check,
     evidence_check,
     evidence_check_changed,
+    launch_readiness_report,
     model_audit,
     screenshot_inventory_check,
     governance_self_test,
@@ -58,6 +59,7 @@ def _build_parser() -> argparse.ArgumentParser:
     stage.add_argument("file", help="PR body markdown path")
 
     gov_sub.add_parser("model-audit", help="cross-reference model catalog, distribution, routing, and scripts")
+    gov_sub.add_parser("launch-readiness", help="compile the current launch readiness snapshot from board, matrix, and ticket docs")
     gov_sub.add_parser("self-test", help="run governance self-tests")
 
     report = subparsers.add_parser("report", help="inspect the latest Maestro/devctl report artifacts")
@@ -113,6 +115,9 @@ def _handle_governance(parsed: argparse.Namespace) -> None:
         return
     if command == "model-audit":
         model_audit()
+        return
+    if command == "launch-readiness":
+        launch_readiness_report()
         return
     if command == "self-test":
         governance_self_test()

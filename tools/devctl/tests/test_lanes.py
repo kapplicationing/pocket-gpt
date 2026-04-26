@@ -23,6 +23,8 @@ from tools.devctl.lanes import (
     _extract_instrumentation_failure,
     _extract_ui_runtime_fields,
     _media_path_fallbacks,
+    _maestro_flow_clears_app_state,
+    _materialize_maestro_flow_without_clear_state,
     _model_sync_cache_dir,
     _normalize_test_mode,
     _parse_model_sync_manifest,
@@ -467,6 +469,7 @@ class LanesTest(unittest.TestCase):
 
         self.assertEqual("failed", result.status)
         self.assertEqual("first_token", result.phase)
+        self.assertIs(result.placeholder_visible, False)
         self.assertEqual("no_terminal_event", result.failure_signature)
 
     def test_send_capture_fast_smoke_allows_first_token_without_terminal(self) -> None:
@@ -1374,8 +1377,61 @@ class LanesTest(unittest.TestCase):
         maestro_calls = [cmd for cmd in issued_commands if cmd and cmd[0] == "/usr/bin/maestro"]
         self.assertEqual(1, len(maestro_calls))
         self.assertTrue(
-            any(token.endswith("tests/maestro/scenario-onboarding.yaml") for token in maestro_calls[0]),
+            any(token.endswith("scenario-onboarding.yaml") for token in maestro_calls[0]),
         )
+        clear_commands = [
+            cmd for cmd in issued_commands
+            if cmd == ["adb", "-s", "SER123", "shell", "pm", "clear", "com.pocketagent.android"]
+        ]
+        self.assertEqual(1, len(clear_commands))
+        self.assertLess(issued_commands.index(clear_commands[0]), issued_commands.index(maestro_calls[0]))
+
+    def test_maestro_flow_clears_app_state_detects_clear_state_true(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            flow = Path(tmpdir) / "flow.yaml"
+            flow.write_text(
+                "\n".join(
+                    [
+                        "appId: com.pocketagent.android",
+                        "---",
+                        "- launchApp:",
+                        "    clearState: true",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(_maestro_flow_clears_app_state(flow))
+
+    def test_materialize_maestro_flow_without_clear_state_preserves_shared_flows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            flow_dir = root / "tests" / "maestro"
+            shared_dir = flow_dir / "shared"
+            shared_dir.mkdir(parents=True)
+            (shared_dir / "bootstrap.yaml").write_text("- assertVisible: Ready\n", encoding="utf-8")
+            flow = flow_dir / "scenario.yaml"
+            flow.write_text(
+                "\n".join(
+                    [
+                        "appId: com.pocketagent.android",
+                        "---",
+                        "- launchApp:",
+                        "    clearState: true",
+                        "- runFlow: shared/bootstrap.yaml",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            materialized = _materialize_maestro_flow_without_clear_state(
+                flow,
+                output_dir=root / "out",
+            )
+
+            text = materialized.read_text(encoding="utf-8")
+            self.assertIn("clearState: false", text)
+            self.assertTrue((root / "out" / "shared" / "bootstrap.yaml").exists())
 
     def test_parse_package_uid(self) -> None:
         self.assertEqual(10635, _parse_package_uid("pkgFlags=[ HAS_CODE ]\nuserId=10635\ngids=[3003]"))
@@ -2202,6 +2258,61 @@ class LanesTest(unittest.TestCase):
             summary = summary_path.read_text(encoding="utf-8")
             self.assertIn("Run owner: `qa-owner`", summary)
             self.assertIn("Run host: `qa-host`", summary)
+
+    def test_write_journey_report_backfills_failed_send_capture_required_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "journey-report.json"
+            summary_path = Path(tmp) / "journey-summary.md"
+
+            _write_journey_report(
+                report_path=report_path,
+                summary_path=summary_path,
+                serial="SER123",
+                steps=[
+                    JourneyStepResult(
+                        name="run-01:send-capture",
+                        status="failed",
+                        duration_seconds=1.23,
+                        phase=None,
+                        placeholder_visible=None,
+                        runtime_status=None,
+                        backend=None,
+                        active_model_id=None,
+                        failure_signature="send-capture-kickoff: launch failed",
+                    ),
+                ],
+            )
+
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            step = payload["steps"][0]
+            self.assertEqual("error", step["phase"])
+            self.assertIs(step["placeholder_visible"], False)
+            self.assertEqual("unknown", step["runtime_status"])
+            self.assertEqual("unknown", step["backend"])
+            self.assertEqual("unknown", step["active_model_id"])
+
+    def test_write_journey_report_summary_uses_normalized_failed_send_capture_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "journey-report.json"
+            summary_path = Path(tmp) / "journey-summary.md"
+
+            _write_journey_report(
+                report_path=report_path,
+                summary_path=summary_path,
+                serial="SER123",
+                steps=[
+                    JourneyStepResult(
+                        name="run-01:send-capture",
+                        status="failed",
+                        duration_seconds=1.23,
+                        failure_signature="send-capture-kickoff: launch failed",
+                    ),
+                ],
+            )
+
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("| run-01:send-capture | - | error | failed | 1.23 |", summary)
+            self.assertIn("| unknown | unknown | unknown | False |", summary)
 
     def test_device_lock_is_reentrant_for_same_process(self) -> None:
         from tools.devctl import lanes

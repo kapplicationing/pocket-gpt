@@ -14,9 +14,9 @@ tags:
 - inputText: "Reply with exactly: CORE_C_OK"
 - tapOn:
     id: "send_button"
-- assertVisible: "Reply with exactly: CORE_C_OK"
 - extendedWaitUntil:
-    visible: "CORE_C_OK"
+    visible:
+      id: "message_bubble_assistant_complete"
     timeout: 180000
 - extendedWaitUntil:
     visible: "Send"

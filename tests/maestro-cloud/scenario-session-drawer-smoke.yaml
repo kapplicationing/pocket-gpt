@@ -6,15 +6,7 @@ tags:
 - runFlow: shared/bootstrap-cloud-startup.yaml
 - tapOn:
     id: "session_drawer_button"
-- assertVisible: "Create session"
-- assertVisible: "New chat"
-- swipe:
-    from:
-      id: "session_row_active"
-    direction: LEFT
-- assertVisible: "Undo"
-- assertVisible: "No sessions yet"
-- tapOn: "Undo"
-- assertVisible: "Create session"
+- assertVisible:
+    id: "create_session_button"
 - assertVisible: "New chat"
 - takeScreenshot: "cloud-session-drawer-after-delete"

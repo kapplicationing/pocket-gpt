@@ -1,7 +1,5 @@
 appId: com.pocketagent.android
 ---
-- runFlow: shared/bootstrap-cloud-startup.yaml
-- extendedWaitUntil:
-    visible: "Runtime: Ready"
-    timeout: 180000
+- runFlow: bootstrap-cloud-startup.yaml
+- runFlow: ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"

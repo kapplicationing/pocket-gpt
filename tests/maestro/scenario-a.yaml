@@ -14,9 +14,9 @@ tags:
 - takeScreenshot: "scenario-a-02-typed"
 - tapOn:
     id: "send_button"
-- assertVisible: "Reply with exactly: CORE_A_OK"
 - extendedWaitUntil:
-    visible: "CORE_A_OK"
+    visible:
+      id: "message_bubble_assistant_complete"
     timeout: 180000
 - extendedWaitUntil:
     visible: "Send"

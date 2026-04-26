@@ -194,18 +194,15 @@ def _should_run_stage2_quick(*, risk_labels: Sequence[str], changed_files: Seque
     return True, ",".join(reasons)
 
 
-def _resolve_serial(explicit_serial: str) -> str:
-    serial = explicit_serial.strip()
-    if serial:
-        return serial
-    result = run_subprocess(["adb", "devices"], check=False, capture_output=True, env=os.environ)
-    if result.returncode != 0:
-        raise DevctlError("ENVIRONMENT_ERROR", "Unable to list adb devices while resolving lifecycle serial.")
-    for line in (result.stdout or "").splitlines()[1:]:
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] == "device":
-            return parts[0]
-    raise DevctlError("ENVIRONMENT_ERROR", "No authorized adb device available for lifecycle flow.")
+def _lifecycle_lane_command() -> list[str]:
+    return [
+        "python3",
+        "tools/devctl/main.py",
+        "lane",
+        "maestro",
+        "--flows",
+        str(_LIFECYCLE_FLOW_PATH),
+    ]
 
 
 def _classify_journey_failure(output: str) -> tuple[str, str | None]:
@@ -389,12 +386,12 @@ def _run_merge_unblock(parsed: argparse.Namespace) -> None:
         )
     )
 
+    lifecycle_command = _lifecycle_lane_command()
     if lifecycle_required:
-        serial = _resolve_serial(env.get("ADB_SERIAL", ""))
         steps.append(
             _run_gate_command(
                 name="lifecycle-e2e-first-run",
-                command=["maestro", "--device", serial, "test", str(_LIFECYCLE_FLOW_PATH)],
+                command=lifecycle_command,
                 env=env,
                 allow_harness_noise=False,
             )
@@ -403,7 +400,7 @@ def _run_merge_unblock(parsed: argparse.Namespace) -> None:
         steps.append(
             GateStepResult(
                 name="lifecycle-e2e-first-run",
-                command=["maestro", "--device", "<resolved-serial>", "test", str(_LIFECYCLE_FLOW_PATH)],
+                command=lifecycle_command,
                 started_at=datetime.now().isoformat(timespec="seconds"),
                 duration_seconds=0.0,
                 status="skipped",
@@ -423,6 +420,7 @@ def _run_merge_unblock(parsed: argparse.Namespace) -> None:
             "risk_labels": parsed.risk_label,
             "lifecycle_required": lifecycle_required,
             "lifecycle_reason": lifecycle_reason,
+            "lifecycle_execution_path": "devctl lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml",
             "changed_files_count": len(changed_files),
         },
     )

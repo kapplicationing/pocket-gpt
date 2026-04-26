@@ -8,8 +8,8 @@ tags:
 - extendedWaitUntil:
     visible: "Skip"
     timeout: 20000
-- tapOn:
-    id: "onboarding_skip"
+- hideKeyboard
+- tapOn: "Skip"
 - tapOn:
     id: "session_drawer_button"
 - assertVisible: "Create session"

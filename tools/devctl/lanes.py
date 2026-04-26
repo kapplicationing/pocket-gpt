@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import fnmatch
 import hashlib
@@ -14,7 +15,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, MutableMapping, Sequence
@@ -158,6 +159,8 @@ _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "timed out while waiting for FUNCTIONFS_BIND",
     "TcpForwarder",
 )
+_MAESTRO_LAUNCH_APP_KEY = "launchApp"
+_MAESTRO_CLEAR_STATE_KEY = "clearState"
 _SCREENSHOT_PACK_HARNESS_NOISE_MARKERS = (
     "No compose hierarchies found in the app",
     "Command timed out after",
@@ -836,6 +839,29 @@ def _run_maestro_transport_recovery(
         capture_output=True,
         env=run_env,
     )
+
+
+def _prepare_device_for_maestro(
+    *,
+    context: RuntimeContext,
+    serial: str,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    run_env = env or context.env
+    commands = (
+        ["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+        ["adb", "-s", serial, "shell", "wm", "dismiss-keyguard"],
+        ["adb", "-s", serial, "shell", "cmd", "statusbar", "collapse"],
+        ["adb", "-s", serial, "shell", "settings", "put", "system", "screen_off_timeout", "600000"],
+        ["adb", "-s", serial, "shell", "svc", "power", "stayon", "true"],
+    )
+    for command in commands:
+        context.run(
+            command,
+            check=False,
+            capture_output=True,
+            env=run_env,
+        )
 
 
 def _remote_file_size_bytes(context: RuntimeContext, serial: str, path: str) -> int | None:
@@ -2376,41 +2402,22 @@ def _run_send_capture_stage(
                 "      visible: \"Advanced\"",
                 "    commands:",
                 "      - tapOn: \"Advanced\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Advanced controls\"",
-                "    commands:",
-                "      - tapOn: \"QWEN_0_8B\"",
-                "      - back",
                 "- takeScreenshot: \"send-kickoff-02-ready\"",
-                "- tapOn: \"Message\"",
+                "- tapOn:",
+                "    id: \"composer_input\"",
                 "- takeScreenshot: \"send-kickoff-03-message-tab\"",
                 "- eraseText",
                 f"- inputText: {json.dumps(prompt)}",
                 "- takeScreenshot: \"send-kickoff-04-typed\"",
                 "- runFlow:",
                 "    when:",
-                "      notVisible: \"Send\"",
+                "      notVisible:",
+                "        id: \"send_button\"",
                 "    commands:",
-                "      - back",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Pocket GPT\"",
-                "    commands:",
-                "      - tapOn: \"Pocket GPT\"",
-                "      - tapOn: \"Message\"",
-                "      - eraseText",
-                f"      - inputText: {json.dumps(prompt)}",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"PocketAgent\"",
-                "    commands:",
-                "      - tapOn: \"PocketAgent\"",
-                "      - tapOn: \"Message\"",
-                "      - eraseText",
-                f"      - inputText: {json.dumps(prompt)}",
+                "      - hideKeyboard",
                 "- takeScreenshot: \"send-kickoff-05-before-send\"",
-                "- tapOn: \"Send\"",
+                "- tapOn:",
+                "    id: \"send_button\"",
                 f"- assertVisible: {json.dumps(prompt)}",
                 "- takeScreenshot: \"send-kickoff-06-after-send\"",
             ]
@@ -3116,6 +3123,7 @@ def _write_journey_report(
         report = _write_runtime_log_signal_artifacts(Path(step.logcat))
         if report is not None:
             step_signal_reports[step.name] = report
+    normalized_steps = [_normalize_journey_report_step(step) for step in steps]
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "serial": serial,
@@ -3166,7 +3174,7 @@ def _write_journey_report(
                 "first_answer_completed": step.first_answer_completed,
                 "follow_up_completed": step.follow_up_completed,
             }
-            for step in steps
+            for step in normalized_steps
         ],
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3183,7 +3191,7 @@ def _write_journey_report(
         "| Step | Mode | Phase | Status | Duration (s) | Elapsed (ms) | Runtime | Backend | Model | Placeholder | Response | Role | Non-empty | First token | Request ID | Finish reason | Terminal | First token ms | Completion ms | First-session stage | Advanced unlocked | First answer done | Follow-up done |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
-    for step in steps:
+    for step in normalized_steps:
         signal_report = step_signal_reports.get(step.name)
         lines.append(
             "| "
@@ -3221,6 +3229,33 @@ def _write_journey_report(
                 lines.append(f"  - `{shot}`")
         lines.append("")
     summary_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _normalize_journey_report_step(step: JourneyStepResult) -> JourneyStepResult:
+    if not _is_send_capture_step(step.name) or step.status != "failed":
+        return step
+    return replace(
+        step,
+        phase=step.phase or _derive_failed_send_capture_phase(step.failure_signature),
+        runtime_status=step.runtime_status or "unknown",
+        backend=step.backend or "unknown",
+        active_model_id=step.active_model_id or "unknown",
+        placeholder_visible=step.placeholder_visible if step.placeholder_visible is not None else False,
+    )
+
+
+def _is_send_capture_step(name: str) -> bool:
+    return name == "send-capture" or name.endswith(":send-capture")
+
+
+def _derive_failed_send_capture_phase(failure_signature: str | None) -> str:
+    signature = (failure_signature or "").lower()
+    if "timeout" in signature:
+        return "timeout"
+    if "first_token" in signature or "first-token" in signature or "first token" in signature:
+        return "first_token"
+    return "error"
+
 
 def _normalize_test_mode(mode: str, context: RuntimeContext) -> str:
     canonical = mode.strip().lower()
@@ -3567,6 +3602,113 @@ def _run_maestro_flow(
     )
 
 
+def _maestro_flow_clears_app_state(flow_path: Path) -> bool:
+    return _maestro_flow_clear_state_value(flow_path) is True
+
+
+def _maestro_flow_clear_state_value(flow_path: Path) -> bool | None:
+    if yaml is None:
+        return _maestro_flow_clear_state_value_from_text(flow_path.read_text(encoding="utf-8"))
+    try:
+        docs = list(yaml.safe_load_all(flow_path.read_text(encoding="utf-8")))
+    except Exception:
+        return _maestro_flow_clear_state_value_from_text(flow_path.read_text(encoding="utf-8"))
+    return _find_maestro_clear_state_value(docs)
+
+
+def _maestro_flow_clear_state_value_from_text(text: str) -> bool | None:
+    previous_launch = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("- launchApp:"):
+            if "clearState: true" in line:
+                return True
+            if "clearState: false" in line:
+                return False
+            previous_launch = True
+            continue
+        if previous_launch and line.startswith(f"{_MAESTRO_CLEAR_STATE_KEY}:"):
+            value = line.split(":", 1)[1].strip().lower()
+            if value in {"true", "false"}:
+                return value == "true"
+        if line.startswith("- ") and not line.startswith("- launchApp:"):
+            previous_launch = False
+    return None
+
+
+def _find_maestro_clear_state_value(value: Any) -> bool | None:
+    if isinstance(value, list):
+        for item in value:
+            found = _find_maestro_clear_state_value(item)
+            if found is not None:
+                return found
+    if isinstance(value, dict):
+        launch_app = value.get(_MAESTRO_LAUNCH_APP_KEY)
+        if isinstance(launch_app, dict) and _MAESTRO_CLEAR_STATE_KEY in launch_app:
+            clear_state = launch_app[_MAESTRO_CLEAR_STATE_KEY]
+            if isinstance(clear_state, bool):
+                return clear_state
+        for item in value.values():
+            found = _find_maestro_clear_state_value(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _materialize_maestro_flow_without_clear_state(flow_path: Path, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    shared_dir = flow_path.parent / "shared"
+    if shared_dir.exists() and shared_dir.is_dir():
+        shutil.copytree(shared_dir, output_dir / "shared", dirs_exist_ok=True)
+    target = output_dir / flow_path.name
+    text = flow_path.read_text(encoding="utf-8")
+    if yaml is None:
+        target.write_text(text.replace(f"{_MAESTRO_CLEAR_STATE_KEY}: true", f"{_MAESTRO_CLEAR_STATE_KEY}: false"), encoding="utf-8")
+        return target
+
+    try:
+        docs = list(yaml.safe_load_all(text))
+    except Exception:
+        target.write_text(text.replace(f"{_MAESTRO_CLEAR_STATE_KEY}: true", f"{_MAESTRO_CLEAR_STATE_KEY}: false"), encoding="utf-8")
+        return target
+
+    rewritten = _rewrite_maestro_clear_state(copy.deepcopy(docs))
+    rendered = "\n---\n".join(
+        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True).strip()
+        for doc in rewritten
+        if doc is not None
+    )
+    target.write_text(f"{rendered}\n", encoding="utf-8")
+    return target
+
+
+def _rewrite_maestro_clear_state(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_rewrite_maestro_clear_state(item) for item in value]
+    if isinstance(value, dict):
+        launch_app = value.get(_MAESTRO_LAUNCH_APP_KEY)
+        if isinstance(launch_app, dict) and launch_app.get(_MAESTRO_CLEAR_STATE_KEY) is True:
+            launch_app[_MAESTRO_CLEAR_STATE_KEY] = False
+        return {key: _rewrite_maestro_clear_state(item) for key, item in value.items()}
+    return value
+
+
+def _clear_app_state_before_seeded_maestro(
+    *,
+    context: RuntimeContext,
+    serial: str,
+    app_package: str,
+    env: Mapping[str, str],
+) -> None:
+    print_step("Clearing app state before real-runtime seeding for Maestro clear-state flow.")
+    context.run(
+        ["adb", "-s", serial, "shell", "pm", "clear", app_package],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
 def _lane_maestro_impl(raw_args: Sequence[str], context: RuntimeContext, strict: bool = True) -> None:
     args = _parse_maestro_lane_args(raw_args)
 
@@ -3614,8 +3756,6 @@ def _lane_maestro_impl(raw_args: Sequence[str], context: RuntimeContext, strict:
                 continue
             context.run(prepared, check=True, env=device_env)
 
-        prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
-
         selected_flows = _resolve_maestro_flow_selection(lane_cfg.flows, args.flows)
         selected_flow_paths = [REPO_ROOT / flow for flow in selected_flows]
         selected_flow_paths = _filter_maestro_flows_by_tags(
@@ -3626,16 +3766,36 @@ def _lane_maestro_impl(raw_args: Sequence[str], context: RuntimeContext, strict:
         if not selected_flow_paths:
             raise DevctlError("CONFIG_ERROR", "No Maestro flows selected.")
 
+        real_runtime_prepared = False
         for flow_path in selected_flow_paths:
             if not flow_path.exists():
                 raise DevctlError("CONFIG_ERROR", f"Missing Maestro flow: {flow_path}")
+            flow_to_run = flow_path
+            debug_output_dir = debug_root / flow_path.stem
+            if _maestro_flow_clears_app_state(flow_path):
+                _clear_app_state_before_seeded_maestro(
+                    context=context,
+                    serial=serial,
+                    app_package=real_runtime_cfg.app_package,
+                    env=device_env,
+                )
+                prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
+                real_runtime_prepared = True
+                flow_to_run = _materialize_maestro_flow_without_clear_state(
+                    flow_path,
+                    output_dir=debug_output_dir / "seeded-flow",
+                )
+            elif not real_runtime_prepared:
+                prepare_real_runtime_env(context, serial, artifact_root=artifact_root)
+                real_runtime_prepared = True
+            _prepare_device_for_maestro(context=context, serial=serial, env=device_env)
             step = _run_maestro_flow(
                 context=context,
                 maestro_bin=maestro_bin,
                 serial=serial,
                 app_package=real_runtime_cfg.app_package,
-                flow_path=flow_path,
-                debug_output_dir=debug_root / flow_path.stem,
+                flow_path=flow_to_run,
+                debug_output_dir=debug_output_dir,
                 env=device_env,
             )
             if step.status != "passed":

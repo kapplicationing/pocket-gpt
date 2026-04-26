@@ -14,6 +14,7 @@ fi
 
 BUILD_APK=1
 API_LEVELS=(34)
+RUN_ROOT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +24,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --api-level)
       API_LEVELS=("${2:?missing api level}")
+      shift 2
+      ;;
+    --run-root)
+      RUN_ROOT="${2:?missing run root}"
       shift 2
       ;;
     *)
@@ -42,23 +47,160 @@ if [[ -z "${APK_PATH}" || ! -f "${APK_PATH}" ]]; then
   exit 1
 fi
 
-mkdir -p tmp/maestro-cloud-smoke
+timestamp_utc() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
 
-EXIT_CODE=0
+write_json_file() {
+  local output_path="$1"
+  local payload="$2"
+  PAYLOAD="${payload}" python3 - "$output_path" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(json.loads(os.environ["PAYLOAD"]), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+}
+
+if [[ -z "${RUN_ROOT}" ]]; then
+  RUN_ROOT="tmp/maestro-cloud-smoke/$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+
+mkdir -p "${RUN_ROOT}"
+
+GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+API_LEVELS_VALUE="$(IFS=,; echo "${API_LEVELS[*]}")"
+STARTED_AT_VALUE="$(timestamp_utc)"
+ROOT_MANIFEST="$(APK_PATH_VALUE="${APK_PATH}" BUILD_APK_VALUE="${BUILD_APK}" GIT_COMMIT_VALUE="${GIT_COMMIT}" API_LEVELS_VALUE="${API_LEVELS_VALUE}" RUN_ROOT_VALUE="${RUN_ROOT}" STARTED_AT_VALUE="${STARTED_AT_VALUE}" python3 - <<'PY'
+import json
+import os
+
+api_levels = os.environ["API_LEVELS_VALUE"].split(",")
+print(json.dumps({
+    "apk_path": os.environ["APK_PATH_VALUE"],
+    "api_levels": api_levels,
+    "build_apk": os.environ["BUILD_APK_VALUE"] == "1",
+    "command": "bash scripts/dev/maestro-cloud-smoke.sh",
+    "flows_root": "tests/maestro-cloud/",
+    "git_commit": os.environ["GIT_COMMIT_VALUE"],
+    "include_tags": ["cloud-smoke"],
+    "run_root": os.environ["RUN_ROOT_VALUE"],
+    "started_at_utc": os.environ["STARTED_AT_VALUE"],
+    "status": "running",
+}, sort_keys=True))
+PY
+)"
+write_json_file "${RUN_ROOT}/run-manifest.json" "${ROOT_MANIFEST}"
+
+API_STATUS_FILES=()
+
 for api_level in "${API_LEVELS[@]}"; do
-  run_dir="tmp/maestro-cloud-smoke/api-${api_level}"
-  mkdir -p "${run_dir}"
+  api_dir="${RUN_ROOT}/api-${api_level}"
+  mkdir -p "${api_dir}"
+  api_manifest="$(API_LEVEL_VALUE="${api_level}" APK_PATH_VALUE="${APK_PATH}" JUNIT_PATH_VALUE="${api_dir}/junit.xml" API_DIR_VALUE="${api_dir}" STARTED_AT_VALUE="$(timestamp_utc)" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({
+    "android_api_level": os.environ["API_LEVEL_VALUE"],
+    "apk_path": os.environ["APK_PATH_VALUE"],
+    "command": [
+        "maestro", "cloud",
+        "--android-api-level", os.environ["API_LEVEL_VALUE"],
+        "--device-locale", "en_US",
+        "--app-file", os.environ["APK_PATH_VALUE"],
+        "--flows", "tests/maestro-cloud/",
+        "--include-tags", "cloud-smoke",
+        "--format", "junit",
+        "--output", os.environ["JUNIT_PATH_VALUE"],
+    ],
+    "flows_root": "tests/maestro-cloud/",
+    "include_tags": ["cloud-smoke"],
+    "junit_path": os.environ["JUNIT_PATH_VALUE"],
+    "run_dir": os.environ["API_DIR_VALUE"],
+    "started_at_utc": os.environ["STARTED_AT_VALUE"],
+    "status": "running",
+}, sort_keys=True))
+PY
+)"
+  write_json_file "${api_dir}/run-manifest.json" "${api_manifest}"
+
   echo "Running Maestro Cloud smoke suite on Android API ${api_level}"
-  if ! maestro cloud \
+  set +e
+  maestro cloud \
     --android-api-level "${api_level}" \
     --device-locale en_US \
     --app-file "${APK_PATH}" \
     --flows tests/maestro-cloud/ \
     --include-tags cloud-smoke \
     --format junit \
-    --output "${run_dir}/junit.xml" | tee "${run_dir}/run.log"; then
-    EXIT_CODE=1
-  fi
+    --output "${api_dir}/junit.xml" 2>&1 | tee "${api_dir}/cli-output.log"
+  command_exit_code=${PIPESTATUS[0]}
+  set -e
+
+  api_status_payload="$(python3 -m tools.devctl.cloud_artifacts status \
+    --android-api-level "${api_level}" \
+    --cli-exit-code "${command_exit_code}" \
+    --cli-output "${api_dir}/cli-output.log" \
+    --completed-at "$(timestamp_utc)" \
+    --junit "${api_dir}/junit.xml")"
+  write_json_file "${api_dir}/status.json" "${api_status_payload}"
+  API_STATUS_FILES+=("${api_dir}/status.json")
 done
+
+ROOT_STATUS_PAYLOAD="$(python3 -m tools.devctl.cloud_artifacts aggregate \
+  --completed-at "$(timestamp_utc)" \
+  --run-root "${RUN_ROOT}" \
+  "${API_STATUS_FILES[@]}")"
+write_json_file "${RUN_ROOT}/status.json" "${ROOT_STATUS_PAYLOAD}"
+
+OVERALL_STATUS="$(STATUS_PATH="${RUN_ROOT}/status.json" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+payload = json.loads(Path(os.environ["STATUS_PATH"]).read_text(encoding="utf-8"))
+print(payload.get("status", "failed"))
+PY
+)"
+
+case "${OVERALL_STATUS}" in
+  passed)
+    EXIT_CODE=0
+    ;;
+  blocked_external_account_setup)
+    EXIT_CODE=2
+    ;;
+  *)
+    EXIT_CODE=1
+    ;;
+esac
+
+UPDATED_ROOT_MANIFEST="$(APK_PATH_VALUE="${APK_PATH}" BUILD_APK_VALUE="${BUILD_APK}" GIT_COMMIT_VALUE="${GIT_COMMIT}" API_LEVELS_VALUE="${API_LEVELS_VALUE}" RUN_ROOT_VALUE="${RUN_ROOT}" STARTED_AT_VALUE="${STARTED_AT_VALUE}" OVERALL_STATUS_VALUE="${OVERALL_STATUS}" python3 - <<'PY'
+import json
+import os
+
+api_levels = os.environ["API_LEVELS_VALUE"].split(",")
+print(json.dumps({
+    "apk_path": os.environ["APK_PATH_VALUE"],
+    "api_levels": api_levels,
+    "build_apk": os.environ["BUILD_APK_VALUE"] == "1",
+    "command": "bash scripts/dev/maestro-cloud-smoke.sh",
+    "flows_root": "tests/maestro-cloud/",
+    "git_commit": os.environ["GIT_COMMIT_VALUE"],
+    "include_tags": ["cloud-smoke"],
+    "run_root": os.environ["RUN_ROOT_VALUE"],
+    "started_at_utc": os.environ["STARTED_AT_VALUE"],
+    "status": os.environ["OVERALL_STATUS_VALUE"],
+}, sort_keys=True))
+PY
+)"
+write_json_file "${RUN_ROOT}/run-manifest.json" "${UPDATED_ROOT_MANIFEST}"
+
+echo "Maestro Cloud smoke artifacts: ${RUN_ROOT}"
 
 exit "${EXIT_CODE}"

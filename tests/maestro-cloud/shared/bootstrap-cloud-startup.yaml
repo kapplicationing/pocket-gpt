@@ -4,22 +4,74 @@ appId: com.pocketagent.android
     clearState: true
 - runFlow:
     when:
-      visible: "Welcome to Pocket GPT"
+      notVisible: "Pocket GPT"
     commands:
-      - tapOn: "Next"
       - extendedWaitUntil:
-          visible: "Step 2 of 3"
+          visible: "Welcome"
           timeout: 20000
-      - tapOn: "Next"
-      - extendedWaitUntil:
-          visible: "Step 3 of 3"
-          timeout: 20000
-      - tapOn: "Get started"
 - runFlow:
     when:
-      visible: "Skip"
+      notVisible: "Welcome"
     commands:
-      - tapOn: "Skip"
+      - extendedWaitUntil:
+          visible: "Pocket GPT"
+          timeout: 20000
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_skip"
+    commands:
+      - tapOn:
+          id: "onboarding_skip"
+- runFlow:
+    when:
+      visible:
+        text: "Skip"
+    commands:
+      - tapOn:
+          text: "Skip"
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_next"
+    commands:
+      - tapOn:
+          id: "onboarding_next"
+- runFlow:
+    when:
+      visible:
+        text: "Next"
+    commands:
+      - tapOn:
+          text: "Next"
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_next"
+    commands:
+      - tapOn:
+          id: "onboarding_next"
+- runFlow:
+    when:
+      visible:
+        text: "Next"
+    commands:
+      - tapOn:
+          text: "Next"
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_get_started"
+    commands:
+      - tapOn:
+          id: "onboarding_get_started"
+- runFlow:
+    when:
+      visible:
+        text: "Get started"
+    commands:
+      - tapOn:
+          text: "Get started"
 - runFlow:
     when:
       visible: "Get ready"
@@ -27,6 +79,8 @@ appId: com.pocketagent.android
       - tapOn: "Get ready"
 - runFlow:
     when:
-      visible: "Refresh"
+      visible:
+        id: "refresh_button"
     commands:
-      - tapOn: "Refresh"
+      - tapOn:
+          id: "refresh_button"

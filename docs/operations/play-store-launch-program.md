@@ -6,7 +6,7 @@ Owner: Product + Tech Lead
 Mutable status stays in `docs/operations/execution-board.md`.
 Program learnings stay in `docs/operations/launch-program-learnings.md`.
 
-Current status note: launch remains `Hold`. The retained provisioning `SIGILL` class is no longer the first live failure, and the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight rather than a new generic native-runtime defect. That local code path is now understood and fixed. `android-instrumented` now has a current-window pass, but the active remaining blockers are still missing final hosted verdicts for corrected cloud uploads (`runtime-ready` / `model-management` / `send-after-ready`), wireless Samsung Maestro harness instability on the physical canaries before app logic begins, missing strict `journey` current-window proof, and the still-incomplete moderated WP-13 packet.
+Current status note: launch remains `Hold`. The retained provisioning `SIGILL` class is no longer the first live failure, and the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight rather than a new generic native-runtime defect. That local code path is now understood and fixed. The fresh local authoritative proof currently in hand is the `android-instrumented` pass recorded under `tmp/devctl-artifacts/2026-04-26/adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp/android-instrumented/20260426-142357/`. The active remaining blockers are now explicitly infrastructure-class machine-evidence blockers plus the still-missing moderated packet: the latest hosted `send-after-ready` uploads (`mupload_01kq4fc793fdathk37tk97jkmd`, `mupload_01kq4fq5hpf6f9m53fm7pq8ew0`) are accepted by Maestro Cloud but remain `PENDING` without hosted verdicts, wireless Samsung Maestro still fails in the gRPC/bootstrap layer before app logic begins, and the corrected strict `journey` kickoff confirms the same `localhost:7001` bootstrap failure before app logic begins. Branch-wise, local `main` is already fast-forwarded to the same tip as `codex/launch-readiness-implementation`; the remaining branch-closeout work is publication from local `main` to `origin/main`, not an internal merge between those two local refs.
 
 Execution policy for the active program:
 
@@ -17,10 +17,10 @@ Execution policy for the active program:
 
 Branch/merge note for the active program:
 
-1. `codex/launch-readiness-implementation` is the current launch integration branch and exists to keep the launch stack linear on top of local `main` while the final blockers are being cleared.
-2. Local `main` is not the same thing as `origin/main` in this repo, so the merge-back plan must account for the local-main base as well as the launch commits layered above it.
-3. Do not treat already-subsumed older `codex/*` branches as separate merge targets during launch closeout.
-4. Once the branch is green enough for preservation, merge it back by fast-forwarding local `main` to the launch branch tip and pushing `main`, rather than replaying the stack through cherry-picks or pretending the remote already contains the local-main base.
+1. `codex/launch-readiness-implementation` is still the preserved name for the launch integration lineage, but local `main` is already at the same tip.
+2. The live branch-hygiene gap is local `main` versus `origin/main`, not `main` versus `codex/launch-readiness-implementation`.
+3. Older `codex/*` branches appear subsumed into local `main`; `cursor/cloud-agent-1775007300791-5ig66` remains intentionally separate and should not be merged wholesale into launch closeout.
+4. Safe merge-back/publication now means auditing `origin/main..main`, validating the final gate state, and then pushing `main` once the launch hold is cleared, rather than inventing another internal merge step.
 
 ## Objective
 
@@ -44,13 +44,81 @@ This program is complete only when:
 
 ## Critical Path
 
-1. Startup/readiness and multimodal packaging contract closure
-2. Timeout/cancel/send reliability closure
-3. Cloud-first required reruns with a clean hosted `send-after-ready` verdict
-4. Authoritative `android-instrumented` and strict `journey` reruns
-5. Narrow real-device canary confirmation and final brush
-6. Moderated WP-13 packet
-7. Release decision and Play Store submission prep
+1. Preserve the current authoritative `android-instrumented` pass as the local proof already in hand.
+2. Close hosted/default machine-verifiable gaps, with special focus on a clean hosted `send-after-ready` verdict.
+3. Close strict `journey` current-window proof.
+4. Use one narrow real-device Samsung canary only as final OEM/runtime confirmation once the cloud/default path is materially stable.
+5. Complete the moderated WP-13 packet.
+6. Re-run the release decision flow and finalize the Play Store submission package.
+7. Publish local `main` to `origin/main` only after the launch hold is cleared.
+
+## Current Evidence Anchors
+
+1. Current local authoritative proof: `tmp/devctl-artifacts/2026-04-26/adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp/android-instrumented/20260426-142357/`
+2. Current repo-side launch snapshot: `build/devctl/launch-readiness/launch-readiness-report.md`
+3. Current hosted/default open items: `runtime-ready`, `model-management`, `send-after-ready`, plus strict `journey`
+
+## Current Execution Graph
+
+### Stream A: Deterministic Technical Evidence
+
+This is the critical stream.
+
+Dependencies:
+
+1. Uses the fixed startup/readiness and multimodal packaging path already on local `main`.
+2. Must finish before final moderated measurement or publication.
+
+Current work:
+
+1. Hosted/default `runtime-ready` / `model-management` / `send-after-ready`
+2. Strict `journey`
+3. Preservation of the current-window `android-instrumented` pass
+
+### Stream B: Human-Required Usability Closure
+
+This stream can prepare early, but should measure late.
+
+Dependencies:
+
+1. Packet prep can run in parallel with Stream A.
+2. Final moderated runs should wait until Stream A is materially stable.
+
+Current work:
+
+1. WP-13 packet cleanup
+2. Facilitator/script readiness
+3. Final moderated metrics collection
+
+### Stream C: Release Governance And Package Readiness
+
+This stream can prepare in parallel, but can only close on verified evidence.
+
+Dependencies:
+
+1. Can prepare in parallel with Streams A and B.
+2. Must consume current evidence from Stream A and measured values from Stream B.
+
+Current work:
+
+1. `PROD-12`, `PROD-11`, `SEC-02`, `MKT-08`, `MKT-10`, `PROD-13`
+2. Claim/copy freeze against verified behavior only
+3. Launch decision memo and rollout recommendation
+
+### Stream D: Branch Hygiene And Publication
+
+This is governance work, not product-scope work.
+
+Dependencies:
+
+1. Can be audited in parallel immediately.
+2. Final publication waits on Streams A-C.
+
+Current work:
+
+1. Keep local `main` and `codex/launch-readiness-implementation` recognized as the same launch tip.
+2. Keep `cursor/cloud-agent-1775007300791-5ig66` out of the launch path unless a specific change is deliberately extracted.
+3. Publish by pushing local `main` to `origin/main` after final gate review.
 
 ## Team Split
 
@@ -165,7 +233,7 @@ Deliverables:
 2. Journey send-capture output with `phase=completed` and `placeholder_visible=false`
 3. Updated evidence notes with artifact roots
 4. Cloud/device parity proof for deterministic lanes
-5. Fresh authoritative `android-instrumented` and strict `journey` pass IDs
+5. Preserved current-window `android-instrumented` pass ID plus fresh strict `journey` pass ID
 6. One narrow real-device canary confirmation after cloud evidence is materially stable
 
 Dependency rule:
@@ -233,7 +301,7 @@ Dependency rule:
 3. Run cloud-first machine-verifiable evidence before scheduling real-device confirmation or moderated sessions.
 4. Keep machine-verifiable evidence and human-required evidence on separate tracks.
 5. Run release-date planning only when the readiness report and current evidence both support it.
-6. Before any closeout merge, confirm the launch branch still contains the intended linear stack and that no unrelated visible branch needs deliberate extraction.
+6. Before publishing `main`, confirm it still matches `codex/launch-readiness-implementation`, audit `origin/main..main`, and verify that no unrelated visible branch needs deliberate extraction.
 
 ## Completion Rule
 

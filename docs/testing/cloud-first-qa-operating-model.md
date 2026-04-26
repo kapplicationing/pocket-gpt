@@ -85,11 +85,11 @@ Move repeatable QA evidence collection to cloud/device automation wherever the o
 
 ## Unblock Sequence For Current Work
 
-1. Keep the current blocker chain honest: the old retained provisioning blocker was narrowed to missing `mmproj` sync in `devctl` preflight and has been addressed in local code; local authoritative onboarding proof now exists, but the remaining open work is a clean hosted `send-after-ready` verdict, current-window authoritative lane evidence, and incomplete human-required evidence.
+1. Keep the current blocker chain honest: the old retained provisioning blocker was narrowed to missing `mmproj` sync in `devctl` preflight and has been addressed in local code; local authoritative onboarding proof and a current-window `android-instrumented` pass now exist, but the remaining open work is a clean hosted `send-after-ready` verdict, strict `journey` current-window proof, the remaining `maestro` machine-evidence gap, and incomplete human-required evidence.
 2. Run the required hosted/default machine-verifiable flows first and attach pass IDs, upload ids, and artifact roots to the active tickets.
-3. If hosted `send-after-ready` returns `infra_status_fetch_failed` or otherwise lacks hosted results, keep it open as incomplete machine evidence rather than downgrading it into a product regression without a hosted verdict.
+3. If hosted `send-after-ready` returns `infra_status_fetch_failed`, remains `PENDING` without a launched flow verdict, or otherwise lacks hosted results, keep it open as incomplete machine evidence rather than downgrading it into a product regression without a hosted verdict.
 4. Use agents to inspect failures, compare deltas, and narrow remaining issues.
-5. Re-run authoritative `android-instrumented` and strict `journey` separately once the cloud/default technical path is materially stable.
+5. Preserve the current authoritative `android-instrumented` artifact set unless the code under review invalidates it, and re-run strict `journey` once the cloud/default technical path is materially stable.
 6. Run one narrow physical-device canary after the cloud path is materially stable, and do not let wireless Samsung harness noise overwrite a clean hosted result.
 7. Run the moderated WP-13 packet only after the scripted gates are green or the remaining question is explicitly subjective.
 8. Publish a promote/iterate/hold recommendation only after both technical and human-required evidence are present.

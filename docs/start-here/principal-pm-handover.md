@@ -63,10 +63,16 @@ The retained gate evidence shows that provisioning preflight was previously bloc
 The current blocker chain is more operational than architectural:
 
 1. `android-instrumented` now has a current-window pass, but the required promotion set is still incomplete because `maestro` and strict `journey` remain open,
-2. corrected cloud uploads for `runtime-ready`, `model-management`, and `send-after-ready` have been accepted, but Maestro Cloud has not yet returned final hosted verdicts during bounded polling,
+2. corrected cloud uploads for `runtime-ready`, `model-management`, and `send-after-ready` have been accepted, but the latest targeted `send-after-ready` uploads remain `PENDING` in Maestro Cloud without hosted verdicts during bounded polling,
 3. wireless Samsung Maestro remains a physical-canary harness blocker before app logic begins, even after retry and transport recovery,
-4. strict `journey` still remains an authoritative gate row even though cloud-first is the default machine-verifiable execution path,
+4. strict `journey` still remains an authoritative gate row even though cloud-first is the default machine-verifiable execution path, and the corrected kickoff rerun still confirms a local `localhost:7001` Maestro bootstrap failure before app logic rather than a new app regression,
 5. and the moderated WP-13 packet is still incomplete.
+
+Current evidence anchors the PM should use:
+
+1. Local authoritative proof already in hand: `tmp/devctl-artifacts/2026-04-26/adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp/android-instrumented/20260426-142357/`
+2. Repo-side launch snapshot: `build/devctl/launch-readiness/launch-readiness-report.md`
+3. Current machine-evidence gap list: hosted/default `runtime-ready` / `model-management` / `send-after-ready`, plus strict `journey`
 
 Story-level gate picture from the retained launch matrix:
 
@@ -122,7 +128,7 @@ The critical path is:
 
 1. restore current-window cloud-first technical evidence where hosted execution is valid,
 2. get a clean hosted verdict for `send-after-ready`,
-3. close the authoritative `android-instrumented` and strict `journey` rows,
+3. preserve the current authoritative `android-instrumented` proof and close the strict `journey` row,
 4. confirm the result on one narrow physical-device canary once the harness is usable enough for final brush,
 5. complete the minimum moderated usability packet,
 6. then make the release decision.
@@ -139,10 +145,10 @@ Those docs define the owner split, dependency order, and final submission packag
 
 Branch hygiene note:
 
-1. The current launch stack is intentionally isolated on `codex/launch-readiness-implementation`, which sits linearly on top of local `main`, not directly on `origin/main`.
-2. Local `main` itself has diverged from `origin/main`, so merge-back planning must account for both the local-main base and the launch commits above it.
-3. Older `codex/*` branches already appear subsumed into `main`; they are not separate launch-closeout streams that need independent merge planning.
-4. Once the branch is green and the working tree is clean, the safest merge-back is to fast-forward local `main` to the launch branch tip and then push `main`, after confirming that the local-main-only base commits are intentionally part of what should reach `origin/main`.
+1. `codex/launch-readiness-implementation` was the launch integration branch while the stack was still moving, but local `main` is now already fast-forwarded to the same tip.
+2. The branch-hygiene gap the PM should manage is therefore local `main` versus `origin/main`, not an unfinished merge between local refs.
+3. Older `codex/*` branches already appear subsumed into `main`; `cursor/cloud-agent-1775007300791-5ig66` remains intentionally separate and should not be swept into launch closeout wholesale.
+4. The safe closeout path is now: keep the worktree clean, audit `origin/main..main`, confirm no deliberate side-branch extraction is needed, validate the final gate state, then push `main`.
 
 ## Evidence Quality
 
@@ -153,7 +159,7 @@ Evidence strength is mixed.
    - feature and UX evidence showing the core MVP surface exists
    - March QA matrix and retained closure evidence for implemented product areas
 2. Weak:
-   - latest current-window promotion-path evidence is still missing because required device lanes are not green yet
+   - the current-window promotion-path evidence set is still incomplete even though a fresh `android-instrumented` pass now exists locally, because hosted/default `maestro` gaps and strict `journey` are still open
    - moderated WP-13 packet still lacks measured values
    - release readiness cannot be inferred from earlier implementation evidence alone
 
@@ -203,9 +209,9 @@ No public or firm internal release date should be committed until:
 
 Branch hygiene remains real operational work, not just documentation:
 
-1. The current branch audit still shows `codex/launch-readiness-implementation` stacked directly on top of local `main`.
-2. Local `main` is still ahead of `origin/main`, so merge-back planning must account for the local-main base as well as the launch-closeout commits above it.
-3. The branch story is therefore still linear, but it is not yet "already merged" or safe to describe as a trivial push to remote `main`.
+1. The current branch audit shows local `main` and `codex/launch-readiness-implementation` already at the same tip, so internal merge-back is no longer the open question.
+2. Local `main` is still ahead of `origin/main`, so publication planning must still account for the full local-main base that is about to be pushed.
+3. The branch story is linear, but it is not safe to describe as "already published" until `origin/main` is intentionally updated.
 
 ## Recommended Follow-Up Plan
 

@@ -185,18 +185,18 @@ What to do again:
 
 What happened:
 
-1. The launch program work was isolated into `codex/launch-readiness-implementation` as a clean integration branch on top of local `main`, not directly on `origin/main`.
-2. That matters because local `main` had already diverged from `origin/main`, so the launch stack was never a standalone remote-only branch story.
+1. The launch program work was isolated into `codex/launch-readiness-implementation` while the stack was still moving, but local `main` was later fast-forwarded to the same tip.
+2. That shifted the operational risk from "did we merge the launch branch back?" to "are we describing local publication truth correctly versus `origin/main`?"
 3. Older `codex/*` branches were already subsumed, while one unrelated omnibus `cursor/*` branch remained separate and unsafe to merge wholesale.
-4. Without an explicit branch audit, it would have been easy to overstate branch sprawl, miss the local-vs-remote base divergence, or describe the merge-back path as simpler than it really is.
+4. Without an explicit branch audit, it would have been easy to overstate branch sprawl, miss the local-vs-remote publication gap, or keep docs describing a fake unmerged state after local `main` had already absorbed the stack.
 
 What to do again:
 
-1. Keep the launch branch linear and ahead-only on the primary local development branch.
-2. Audit local `main` versus `origin/main` before describing merge-back as a simple push.
+1. Keep the launch branch linear while the stack is volatile, then fast-forward local `main` to it early once the stack stabilizes.
+2. Audit local `main` versus `origin/main` before describing work as merged or published.
 3. Audit other visible branches before cherry-picking anything during release closeout.
 4. Preserve the launch stack as one linear unit instead of recreating it through ad hoc cherry-picks at the end.
-5. Merge back by fast-forwarding local `main` to the launch branch tip only after the working tree is clean, then push `main` once the local-main base commits are confirmed intentional for publication.
+5. Once local `main` already contains the launch stack, describe the remaining operation as publication to `origin/main`, not another internal merge.
 
 ### 14. Simple-first completion is not the same thing as `advancedUnlocked` proof
 
@@ -240,6 +240,20 @@ What to do again:
 2. Preserve the upload id, upload URL, and app binary id so the hosted run can still be inspected externally if needed.
 3. Do not let a later null-status polling failure overwrite the last clean product finding from an earlier hosted run.
 
+### 16A. A corrected local `journey` kickoff can still prove only harness truth, not product truth
+
+What happened:
+
+1. The strict `journey` kickoff generator was corrected to follow the real shipped UI contract (`Get ready`, `Model library`, `Load last used`, `refresh_button`, `send_button`) instead of the stale `Runtime: Ready` wording.
+2. After that correction, the canary rerun still failed before app logic in the same Maestro bootstrap layer with `io.grpc.StatusRuntimeException: UNAVAILABLE` and `Connection refused: localhost:7001`.
+3. That means the new rerun was still useful, but only as confirmation that the blocker class remains harness/bootstrap rather than a product-flow regression.
+
+What to do again:
+
+1. When a corrected flow still fails before app logic, record that as stronger evidence about the harness class instead of misreporting it as a fresh product failure.
+2. Preserve the corrected kickoff artifact alongside the failure log so reviewers can see that stale selector drift is no longer the reason the lane is red.
+3. Keep strict `journey` open as missing current-window proof until the harness-class blocker is cleared, but do not reopen already-fixed app contracts without new app-side evidence.
+
 ### 17. Local authoritative onboarding proof and hosted send proof are different closure steps
 
 What happened:
@@ -254,6 +268,18 @@ What to do again:
 2. When hosted `send-after-ready` lacks a clean verdict, classify it as incomplete machine evidence, not as proof that onboarding or the setup contract regressed.
 3. Keep PM and launch-gate docs explicit about which part is implemented in code, which part has local authoritative proof, and which part still lacks current-window hosted or lane evidence.
 4. Use the repo-side cloud artifact parser to separate real hosted flow failures from Maestro Cloud polling failures before updating the board or PM handover.
+
+### 17B. A current-window pass should be named by artifact root, not just described in prose
+
+What happened:
+
+1. Once local `android-instrumented` went green, several docs were still saying only that "a current-window pass exists" without pointing PM or ops to the exact artifact root.
+2. That made the truth technically correct but operationally weaker, because reviewers still had to guess which run was the preserved authority versus which evidence remained open.
+
+What to do again:
+
+1. When a current-window pass becomes the preserved authority, name its artifact root in the board, PM handover, or launch-program summary.
+2. Separate "this pass exists and should be preserved" from "the whole promotion evidence set is now complete."
 
 ### 17. A lane is not authoritative if it only passes by assumption-skip
 

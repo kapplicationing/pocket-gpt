@@ -20,7 +20,7 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 
 1. `Advanced` settings include a voice activation section with:
    - enable toggle
-   - model-readiness copy
+   - blocker/advisory readiness copy
    - listener-status line
    - setup/help CTAs for assistant role, battery settings, and app settings
 2. Voice activation is a limited-beta surface for controlled cohorts, not the default onboarding or broad public launch path.
@@ -30,14 +30,21 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 4. Assistant-role setup and battery-optimization guidance are advisory/support CTAs:
    - assistant role enables assistant-gesture capture-once on supported Android versions
    - battery guidance improves background reliability but does not gate the toggle
-5. Current voice device-action tool allowlist is intentionally narrow:
+5. The settings surface keeps blocker state and advisory follow-up separate:
+   - microphone/model blockers render as setup-required status
+   - assistant-role and battery guidance remain visible as follow-up support, not launch blockers
+   - OEM battery guidance only renders when battery follow-up is actually still needed
+6. Voice enable feedback is immediate and supportable:
+   - blocked microphone/model enables surface snackbar guidance
+   - start failures surface the stored inline error message and the same message is used for immediate feedback
+7. Current voice device-action tool allowlist is intentionally narrow:
    - `alarm_set`
    - `timer_set`
    - `app_open`
    - `volume_set`
    - `flashlight_toggle`
-6. Public launch copy must stay bounded to the core chat surface, prompt-first tools, and single-image attach/Q&A until voice evidence, privacy wording, and device-tier language are ready.
-7. Voice is user-visible and supportable as limited beta; it must not be described in launch canon as merely planned or hidden.
+8. Public launch copy must stay bounded to the core chat surface, prompt-first tools, and single-image attach/Q&A until voice evidence, privacy wording, and device-tier language are ready.
+9. Voice is user-visible and supportable as limited beta; it must not be described in launch canon as merely planned or hidden.
 
 ## Privacy Section Behavior
 

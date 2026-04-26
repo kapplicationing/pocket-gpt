@@ -226,17 +226,17 @@ What to do again:
 2. Do not count hosted pass/fail output as current-window launch evidence unless the uploaded APK is known to come from the branch tip under review.
 3. Keep the artifact provenance note with the pass id/report bundle so PM, QA, and release review can tell which code state the cloud run actually proved.
 
-### 16. Maestro Cloud null-status polling failures are infrastructure blockers until hosted results exist
+### 16. Maestro Cloud polling failures are infrastructure blockers until hosted results exist
 
 What happened:
 
-1. Multiple hosted uploads completed successfully, but Maestro Cloud intermittently returned `Failed to fetch the status of an upload ... Status code = null` before any hosted flow results or JUnit output were returned.
-2. In at least one run, the CLI then fell through into a local debug-log packaging exception instead of leaving a clean pass/fail artifact.
+1. Multiple hosted uploads completed successfully, but Maestro Cloud intermittently either returned `Failed to fetch the status of an upload ... Status code = null` before any hosted flow results or JUnit output were returned, or accepted corrected uploads and then left them stuck at `running` during bounded polling with no hosted verdict returned.
+2. In at least one earlier run, the CLI then fell through into a local debug-log packaging exception instead of leaving a clean pass/fail artifact.
 3. That means the upload exists, but the run is not yet trustworthy product evidence because the hosted result never came back.
 
 What to do again:
 
-1. Classify this pattern as `infra_status_fetch_failed`, not as a product-flow failure.
+1. Classify this pattern as hosted infrastructure blocking, not as a product-flow failure.
 2. Preserve the upload id, upload URL, and app binary id so the hosted run can still be inspected externally if needed.
 3. Do not let a later null-status polling failure overwrite the last clean product finding from an earlier hosted run.
 
@@ -268,6 +268,20 @@ What to do again:
 1. Treat assumption-skipped tests as non-evidence for launch gates, even if the wrapper exits green.
 2. When a lane only needs a small contract, add a tiny dedicated selector instead of trying to repurpose a broader screenshot-oriented class.
 3. Keep the authoritative lane small enough that a real executed pass is easy to interpret.
+
+### 17A. Voice beta support copy must separate blockers from follow-up guidance
+
+What happened:
+
+1. The shipped voice surface is already user-visible under `Advanced`, so launch planning could not keep treating it as if it were hidden or purely future scope.
+2. The real code contract only blocks always-on listening on microphone permission and local voice-model readiness, but support copy can still drift into making assistant-role or battery guidance sound mandatory if those states are all rendered the same way.
+3. That kind of drift creates avoidable launch-support noise because users and PMs start reading advisory OEM/setup guidance as a hard product failure.
+
+What to do again:
+
+1. Keep voice positioned as a limited beta, Advanced-only, and outside headline launch claims.
+2. Keep visible settings/support copy explicit about the difference between hard blockers and advisory follow-up.
+3. Preserve the current bounded device-action allowlist in docs and support guidance instead of implying a broader general voice agent surface.
 
 ### 18. First-run reset now requires clearing database-backed state, not just legacy prefs
 

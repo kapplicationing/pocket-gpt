@@ -16,6 +16,13 @@ The locked launch scope is the core MVP surface plus prompt-first local tools, s
 
 The core MVP surface is already built: offline chat, streaming, model setup and recovery, routing, performance controls, prompt-first local tools, memory, single-image Q&A, diagnostics, privacy-aware network enforcement, and a limited-beta voice surface are all represented in the implementation and retained evidence. The active problem is whether the release path is reliable enough, evidenced enough, and understandable enough to justify promotion beyond the current pilot posture.
 
+For voice specifically, the PM should use the shipped beta contract rather than older looser assumptions:
+
+1. voice is user-visible today under `Advanced`, so it must be supportable even though it stays limited beta
+2. microphone permission and local voice-model readiness are the only hard blockers for always-on listening
+3. assistant-role and battery guidance are advisory/support follow-up for capture-once and background reliability
+4. current voice device actions stay intentionally bounded and should not be marketed as a broad agent surface
+
 The launch setup experience should be understood as simple-first: `Get ready` is the primary blocked-state setup action, while the unified `Model library` remains the import/download/recovery surface when the default path is not enough.
 
 The near-term release path is gated by two categories of work:
@@ -55,10 +62,10 @@ The retained gate evidence shows that provisioning preflight was previously bloc
 
 The current blocker chain is more operational than architectural:
 
-1. current-window authoritative lane evidence is still missing for the required promotion rows,
-2. cloud `send-after-ready` still lacks a clean hosted verdict, so the cloud-first technical packet is not complete yet,
-3. wireless Samsung Maestro remains a physical-canary harness blocker before app logic begins,
-4. `android-instrumented` and strict `journey` still remain authoritative gate rows even though cloud-first is the default machine-verifiable execution path,
+1. `android-instrumented` now has a current-window pass, but the required promotion set is still incomplete because `maestro` and strict `journey` remain open,
+2. corrected cloud uploads for `runtime-ready`, `model-management`, and `send-after-ready` have been accepted, but Maestro Cloud has not yet returned final hosted verdicts during bounded polling,
+3. wireless Samsung Maestro remains a physical-canary harness blocker before app logic begins, even after retry and transport recovery,
+4. strict `journey` still remains an authoritative gate row even though cloud-first is the default machine-verifiable execution path,
 5. and the moderated WP-13 packet is still incomplete.
 
 Story-level gate picture from the retained launch matrix:
@@ -66,7 +73,7 @@ Story-level gate picture from the retained launch matrix:
 1. `S-A`, `S-B`, `S-C`: `PASS`
 2. `S-D`, `S-D1`, `S-E`, `S-F`, `S-G`: `FAIL`
 
-One important nuance: the app no longer lacks an authoritative onboarding contract in code. The local `android-instrumented` lane now includes `MainActivityAuthoritativeOnboardingInstrumentationTest`, so first-session onboarding proof is represented locally even though the current-window lane set is still incomplete.
+One important nuance: the app no longer lacks an authoritative onboarding contract in code, and it no longer lacks a current-window proof either. The local `android-instrumented` lane now includes `MainActivityAuthoritativeOnboardingInstrumentationTest`, and the latest current-window rerun passed, so first-session onboarding proof is represented locally even though the full current-window lane set is still incomplete.
 
 ## What Is Already Built
 

@@ -6,7 +6,7 @@ Owner: Product + Tech Lead
 Mutable status stays in `docs/operations/execution-board.md`.
 Program learnings stay in `docs/operations/launch-program-learnings.md`.
 
-Current status note: launch remains `Hold`. The retained provisioning `SIGILL` class is no longer the first live failure, and the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight rather than a new generic native-runtime defect. That local code path is now understood and fixed. Local authoritative onboarding proof now exists in the `android-instrumented` lane, but the active remaining blockers are still a missing clean hosted verdict for `send-after-ready`, missing current-window authoritative lane evidence, wireless Samsung Maestro harness instability on the physical canaries, and the still-incomplete moderated WP-13 packet.
+Current status note: launch remains `Hold`. The retained provisioning `SIGILL` class is no longer the first live failure, and the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight rather than a new generic native-runtime defect. That local code path is now understood and fixed. `android-instrumented` now has a current-window pass, but the active remaining blockers are still missing final hosted verdicts for corrected cloud uploads (`runtime-ready` / `model-management` / `send-after-ready`), wireless Samsung Maestro harness instability on the physical canaries before app logic begins, missing strict `journey` current-window proof, and the still-incomplete moderated WP-13 packet.
 
 Execution policy for the active program:
 

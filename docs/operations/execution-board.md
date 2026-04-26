@@ -53,7 +53,7 @@ Engineering and quality excellence are mandatory.
 
 ### Blocked
 
-- [ ] QA-11 rerun `android-instrumented` + `maestro` + strict `journey` (`--mode strict --repeats 3`) is still blocked on missing current-window authoritative evidence. Local authoritative onboarding proof is now represented in the `android-instrumented` lane, but hosted `send-after-ready` still lacks a clean hosted verdict and strict `journey` pass evidence is still missing.
+- [ ] QA-11 rerun `android-instrumented` + `maestro` + strict `journey` (`--mode strict --repeats 3`) is still blocked on incomplete current-window authoritative evidence. `android-instrumented` now has a current-window pass, but local wireless Samsung `maestro` still fails in the Maestro gRPC/bootstrap layer before app logic begins, corrected hosted uploads still lack final cloud verdicts for `runtime-ready` / `model-management` / `send-after-ready`, and strict `journey` pass evidence is still missing.
 - [ ] QA-WP13-RUN02 moderated 5-user usability run packet completion blocked pending required-lane reliability rerun
 - [ ] PROD-10 launch gate matrix decision run blocked by required-row failures (`S-D`, `S-E`, `S-F`, `S-G`)
 
@@ -79,6 +79,7 @@ Engineering and quality excellence are mandatory.
 - [x] ENG-24 startup/readiness metadata self-healing landed; the later setup/provisioning gap was narrowed to missing multimodal companion (`mmproj`) sync in `devctl` preflight and fixed in local code
 - [x] ENG-20 host-side runtime cancel/timeout contract coverage landed; strict journey proof still depends on clearing the runtime-ready blocker in `QA-11`
 - [x] Local authoritative onboarding proof is now represented in `android-instrumented` coverage through `MainActivityAuthoritativeOnboardingInstrumentationTest`; launch still remains blocked on current-window pass evidence, not on missing onboarding contract coverage
+- [x] Current-window `android-instrumented` rerun passed on the S906N canary; the remaining technical evidence gap is `maestro` / strict `journey`, not authoritative onboarding coverage
 - [x] WP-12 package closeout complete
 
 ## Owner Focus (Current)

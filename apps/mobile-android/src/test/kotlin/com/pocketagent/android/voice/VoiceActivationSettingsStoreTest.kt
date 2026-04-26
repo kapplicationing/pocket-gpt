@@ -77,6 +77,23 @@ class VoiceActivationSettingsStoreTest {
         assertNull(store.state().lastError)
         assertNull(storage.stringValues["last_error"])
     }
+
+    @Test
+    fun `disableWithError turns voice beta off and preserves action needed message`() {
+        val storage = FakeVoiceActivationSettingsStorage(
+            booleanValues = mutableMapOf("enabled" to true),
+            stringValues = mutableMapOf("service_state" to VoiceServiceState.LISTENING.name),
+        )
+        val store = VoiceActivationSettingsStore(storage)
+
+        store.disableWithError("Voice models missing.")
+
+        assertEquals(false, store.state().enabled)
+        assertEquals(VoiceServiceState.DISABLED, store.state().voiceServiceState)
+        assertEquals("Voice models missing.", store.state().lastError)
+        assertEquals(false, storage.booleanValues["enabled"])
+        assertEquals(VoiceServiceState.DISABLED.name, storage.stringValues["service_state"])
+    }
 }
 
 private class FakeVoiceActivationSettingsStorage(

@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.core.content.ContextCompat
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
+import com.pocketagent.android.voice.VoiceActivationEnableResult
 import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.voice.VoiceActivationUiState
 import kotlinx.coroutines.CoroutineScope
@@ -68,14 +69,8 @@ internal fun rememberChatAppLaunchers(
     ) { granted ->
         if (granted) {
             voiceController.setEnabled(true)
-            if (!voiceState.batteryOptimizationIgnored) {
-                runCatching {
-                    context.startActivity(
-                        voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            }
         } else {
+            voiceController.refresh()
             scope.launch {
                 snackbarHostState.showSnackbar(context.getString(R.string.ui_voice_activation_microphone_required))
             }
@@ -149,13 +144,22 @@ internal fun rememberChatAppLaunchers(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
                 microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             else -> {
-                voiceController.setEnabled(true)
-                if (!voiceState.batteryOptimizationIgnored) {
-                    runCatching {
-                        context.startActivity(
-                            voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
+                when (voiceController.setEnabled(true)) {
+                    VoiceActivationEnableResult.BLOCKED_MODELS_MISSING -> {
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.ui_voice_activation_models_missing),
+                            )
+                        }
                     }
+                    VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION -> {
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.ui_voice_activation_microphone_required),
+                            )
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }
@@ -168,7 +172,7 @@ internal fun rememberChatAppLaunchers(
     }
     val openBatteryOptimizationSettings: () -> Unit = {
         runCatching {
-            context.startActivity(voiceController.requestBatteryOptimizationIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(voiceController.openBatteryOptimizationSettingsIntent())
         }.onFailure {
             context.startActivity(voiceController.openAppSettingsIntent())
         }

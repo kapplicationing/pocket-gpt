@@ -10,7 +10,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
+import android.Manifest
+import android.content.pm.PackageManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,13 +46,37 @@ data class VoiceActivationSettings(
 
 data class VoiceActivationUiState(
     val settings: VoiceActivationSettings = VoiceActivationSettings(),
+    val microphonePermissionGranted: Boolean = false,
     val assistantRoleSupported: Boolean = false,
     val assistantRoleHeld: Boolean = false,
     val batteryOptimizationIgnored: Boolean = false,
     val oemGuide: OemBatteryGuide? = null,
     val modelsReady: Boolean = false,
+    val modelsRootPath: String = "",
     val missingModelPaths: List<String> = emptyList(),
+    val betaContract: VoiceBetaContract = VoiceBetaContract(),
 )
+
+enum class VoiceBetaBlockingIssue {
+    MICROPHONE_PERMISSION,
+    MODELS_MISSING,
+}
+
+data class VoiceBetaContract(
+    val blockingIssue: VoiceBetaBlockingIssue? = null,
+    val needsBatteryGuidance: Boolean = false,
+    val needsAssistantRole: Boolean = false,
+) {
+    val canEnableAlwaysOnListening: Boolean
+        get() = blockingIssue == null
+}
+
+enum class VoiceActivationEnableResult {
+    ENABLED,
+    DISABLED,
+    BLOCKED_MICROPHONE_PERMISSION,
+    BLOCKED_MODELS_MISSING,
+}
 
 enum class OemBatteryGuide(
     val title: String,
@@ -149,6 +176,16 @@ class VoiceActivationSettingsStore private constructor(
         save(read().copy(lastError = error))
     }
 
+    fun disableWithError(error: String) {
+        save(
+            read().copy(
+                enabled = false,
+                voiceServiceState = VoiceServiceState.DISABLED,
+                lastError = error,
+            ),
+        )
+    }
+
     private fun save(settings: VoiceActivationSettings) {
         storage.save(settings)
         stateFlow.value = settings
@@ -192,23 +229,39 @@ class VoiceActivationController(
         stateFlow.value = computeState()
     }
 
-    fun setEnabled(enabled: Boolean) {
-        settingsStore.setEnabled(enabled)
-        if (enabled) {
-            OffasRuntime.start(appContext)
-        } else {
+    fun setEnabled(enabled: Boolean): VoiceActivationEnableResult {
+        if (!enabled) {
+            settingsStore.setEnabled(false)
             OffasRuntime.stop(appContext)
+            refresh()
+            return VoiceActivationEnableResult.DISABLED
         }
-        refresh()
+
+        return when (val blockingIssue = computeState().betaContract.blockingIssue) {
+            VoiceBetaBlockingIssue.MICROPHONE_PERMISSION -> {
+                settingsStore.disableWithError("Microphone permission is required before voice beta can start.")
+                refresh()
+                VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION
+            }
+            VoiceBetaBlockingIssue.MODELS_MISSING -> {
+                settingsStore.disableWithError("Voice beta needs local voice model files before always-on listening can start.")
+                refresh()
+                VoiceActivationEnableResult.BLOCKED_MODELS_MISSING
+            }
+            null -> {
+                settingsStore.setEnabled(true)
+                OffasRuntime.start(appContext)
+                refresh()
+                VoiceActivationEnableResult.ENABLED
+            }
+        }
     }
 
     fun silenceTimeoutSeconds(): Int = settingsStore.state().silenceTimeoutSeconds
 
-    fun requestBatteryOptimizationIntent(): Intent {
-        return Intent(
-            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-            Uri.parse("package:${appContext.packageName}"),
-        )
+    fun openBatteryOptimizationSettingsIntent(): Intent {
+        return Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     fun requestAssistantRoleIntent(): Intent? {
@@ -232,6 +285,10 @@ class VoiceActivationController(
     private fun computeState(): VoiceActivationUiState {
         val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val batteryOptimizationIgnored = powerManager?.isIgnoringBatteryOptimizations(appContext.packageName) == true
+        val microphonePermissionGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
         val assistantRoleSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
         val assistantRoleHeld = if (assistantRoleSupported) {
             val roleManager = appContext.getSystemService(RoleManager::class.java)
@@ -240,16 +297,45 @@ class VoiceActivationController(
             false
         }
         val modelStatus = VoiceModelCatalog.status(appContext)
+        val betaContract = evaluateVoiceBetaContract(
+            microphonePermissionGranted = microphonePermissionGranted,
+            assistantRoleSupported = assistantRoleSupported,
+            assistantRoleHeld = assistantRoleHeld,
+            batteryOptimizationIgnored = batteryOptimizationIgnored,
+            modelsReady = modelStatus.ready,
+        )
         return VoiceActivationUiState(
             settings = settingsStore.state(),
+            microphonePermissionGranted = microphonePermissionGranted,
             assistantRoleSupported = assistantRoleSupported,
             assistantRoleHeld = assistantRoleHeld,
             batteryOptimizationIgnored = batteryOptimizationIgnored,
             oemGuide = OemBatteryGuide.fromManufacturer(Build.MANUFACTURER),
             modelsReady = modelStatus.ready,
+            modelsRootPath = VoiceModelCatalog.root(appContext).absolutePath,
             missingModelPaths = modelStatus.missingPaths,
+            betaContract = betaContract,
         )
     }
+}
+
+internal fun evaluateVoiceBetaContract(
+    microphonePermissionGranted: Boolean,
+    assistantRoleSupported: Boolean,
+    assistantRoleHeld: Boolean,
+    batteryOptimizationIgnored: Boolean,
+    modelsReady: Boolean,
+): VoiceBetaContract {
+    val blockingIssue = when {
+        !microphonePermissionGranted -> VoiceBetaBlockingIssue.MICROPHONE_PERMISSION
+        !modelsReady -> VoiceBetaBlockingIssue.MODELS_MISSING
+        else -> null
+    }
+    return VoiceBetaContract(
+        blockingIssue = blockingIssue,
+        needsBatteryGuidance = !batteryOptimizationIgnored,
+        needsAssistantRole = assistantRoleSupported && !assistantRoleHeld,
+    )
 }
 
 class AssistActivity : ComponentActivity() {

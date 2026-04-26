@@ -30,6 +30,7 @@ import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.pocketagent.android.MainActivity
 import com.pocketagent.android.R
@@ -38,6 +39,7 @@ import java.util.ArrayDeque
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -199,116 +201,177 @@ internal class SherpaOnnxOffasVoiceEngine(
             AudioFormat.ENCODING_PCM_16BIT,
             minBufferBytes.coerceAtLeast(SHORT_BUFFER_SIZE * 4),
         )
-        if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+        check(audioRecord.state == AudioRecord.STATE_INITIALIZED) {
             audioRecord.release()
-            throw IllegalStateException("AudioRecord initialization failed.")
+            "AudioRecord initialization failed."
         }
         val samples = ShortArray(SHORT_BUFFER_SIZE)
-        val ringBuffer = ArrayDeque<FloatArray>()
-        val detectWakeWithKws = keywordSpotter != null && !directCapture
-        val wakeSpotter = keywordSpotter
-        val wakeStream = if (detectWakeWithKws) wakeSpotter?.createStream() else recognizer.createStream()
-        var commandStream = if (directCapture) recognizer.createStream() else null
-        var capturingCommand = directCapture
-        var lastVoiceAtMs = System.currentTimeMillis()
-        var lastTranscript = ""
+        val session = WakeCommandSession(
+            wakePhrase = wakePhrase,
+            silenceTimeoutSeconds = silenceTimeoutSeconds,
+            directCapture = directCapture,
+            onWakeWord = onWakeWord,
+            onStateChanged = onStateChanged,
+        )
         audioRecord.startRecording()
         try {
-            if (directCapture) {
-                onWakeWord()
-                onStateChanged(VoiceServiceState.CAPTURING)
-            } else {
-                onStateChanged(VoiceServiceState.LISTENING)
-            }
+            session.start()
             while (isActive) {
                 val read = audioRecord.read(samples, 0, samples.size)
-                if (read <= 0) {
-                    continue
-                }
-                val chunk = samples.copyOf(read).toFloatChunk()
-                ringBuffer.addLast(chunk)
-                while (ringBuffer.size > RING_BUFFER_CHUNKS) {
-                    ringBuffer.removeFirst()
-                }
-                if (!capturingCommand) {
-                    val wakeDetected = if (detectWakeWithKws && wakeSpotter != null && wakeStream != null) {
-                        wakeStream.acceptWaveform(chunk, SAMPLE_RATE)
-                        var hit = false
-                        while (wakeSpotter.isReady(wakeStream)) {
-                            wakeSpotter.decode(wakeStream)
-                            val result = wakeSpotter.getResult(wakeStream)
-                            if (result.keyword.isNotBlank()) {
-                                hit = true
-                            }
-                        }
-                        hit
-                    } else {
-                        val recognizerStream = wakeStream ?: continue
-                        recognizerStream.acceptWaveform(chunk, SAMPLE_RATE)
-                        while (recognizer.isReady(recognizerStream)) {
-                            recognizer.decode(recognizerStream)
-                        }
-                        val partial = recognizer.getResult(recognizerStream).text.trim()
-                        partial.lowercase(Locale.US).contains(wakePhrase.lowercase(Locale.US))
+                if (read > 0) {
+                    val command = session.accept(samples.copyOf(read).toFloatChunk())
+                    if (command != null) {
+                        return@withContext command.takeIf { it.isNotBlank() }
                     }
-                    if (!wakeDetected) {
-                        continue
-                    }
-                    capturingCommand = true
-                    onWakeWord()
-                    onStateChanged(VoiceServiceState.CAPTURING)
-                    commandStream = recognizer.createStream()
-                    ringBuffer.forEach { buffered ->
-                        commandStream?.acceptWaveform(buffered, SAMPLE_RATE)
-                    }
-                    lastVoiceAtMs = System.currentTimeMillis()
-                    lastTranscript = ""
-                    continue
                 }
-
-                val activeCommandStream = commandStream ?: continue
-                activeCommandStream.acceptWaveform(chunk, SAMPLE_RATE)
-                while (recognizer.isReady(activeCommandStream)) {
-                    recognizer.decode(activeCommandStream)
-                }
-                val partial = recognizer.getResult(activeCommandStream).text.trim()
-                val rms = chunk.rms()
-                if (rms >= SPEECH_RMS_THRESHOLD || partial.length > lastTranscript.length) {
-                    lastVoiceAtMs = System.currentTimeMillis()
-                }
-                lastTranscript = partial
-                onStateChanged(VoiceServiceState.TRANSCRIBING)
-                val silentForMs = System.currentTimeMillis() - lastVoiceAtMs
-                if (silentForMs < silenceTimeoutSeconds * 1000L) {
-                    continue
-                }
-                activeCommandStream.inputFinished()
-                while (recognizer.isReady(activeCommandStream)) {
-                    recognizer.decode(activeCommandStream)
-                }
-                val finalText = recognizer.getResult(activeCommandStream).text
-                    .replace(wakePhrase, "", ignoreCase = true)
-                    .trim()
-                activeCommandStream.release()
-                if (wakeStream != null && !detectWakeWithKws) {
-                    recognizer.reset(wakeStream)
-                } else if (wakeSpotter != null && wakeStream != null) {
-                    wakeSpotter?.reset(wakeStream)
-                }
-                return@withContext finalText.takeIf { it.isNotBlank() }
             }
             null
         } finally {
             runCatching { audioRecord.stop() }
             audioRecord.release()
-            commandStream?.release()
-            wakeStream?.release()
+            session.release()
         }
     }
 
     override fun release() {
         runCatching { keywordSpotter?.release() }
         runCatching { recognizer.release() }
+    }
+
+    private inner class WakeCommandSession(
+        private val wakePhrase: String,
+        private val silenceTimeoutSeconds: Int,
+        private val directCapture: Boolean,
+        private val onWakeWord: () -> Unit,
+        private val onStateChanged: (VoiceServiceState) -> Unit,
+    ) {
+        private val ringBuffer = ArrayDeque<FloatArray>()
+        private val wakeSpotter = keywordSpotter
+        private val detectWakeWithKws = wakeSpotter != null && !directCapture
+        private val wakeStream = if (detectWakeWithKws) wakeSpotter?.createStream() else recognizer.createStream()
+        private var commandStream = if (directCapture) recognizer.createStream() else null
+        private var capturingCommand = directCapture
+        private var lastVoiceAtMs = System.currentTimeMillis()
+        private var lastTranscript = ""
+
+        fun start() {
+            if (directCapture) {
+                onWakeWord()
+                onStateChanged(VoiceServiceState.CAPTURING)
+            } else {
+                onStateChanged(VoiceServiceState.LISTENING)
+            }
+        }
+
+        fun accept(chunk: FloatArray): String? {
+            appendToRingBuffer(chunk)
+            return if (capturingCommand) {
+                captureCommand(chunk)
+            } else {
+                detectWake(chunk)
+                null
+            }
+        }
+
+        fun release() {
+            commandStream?.release()
+            wakeStream?.release()
+        }
+
+        private fun appendToRingBuffer(chunk: FloatArray) {
+            ringBuffer.addLast(chunk)
+            while (ringBuffer.size > RING_BUFFER_CHUNKS) {
+                ringBuffer.removeFirst()
+            }
+        }
+
+        private fun detectWake(chunk: FloatArray) {
+            if (isWakeDetected(chunk)) {
+                startCommandCapture()
+            }
+        }
+
+        private fun isWakeDetected(chunk: FloatArray): Boolean {
+            val stream = wakeStream ?: return false
+            return if (detectWakeWithKws && wakeSpotter != null) {
+                wakeSpotter.detectKeyword(chunk, stream)
+            } else {
+                recognizer.partialText(chunk, stream)
+                    .lowercase(Locale.US)
+                    .contains(wakePhrase.lowercase(Locale.US))
+            }
+        }
+
+        private fun startCommandCapture() {
+            capturingCommand = true
+            onWakeWord()
+            onStateChanged(VoiceServiceState.CAPTURING)
+            commandStream = recognizer.createStream()
+            ringBuffer.forEach { buffered ->
+                commandStream?.acceptWaveform(buffered, SAMPLE_RATE)
+            }
+            lastVoiceAtMs = System.currentTimeMillis()
+            lastTranscript = ""
+        }
+
+        private fun captureCommand(chunk: FloatArray): String? {
+            val stream = commandStream ?: return null
+            val partial = recognizer.partialText(chunk, stream)
+            if (chunk.rms() >= SPEECH_RMS_THRESHOLD || partial.length > lastTranscript.length) {
+                lastVoiceAtMs = System.currentTimeMillis()
+            }
+            lastTranscript = partial
+            onStateChanged(VoiceServiceState.TRANSCRIBING)
+            return if (isSilenceTimeoutReached()) finishCommandCapture(stream) else null
+        }
+
+        private fun isSilenceTimeoutReached(): Boolean {
+            return System.currentTimeMillis() - lastVoiceAtMs >= silenceTimeoutSeconds * 1000L
+        }
+
+        private fun finishCommandCapture(stream: OnlineStream): String {
+            stream.inputFinished()
+            recognizer.drain(stream)
+            val finalText = recognizer.getResult(stream).text
+                .replace(wakePhrase, "", ignoreCase = true)
+                .trim()
+            stream.release()
+            resetWakeStream()
+            return finalText
+        }
+
+        private fun resetWakeStream() {
+            val stream = wakeStream ?: return
+            if (detectWakeWithKws) {
+                wakeSpotter?.reset(stream)
+            } else {
+                recognizer.reset(stream)
+            }
+        }
+    }
+
+    private fun KeywordSpotter.detectKeyword(chunk: FloatArray, stream: OnlineStream): Boolean {
+        stream.acceptWaveform(chunk, SAMPLE_RATE)
+        var hit = false
+        while (isReady(stream)) {
+            decode(stream)
+            if (getResult(stream).keyword.isNotBlank()) {
+                hit = true
+            }
+        }
+        return hit
+    }
+
+    private fun OnlineRecognizer.partialText(chunk: FloatArray, stream: OnlineStream): String {
+        stream.acceptWaveform(chunk, SAMPLE_RATE)
+        drain(stream)
+        return getResult(stream).text.trim()
+    }
+
+    private fun OnlineRecognizer.drain(stream: OnlineStream) {
+        while (isReady(stream)) {
+            decode(stream)
+        }
     }
 }
 
@@ -330,8 +393,7 @@ internal object OffasRuntime {
 
     fun stop(context: Context) {
         context.startService(Intent(context, OffasListenerService::class.java).setAction(ACTION_STOP))
-        WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
-        cancelRestartAlarm(context)
+        pauseRecovery(context)
     }
 
     fun captureOnce(context: Context) {
@@ -339,7 +401,9 @@ internal object OffasRuntime {
             context,
             Intent(context, OffasListenerService::class.java).setAction(ACTION_CAPTURE_ONCE),
         )
-        enqueueWatchdog(context)
+        if (VoiceActivationSettingsStore(context.applicationContext).state().enabled) {
+            enqueueWatchdog(context)
+        }
     }
 
     fun enqueueWatchdog(context: Context) {
@@ -380,6 +444,11 @@ internal object OffasRuntime {
         alarmManager.cancel(pendingIntent)
     }
 
+    fun pauseRecovery(context: Context) {
+        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(UNIQUE_WORK_NAME)
+        cancelRestartAlarm(context.applicationContext)
+    }
+
     private const val WATCHDOG_REQUEST_CODE = 4037
 }
 
@@ -414,12 +483,17 @@ class OffasAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val label = intent?.getStringExtra(AndroidLocalToolRuntime.EXTRA_LABEL).orEmpty().ifBlank { "Offas reminder" }
         val action = intent?.action ?: return
+        val title = if (action == AndroidLocalToolRuntime.ACTION_OFFAS_TIMER) {
+            "Offas timer finished"
+        } else {
+            "Offas alarm"
+        }
         val channelId = OffasListenerService.CHANNEL_VOICE_STATUS
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(manager)
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(if (action == AndroidLocalToolRuntime.ACTION_OFFAS_TIMER) "Offas timer finished" else "Offas alarm")
+            .setContentTitle(title)
             .setContentText(label)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
@@ -496,67 +570,93 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun startServiceLoop(directCapture: Boolean) {
-        if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            settingsStore.updateServiceState(VoiceServiceState.ERROR, "Microphone permission is missing.")
+        if (!hasRecordAudioPermission()) {
             startForeground(NOTIFICATION_ID, buildNotification("Microphone permission required"))
+            handleBlockingPrerequisiteFailure(
+                error = "Microphone permission is missing.",
+                notification = "Microphone permission required",
+            )
             return
         }
         startForeground(NOTIFICATION_ID, buildNotification("Offas is starting"))
         serviceJob?.cancel()
         serviceJob = scope.launch {
-            val modelStatus = VoiceModelCatalog.status(applicationContext)
-            if (!modelStatus.ready) {
-                settingsStore.updateServiceState(
-                    VoiceServiceState.ERROR,
-                    "Voice models missing: ${modelStatus.missingPaths.joinToString()}",
-                )
-                updateNotification("Install Offas voice models to enable background listening.")
-                return@launch
+            try {
+                runServiceLoop(directCapture)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                handleUnexpectedFailure(error)
             }
-            engine = engine ?: SherpaOnnxOffasVoiceEngine(applicationContext)
-            OffasRuntime.scheduleRestartAlarm(applicationContext)
-            settingsStore.updateServiceState(VoiceServiceState.STARTING)
-            val transcript = engine?.awaitWakeAndCommand(
-                wakePhrase = settingsStore.state().wakePhrase,
-                silenceTimeoutSeconds = settingsStore.state().silenceTimeoutSeconds,
-                directCapture = directCapture,
-                onWakeWord = {
-                    updateNotification("Listening for your command…")
-                    settingsStore.updateServiceState(VoiceServiceState.CAPTURING)
-                    scope.launch(Dispatchers.IO) {
-                        runCatching {
-                            val lastUsed = offscreenRuntimeClient.warmLastUsedModel()
-                            if (!lastUsed.success) {
-                                Unit
-                            }
-                        }
-                    }
-                },
-                onStateChanged = { state ->
-                    settingsStore.updateServiceState(state)
-                    when (state) {
-                        VoiceServiceState.LISTENING -> updateNotification("Offas is listening")
-                        VoiceServiceState.CAPTURING -> updateNotification("Listening for your command…")
-                        VoiceServiceState.TRANSCRIBING -> updateNotification("Transcribing…")
-                        VoiceServiceState.PROCESSING -> updateNotification("Processing command…")
-                        VoiceServiceState.ERROR -> updateNotification(settingsStore.state().lastError ?: "Voice error")
-                        else -> Unit
-                    }
-                },
-            )
-            if (transcript.isNullOrBlank()) {
-                settingsStore.updateServiceState(if (settingsStore.state().enabled) VoiceServiceState.LISTENING else VoiceServiceState.DISABLED)
-                updateNotification("Offas is listening")
-                if (settingsStore.state().enabled && !directCapture) {
-                    startServiceLoop(directCapture = false)
-                } else {
-                    stopForeground(STOP_FOREGROUND_DETACH)
-                    stopSelf()
-                }
-                return@launch
-            }
-            handleTranscript(transcript, directCapture = directCapture)
         }
+    }
+
+    private fun hasRecordAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            applicationContext,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private suspend fun runServiceLoop(directCapture: Boolean) {
+        val modelStatus = VoiceModelCatalog.status(applicationContext)
+        if (!modelStatus.ready) {
+            handleBlockingPrerequisiteFailure(
+                error = "Voice models missing: ${modelStatus.missingPaths.joinToString()}",
+                notification = "Install Offas voice models before enabling voice beta.",
+            )
+            return
+        }
+        engine = engine ?: SherpaOnnxOffasVoiceEngine(applicationContext)
+        OffasRuntime.scheduleRestartAlarm(applicationContext)
+        settingsStore.updateServiceState(VoiceServiceState.STARTING)
+        val transcript = engine?.awaitWakeAndCommand(
+            wakePhrase = settingsStore.state().wakePhrase,
+            silenceTimeoutSeconds = settingsStore.state().silenceTimeoutSeconds,
+            directCapture = directCapture,
+            onWakeWord = ::handleWakeWord,
+            onStateChanged = ::handleVoiceEngineStateChanged,
+        )
+        if (transcript.isNullOrBlank()) {
+            handleEmptyTranscript(directCapture)
+            return
+        }
+        handleTranscript(transcript, directCapture = directCapture)
+    }
+
+    private fun handleWakeWord() {
+        updateNotification("Listening for your command…")
+        settingsStore.updateServiceState(VoiceServiceState.CAPTURING)
+        scope.launch(Dispatchers.IO) {
+            runCatching { offscreenRuntimeClient.warmLastUsedModel() }
+        }
+    }
+
+    private fun handleVoiceEngineStateChanged(state: VoiceServiceState) {
+        settingsStore.updateServiceState(state)
+        when (state) {
+            VoiceServiceState.LISTENING -> updateNotification("Offas is listening")
+            VoiceServiceState.CAPTURING -> updateNotification("Listening for your command…")
+            VoiceServiceState.TRANSCRIBING -> updateNotification("Transcribing…")
+            VoiceServiceState.PROCESSING -> updateNotification("Processing command…")
+            VoiceServiceState.ERROR -> updateNotification(settingsStore.state().lastError ?: "Voice error")
+            else -> Unit
+        }
+    }
+
+    private fun handleEmptyTranscript(directCapture: Boolean) {
+        settingsStore.updateServiceState(stateAfterEmptyTranscript())
+        updateNotification("Offas is listening")
+        if (settingsStore.state().enabled && !directCapture) {
+            startServiceLoop(directCapture = false)
+        } else {
+            stopForeground(STOP_FOREGROUND_DETACH)
+            stopSelf()
+        }
+    }
+
+    private fun stateAfterEmptyTranscript(): VoiceServiceState {
+        return if (settingsStore.state().enabled) VoiceServiceState.LISTENING else VoiceServiceState.DISABLED
     }
 
     private suspend fun handleTranscript(transcript: String, directCapture: Boolean) {
@@ -586,10 +686,13 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun stopServiceLoop() {
-        settingsStore.updateServiceState(
-            if (settingsStore.state().enabled) VoiceServiceState.PAUSED else VoiceServiceState.DISABLED,
-            settingsStore.state().lastError,
-        )
+        val currentState = settingsStore.state()
+        val nextState = when {
+            currentState.voiceServiceState == VoiceServiceState.ERROR -> VoiceServiceState.ERROR
+            currentState.enabled -> VoiceServiceState.PAUSED
+            else -> VoiceServiceState.DISABLED
+        }
+        settingsStore.updateServiceState(nextState, currentState.lastError)
         serviceJob?.cancel()
         serviceJob = null
         engine?.release()
@@ -607,6 +710,22 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     private fun updateNotification(message: String) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(message))
+    }
+
+    private fun handleBlockingPrerequisiteFailure(error: String, notification: String) {
+        settingsStore.disableWithError(error)
+        updateNotification(notification)
+        OffasRuntime.pauseRecovery(applicationContext)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun handleUnexpectedFailure(error: Throwable) {
+        val message = error.message?.takeIf { it.isNotBlank() } ?: "Unexpected voice runtime failure."
+        settingsStore.updateServiceState(VoiceServiceState.ERROR, message)
+        updateNotification("Voice beta stopped: $message")
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun buildNotification(message: String): Notification {

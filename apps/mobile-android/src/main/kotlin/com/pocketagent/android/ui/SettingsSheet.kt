@@ -33,7 +33,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.pocketagent.android.R
@@ -283,28 +285,89 @@ private fun GeneralTabContent(
                 Text(stringResource(id = R.string.ui_voice_activation_toggle))
                 Text(
                     text = stringResource(
-                        id = if (voiceState.modelsReady) {
-                            R.string.ui_voice_activation_models_ready
+                        id = if (voiceState.betaContract.canEnableAlwaysOnListening) {
+                            R.string.ui_voice_activation_beta_ready
                         } else {
-                            R.string.ui_voice_activation_models_missing
+                            R.string.ui_voice_activation_beta_setup_required
                         },
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    text = stringResource(
-                        id = R.string.ui_voice_activation_status_line,
-                        voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(
+                    modifier = Modifier.semantics {
+                        liveRegion = LiveRegionMode.Polite
+                    },
+                    verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
+                ) {
+                    Text(
+                        text = stringResource(
+                            id = if (voiceState.microphonePermissionGranted) {
+                                R.string.ui_voice_activation_microphone_ready
+                            } else {
+                                R.string.ui_voice_activation_microphone_missing
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(
+                            id = if (voiceState.modelsReady) {
+                                R.string.ui_voice_activation_models_ready
+                            } else {
+                                R.string.ui_voice_activation_models_missing
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(
+                            id = when {
+                                !voiceState.assistantRoleSupported -> R.string.ui_voice_activation_assistant_unavailable
+                                !voiceState.betaContract.needsAssistantRole -> R.string.ui_voice_activation_assistant_ready
+                                else -> R.string.ui_voice_activation_assistant_missing
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(
+                            id = if (!voiceState.betaContract.needsBatteryGuidance) {
+                                R.string.ui_voice_activation_battery_ready
+                            } else {
+                                R.string.ui_voice_activation_battery_missing
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(
+                            id = R.string.ui_voice_activation_status_line,
+                            voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 voiceState.settings.lastError?.takeIf { it.isNotBlank() }?.let { error ->
                     Text(
                         text = error,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (!voiceState.modelsReady) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.ui_voice_activation_models_root,
+                            voiceState.modelsRootPath,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -313,17 +376,17 @@ private fun GeneralTabContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
         ) {
-            if (voiceState.assistantRoleSupported && !voiceState.assistantRoleHeld) {
+            if (voiceState.assistantRoleSupported && voiceState.betaContract.needsAssistantRole) {
                 TextButton(onClick = { haptic.tickLightThen(onRequestAssistantRole) }) {
                     Text(stringResource(id = R.string.ui_voice_activation_set_assistant))
                 }
             }
-            if (!voiceState.batteryOptimizationIgnored) {
+            if (voiceState.betaContract.needsBatteryGuidance) {
                 TextButton(onClick = { haptic.tickLightThen(onOpenBatteryOptimizationSettings) }) {
                     Text(stringResource(id = R.string.ui_voice_activation_battery_settings))
                 }
             }
-            if (!voiceState.modelsReady) {
+            if (!voiceState.microphonePermissionGranted) {
                 TextButton(onClick = { haptic.tickLightThen(onOpenAppSettings) }) {
                     Text(stringResource(id = R.string.ui_voice_activation_open_app_settings))
                 }

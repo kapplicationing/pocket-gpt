@@ -92,7 +92,7 @@ internal class OffscreenRuntimeClient(
         ) {
             is ChatStreamEvent.Completed -> terminalEvent.response
             is ChatStreamEvent.Cancelled -> throw CancellationException("Voice turn cancelled: ${terminalEvent.reason}")
-            is ChatStreamEvent.Failed -> throw IllegalStateException(
+            is ChatStreamEvent.Failed -> error(
                 "Voice turn failed: ${terminalEvent.errorCode}: ${terminalEvent.message}",
             )
             else -> error("Unreachable terminal stream event: $terminalEvent")

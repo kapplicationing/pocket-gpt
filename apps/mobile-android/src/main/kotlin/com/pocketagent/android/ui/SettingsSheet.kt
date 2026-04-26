@@ -48,6 +48,7 @@ import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
+import com.pocketagent.android.voice.VoiceBetaBlockingIssue
 import com.pocketagent.android.voice.VoiceActivationUiState
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.core.ModelPreset
@@ -292,7 +293,11 @@ private fun GeneralTabContent(
                         },
                     ),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (voiceState.betaContract.canEnableAlwaysOnListening) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
                 )
                 Column(
                     modifier = Modifier.semantics {
@@ -309,7 +314,11 @@ private fun GeneralTabContent(
                             },
                         ),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (voiceState.betaContract.blockingIssue == VoiceBetaBlockingIssue.MICROPHONE_PERMISSION) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                     Text(
                         text = stringResource(
@@ -320,19 +329,39 @@ private fun GeneralTabContent(
                             },
                         ),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (voiceState.betaContract.blockingIssue == VoiceBetaBlockingIssue.MODELS_MISSING) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                     Text(
                         text = stringResource(
-                            id = when {
-                                !voiceState.assistantRoleSupported -> R.string.ui_voice_activation_assistant_unavailable
-                                !voiceState.betaContract.needsAssistantRole -> R.string.ui_voice_activation_assistant_ready
-                                else -> R.string.ui_voice_activation_assistant_missing
-                            },
+                            id = R.string.ui_voice_activation_status_line,
+                            voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (voiceState.assistantRoleSupported || voiceState.betaContract.needsAssistantRole) {
+                        Text(
+                            text = stringResource(
+                                id = if (!voiceState.betaContract.needsAssistantRole) {
+                                    R.string.ui_voice_activation_assistant_ready
+                                } else {
+                                    R.string.ui_voice_activation_assistant_missing
+                                },
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(id = R.string.ui_voice_activation_assistant_unavailable),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         text = stringResource(
                             id = if (!voiceState.betaContract.needsBatteryGuidance) {
@@ -340,14 +369,6 @@ private fun GeneralTabContent(
                             } else {
                                 R.string.ui_voice_activation_battery_missing
                             },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = stringResource(
-                            id = R.string.ui_voice_activation_status_line,
-                            voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -392,11 +413,13 @@ private fun GeneralTabContent(
                 }
             }
         }
-        Text(
-            text = voiceState.oemGuide?.summary.orEmpty(),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (voiceState.betaContract.needsBatteryGuidance) {
+            Text(
+                text = voiceState.oemGuide?.summary.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         HorizontalDivider()
 

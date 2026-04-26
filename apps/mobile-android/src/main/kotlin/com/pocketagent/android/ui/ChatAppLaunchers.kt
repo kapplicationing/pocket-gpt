@@ -8,6 +8,7 @@ import android.os.Build
 import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.core.content.ContextCompat
@@ -74,6 +75,7 @@ internal fun rememberChatAppLaunchers(
         if (granted) {
             handleVoiceActivationResult(
                 result = voiceController.setEnabled(true),
+                voiceController = voiceController,
                 context = context,
                 scope = scope,
                 snackbarHostState = snackbarHostState,
@@ -154,6 +156,7 @@ internal fun rememberChatAppLaunchers(
                 microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             else -> handleVoiceActivationResult(
                 result = voiceController.setEnabled(true),
+                voiceController = voiceController,
                 context = context,
                 scope = scope,
                 snackbarHostState = snackbarHostState,
@@ -189,22 +192,37 @@ internal fun rememberChatAppLaunchers(
 
 private fun handleVoiceActivationResult(
     result: VoiceActivationEnableResult,
+    voiceController: VoiceActivationController,
     context: Context,
     scope: CoroutineScope,
     snackbarHostState: SnackbarHostState,
 ) {
-    val messageResId = voiceActivationFeedbackMessageResId(result) ?: return
+    val feedback = voiceActivationFeedback(
+        result = result,
+        lastError = voiceController.observe().value.settings.lastError,
+    ) ?: return
     scope.launch {
-        snackbarHostState.showSnackbar(context.getString(messageResId))
+        val message = feedback.messageText ?: feedback.messageResId?.let(context::getString) ?: return@launch
+        snackbarHostState.showSnackbar(message)
     }
 }
 
-internal fun voiceActivationFeedbackMessageResId(
+internal data class VoiceActivationFeedback(
+    @StringRes val messageResId: Int? = null,
+    val messageText: String? = null,
+)
+
+internal fun voiceActivationFeedback(
     result: VoiceActivationEnableResult,
-): Int? {
+    lastError: String? = null,
+): VoiceActivationFeedback? {
     return when (result) {
-        VoiceActivationEnableResult.BLOCKED_MODELS_MISSING -> R.string.ui_voice_activation_models_missing
-        VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION -> R.string.ui_voice_activation_microphone_required
+        VoiceActivationEnableResult.BLOCKED_MODELS_MISSING ->
+            VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_models_missing)
+        VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION ->
+            VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_microphone_required)
+        VoiceActivationEnableResult.START_FAILED ->
+            lastError?.takeIf { it.isNotBlank() }?.let { VoiceActivationFeedback(messageText = it) }
         else -> null
     }
 }

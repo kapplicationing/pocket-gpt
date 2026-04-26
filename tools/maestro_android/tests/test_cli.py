@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools.maestro_android import cli
 from tools.maestro_android.common import MaestroAndroidError
@@ -134,6 +135,195 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual("DEVICE_ERROR", raised.exception.code)
         self.assertIn("Rerun without --no-install", raised.exception.message)
+
+    def test_run_test_retries_transient_maestro_launch_failure(self) -> None:
+        config = cli.load_config()
+        flow_path = cli.REPO_ROOT / "tests/maestro/scenario-a.yaml"
+        maestro_attempts = 0
+        issued_commands: list[list[str]] = []
+
+        original_resolve_serial = cli._resolve_serial
+        original_select_flows = cli._select_flows
+        original_resolve_apk = cli._resolve_apk
+        original_normalize_artifact_root = cli._normalize_artifact_root
+        original_capture_logcat = cli._capture_logcat
+        original_run_subprocess = cli.run_subprocess
+        try:
+            cli._resolve_serial = lambda _device: "SER123"  # type: ignore[assignment]
+            cli._select_flows = lambda *_args, **_kwargs: [flow_path]  # type: ignore[assignment]
+            cli._resolve_apk = lambda _config: cli.REPO_ROOT / "fake.apk"  # type: ignore[assignment]
+            cli._capture_logcat = lambda _serial, output_path: output_path.write_text("", encoding="utf-8")  # type: ignore[assignment]
+
+            def fake_run_subprocess(command, **kwargs):
+                nonlocal maestro_attempts
+                command_list = list(command)
+                issued_commands.append(command_list)
+                if command_list[:5] == ["adb", "-s", "SER123", "shell", "pm"]:
+                    return subprocess.CompletedProcess(command_list, 0, stdout="package:/tmp/base.apk\n", stderr="")
+                if command_list[:4] == ["maestro", "--device", "SER123", "test"]:
+                    maestro_attempts += 1
+                    if maestro_attempts == 1:
+                        return subprocess.CompletedProcess(command_list, 1, stdout="", stderr="TimeoutException: TcpForwarder")
+                    return subprocess.CompletedProcess(command_list, 0, stdout="<testsuite/>\n", stderr="")
+                return subprocess.CompletedProcess(command_list, 0, stdout="", stderr="")
+
+            cli.run_subprocess = fake_run_subprocess  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmp, mock.patch("tools.maestro_android.cli.time.sleep", return_value=None):
+                cli._normalize_artifact_root = lambda *_args, **_kwargs: Path(tmp) / "artifacts"  # type: ignore[assignment]
+                parsed = argparse.Namespace(
+                    device="SER123",
+                    flows=[],
+                    flow_csv="tests/maestro/scenario-a.yaml",
+                    include_tags="",
+                    exclude_tags="",
+                    no_build=True,
+                    no_install=True,
+                    format="junit",
+                    clear_state=False,
+                )
+
+                cli._run_test(parsed, config)
+                output = (Path(tmp) / "artifacts/flows/scenario-a/maestro-output.txt").read_text(encoding="utf-8")
+        finally:
+            cli._resolve_serial = original_resolve_serial  # type: ignore[assignment]
+            cli._select_flows = original_select_flows  # type: ignore[assignment]
+            cli._resolve_apk = original_resolve_apk  # type: ignore[assignment]
+            cli._normalize_artifact_root = original_normalize_artifact_root  # type: ignore[assignment]
+            cli._capture_logcat = original_capture_logcat  # type: ignore[assignment]
+            cli.run_subprocess = original_run_subprocess  # type: ignore[assignment]
+
+        self.assertEqual(2, maestro_attempts)
+        self.assertIn(["adb", "-s", "SER123", "forward", "--remove-all"], issued_commands)
+        self.assertIn(["adb", "-s", "SER123", "wait-for-device"], issued_commands)
+        self.assertIn(["adb", "-s", "SER123", "shell", "am", "force-stop", config.project.app_id], issued_commands)
+        self.assertIn("=== attempt 1 ===", output)
+        self.assertIn("TimeoutException: TcpForwarder", output)
+        self.assertIn("=== attempt 2 ===", output)
+
+    def test_run_test_does_not_retry_non_transient_maestro_failure(self) -> None:
+        config = cli.load_config()
+        flow_path = cli.REPO_ROOT / "tests/maestro/scenario-a.yaml"
+        maestro_attempts = 0
+
+        original_resolve_serial = cli._resolve_serial
+        original_select_flows = cli._select_flows
+        original_resolve_apk = cli._resolve_apk
+        original_normalize_artifact_root = cli._normalize_artifact_root
+        original_capture_logcat = cli._capture_logcat
+        original_run_subprocess = cli.run_subprocess
+        try:
+            cli._resolve_serial = lambda _device: "SER123"  # type: ignore[assignment]
+            cli._select_flows = lambda *_args, **_kwargs: [flow_path]  # type: ignore[assignment]
+            cli._resolve_apk = lambda _config: cli.REPO_ROOT / "fake.apk"  # type: ignore[assignment]
+            cli._capture_logcat = lambda _serial, output_path: output_path.write_text("", encoding="utf-8")  # type: ignore[assignment]
+
+            def fake_run_subprocess(command, **kwargs):
+                nonlocal maestro_attempts
+                command_list = list(command)
+                if command_list[:5] == ["adb", "-s", "SER123", "shell", "pm"]:
+                    return subprocess.CompletedProcess(command_list, 0, stdout="package:/tmp/base.apk\n", stderr="")
+                if command_list[:4] == ["maestro", "--device", "SER123", "test"]:
+                    maestro_attempts += 1
+                    return subprocess.CompletedProcess(command_list, 1, stdout="", stderr="Element not found")
+                return subprocess.CompletedProcess(command_list, 0, stdout="", stderr="")
+
+            cli.run_subprocess = fake_run_subprocess  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmp:
+                cli._normalize_artifact_root = lambda *_args, **_kwargs: Path(tmp) / "artifacts"  # type: ignore[assignment]
+                parsed = argparse.Namespace(
+                    device="SER123",
+                    flows=[],
+                    flow_csv="tests/maestro/scenario-a.yaml",
+                    include_tags="",
+                    exclude_tags="",
+                    no_build=True,
+                    no_install=True,
+                    format="junit",
+                    clear_state=False,
+                )
+
+                with self.assertRaises(MaestroAndroidError):
+                    cli._run_test(parsed, config)
+                output = (Path(tmp) / "artifacts/flows/scenario-a/maestro-output.txt").read_text(encoding="utf-8")
+        finally:
+            cli._resolve_serial = original_resolve_serial  # type: ignore[assignment]
+            cli._select_flows = original_select_flows  # type: ignore[assignment]
+            cli._resolve_apk = original_resolve_apk  # type: ignore[assignment]
+            cli._normalize_artifact_root = original_normalize_artifact_root  # type: ignore[assignment]
+            cli._capture_logcat = original_capture_logcat  # type: ignore[assignment]
+            cli.run_subprocess = original_run_subprocess  # type: ignore[assignment]
+
+        self.assertEqual(1, maestro_attempts)
+        self.assertIn("=== attempt 1 ===", output)
+        self.assertNotIn("=== attempt 2 ===", output)
+
+    def test_run_test_retries_when_transient_marker_only_exists_in_maestro_log(self) -> None:
+        config = cli.load_config()
+        flow_path = cli.REPO_ROOT / "tests/maestro/scenario-a.yaml"
+        maestro_attempts = 0
+
+        original_resolve_serial = cli._resolve_serial
+        original_select_flows = cli._select_flows
+        original_resolve_apk = cli._resolve_apk
+        original_normalize_artifact_root = cli._normalize_artifact_root
+        original_capture_logcat = cli._capture_logcat
+        original_run_subprocess = cli.run_subprocess
+        try:
+            cli._resolve_serial = lambda _device: "SER123"  # type: ignore[assignment]
+            cli._select_flows = lambda *_args, **_kwargs: [flow_path]  # type: ignore[assignment]
+            cli._resolve_apk = lambda _config: cli.REPO_ROOT / "fake.apk"  # type: ignore[assignment]
+            cli._capture_logcat = lambda _serial, output_path: output_path.write_text("", encoding="utf-8")  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmp, mock.patch("tools.maestro_android.cli.time.sleep", return_value=None):
+                artifact_root = Path(tmp) / "artifacts"
+                cli._normalize_artifact_root = lambda *_args, **_kwargs: artifact_root  # type: ignore[assignment]
+
+                def fake_run_subprocess(command, **kwargs):
+                    nonlocal maestro_attempts
+                    command_list = list(command)
+                    if command_list[:5] == ["adb", "-s", "SER123", "shell", "pm"]:
+                        return subprocess.CompletedProcess(command_list, 0, stdout="package:/tmp/base.apk\n", stderr="")
+                    if command_list[:4] == ["maestro", "--device", "SER123", "test"]:
+                        maestro_attempts += 1
+                        debug_dir = Path(command_list[6])
+                        log_dir = debug_dir / ".maestro/tests/2026-04-26_000000"
+                        log_dir.mkdir(parents=True, exist_ok=True)
+                        if maestro_attempts == 1:
+                            (log_dir / "maestro.log").write_text("io.grpc.StatusRuntimeException: UNAVAILABLE: io exception\n", encoding="utf-8")
+                            return subprocess.CompletedProcess(command_list, 1, stdout="Waiting for flows to complete...\n[Failed]\n", stderr="")
+                        (log_dir / "maestro.log").write_text("flow passed\n", encoding="utf-8")
+                        return subprocess.CompletedProcess(command_list, 0, stdout="<testsuite/>\n", stderr="")
+                    return subprocess.CompletedProcess(command_list, 0, stdout="", stderr="")
+
+                cli.run_subprocess = fake_run_subprocess  # type: ignore[assignment]
+
+                parsed = argparse.Namespace(
+                    device="SER123",
+                    flows=[],
+                    flow_csv="tests/maestro/scenario-a.yaml",
+                    include_tags="",
+                    exclude_tags="",
+                    no_build=True,
+                    no_install=True,
+                    format="junit",
+                    clear_state=False,
+                )
+
+                cli._run_test(parsed, config)
+                output = (artifact_root / "flows/scenario-a/maestro-output.txt").read_text(encoding="utf-8")
+        finally:
+            cli._resolve_serial = original_resolve_serial  # type: ignore[assignment]
+            cli._select_flows = original_select_flows  # type: ignore[assignment]
+            cli._resolve_apk = original_resolve_apk  # type: ignore[assignment]
+            cli._normalize_artifact_root = original_normalize_artifact_root  # type: ignore[assignment]
+            cli._capture_logcat = original_capture_logcat  # type: ignore[assignment]
+            cli.run_subprocess = original_run_subprocess  # type: ignore[assignment]
+
+        self.assertEqual(2, maestro_attempts)
+        self.assertIn("UNAVAILABLE: io exception", output)
+        self.assertIn("=== attempt 2 ===", output)
 
 
 if __name__ == "__main__":

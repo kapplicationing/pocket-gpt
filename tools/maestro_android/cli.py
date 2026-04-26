@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,16 @@ try:
     import yaml  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - validated by config load
     yaml = None
+
+
+_MAESTRO_TRANSIENT_FAILURE_MARKERS = (
+    "Unable to launch app",
+    "TimeoutException",
+    "timed out while waiting for FUNCTIONFS_BIND",
+    "TcpForwarder",
+    "UNAVAILABLE: io exception",
+    "Connection refused",
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -145,6 +156,67 @@ def _device_env(serial: str) -> dict[str, str]:
     return env
 
 
+def _is_tcpip_serial(serial: str) -> bool:
+    return ":" in serial and not serial.startswith("emulator-")
+
+
+def _run_maestro_transport_recovery(serial: str, *, env: dict[str, str]) -> None:
+    run_subprocess(["adb", "-s", serial, "forward", "--remove-all"], check=False, capture_output=True, env=env)
+    if _is_tcpip_serial(serial):
+        run_subprocess(["adb", "disconnect", serial], check=False, capture_output=True, env=env)
+        run_subprocess(["adb", "connect", serial], check=False, capture_output=True, env=env)
+    run_subprocess(["adb", "-s", serial, "wait-for-device"], check=False, capture_output=True, env=env)
+    run_subprocess(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"], check=False, capture_output=True, env=env)
+    run_subprocess(["adb", "-s", serial, "shell", "wm", "dismiss-keyguard"], check=False, capture_output=True, env=env)
+
+
+def _is_transient_maestro_failure(output: str) -> bool:
+    return any(marker in output for marker in _MAESTRO_TRANSIENT_FAILURE_MARKERS)
+
+
+def _latest_maestro_log_text(debug_dir: Path) -> str:
+    logs = sorted(debug_dir.rglob("maestro.log"))
+    if not logs:
+        return ""
+    return logs[-1].read_text(encoding="utf-8", errors="replace")
+
+
+def _run_maestro_test_with_retry(
+    *,
+    serial: str,
+    flow: Path,
+    debug_dir: Path,
+    output_format: str,
+    env: dict[str, str],
+    app_id: str,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    attempt_outputs: list[str] = []
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(2):
+        run_subprocess(["adb", "-s", serial, "forward", "--remove-all"], check=False, capture_output=True, env=env)
+        if attempt > 0:
+            run_subprocess(["adb", "-s", serial, "shell", "am", "force-stop", app_id], check=False, capture_output=True, env=env)
+        cmd = ["maestro", "--device", serial, "test", str(flow), "--debug-output", str(debug_dir), "--format", output_format]
+        result = run_subprocess(cmd, capture_output=True, check=False, cwd=debug_dir, env=env)
+        combined = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+        maestro_log = _latest_maestro_log_text(debug_dir)
+        transient_source = combined if _is_transient_maestro_failure(combined) else maestro_log
+        attempt_block = [f"=== attempt {attempt + 1} ===", combined]
+        if maestro_log:
+            attempt_block.extend(["--- maestro.log ---", maestro_log])
+        attempt_outputs.append("\n".join(part for part in attempt_block if part).rstrip() + "\n")
+        if result.returncode == 0:
+            break
+        if attempt == 0 and _is_transient_maestro_failure(transient_source):
+            print_step(f"Flow {flow.stem} hit transient Maestro launch failure; retrying once.")
+            _run_maestro_transport_recovery(serial, env=env)
+            time.sleep(1.5)
+            continue
+        break
+    assert result is not None
+    return result, "".join(attempt_outputs)
+
+
 def _is_app_installed(serial: str, app_id: str) -> bool:
     completed = run_subprocess(
         ["adb", "-s", serial, "shell", "pm", "path", app_id],
@@ -242,6 +314,7 @@ def _write_trace(path: Path, manifest: dict[str, Any]) -> None:
 
 def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
     serial = _resolve_serial(parsed.device)
+    device_env = _device_env(serial)
     explicit_flows = list(parsed.flows) + _parse_csv(parsed.flow_csv)
     include_tags = _parse_csv(parsed.include_tags)
     exclude_tags = _parse_csv(parsed.exclude_tags)
@@ -250,7 +323,7 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
     if not parsed.no_build:
         run_subprocess(config.project.build_command)
     if not parsed.no_install:
-        run_subprocess(config.project.install_command, env=_device_env(serial))
+        run_subprocess(config.project.install_command, env=device_env)
     _ensure_app_installed(serial, config.project.app_id, allow_install_hint=parsed.no_install)
     apk_path = _resolve_apk(config)
 
@@ -265,12 +338,20 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
         run_subprocess(["adb", "-s", serial, "logcat", "-c"], check=False)
         if parsed.clear_state:
             run_subprocess(["adb", "-s", serial, "shell", "pm", "clear", config.project.app_id], check=False)
-        cmd = ["maestro", "--device", serial, "test", str(flow), "--debug-output", str(debug_dir), "--format", parsed.format]
-        completed = run_subprocess(cmd, capture_output=True, check=False, cwd=debug_dir)
+        completed, attempt_output = _run_maestro_test_with_retry(
+            serial=serial,
+            flow=flow,
+            debug_dir=debug_dir,
+            output_format=parsed.format,
+            env=device_env,
+            app_id=config.project.app_id,
+        )
 
         junit_path = flow_dir / "junit.xml"
         stderr_path = flow_dir / "maestro-stderr.log"
         stdout_path = flow_dir / "maestro-stdout.log"
+        output_path = flow_dir / "maestro-output.txt"
+        output_path.write_text(attempt_output, encoding="utf-8")
         if parsed.format == "junit":
             junit_path.write_text(completed.stdout or "", encoding="utf-8")
         else:

@@ -7,7 +7,24 @@ tags:
 ---
 - launchApp:
     clearState: true
+- runFlow:
+    when:
+      visible:
+        id: "provisioning_bootstrap_loading"
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- extendedWaitUntil:
+    visible: "Next"
+    timeout: 30000
 - runFlow: shared/bootstrap-to-ready.yaml
-- assertNotVisible: "Welcome"
+- assertNotVisible:
+    text: "Next"
 - assertNotVisible: "UI-STARTUP-001"
+- assertNotVisible:
+    id: "provisioning_bootstrap_loading"
+- assertVisible:
+    id: "session_drawer_button"
 - takeScreenshot: "scenario-onboarding-ready"

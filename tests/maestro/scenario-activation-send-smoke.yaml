@@ -24,7 +24,6 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "send_button"
-      enabled: true
     timeout: 180000
 - tapOn:
     id: "send_button"

@@ -5,9 +5,18 @@ tags:
 ---
 - launchApp:
     clearState: true
+- runFlow:
+    when:
+      visible:
+        id: "provisioning_bootstrap_loading"
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
 - extendedWaitUntil:
     visible: "Skip"
-    timeout: 20000
+    timeout: 30000
 - hideKeyboard
 - tapOn: "Skip"
 - tapOn:

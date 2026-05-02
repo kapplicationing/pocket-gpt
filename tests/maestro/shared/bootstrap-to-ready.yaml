@@ -5,6 +5,7 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_skip"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_skip"
 - runFlow:
@@ -12,6 +13,7 @@ appId: com.pocketagent.android
       visible:
         text: "Skip"
     commands:
+      - hideKeyboard
       - tapOn:
           text: "Skip"
 - runFlow:
@@ -19,20 +21,15 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_next"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_next"
-- runFlow:
-    when:
-      visible:
-        text: "Next"
-    commands:
-      - tapOn:
-          text: "Next"
 - runFlow:
     when:
       visible:
         id: "onboarding_next"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_next"
 - runFlow:
@@ -40,6 +37,15 @@ appId: com.pocketagent.android
       visible:
         text: "Next"
     commands:
+      - hideKeyboard
+      - tapOn:
+          text: "Next"
+- runFlow:
+    when:
+      visible:
+        text: "Next"
+    commands:
+      - hideKeyboard
       - tapOn:
           text: "Next"
 - runFlow:
@@ -47,6 +53,7 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_get_started"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_get_started"
 - runFlow:
@@ -54,6 +61,7 @@ appId: com.pocketagent.android
       visible:
         text: "Get started"
     commands:
+      - hideKeyboard
       - tapOn:
           text: "Get started"
 - runFlow:

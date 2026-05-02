@@ -4,23 +4,22 @@ appId: com.pocketagent.android
     clearState: true
 - runFlow:
     when:
-      notVisible: "Pocket GPT"
+      visible:
+        id: "provisioning_bootstrap_loading"
     commands:
       - extendedWaitUntil:
-          visible: "Welcome"
-          timeout: 20000
-- runFlow:
-    when:
-      notVisible: "Welcome"
-    commands:
-      - extendedWaitUntil:
-          visible: "Pocket GPT"
-          timeout: 20000
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- extendedWaitUntil:
+    visible: "Next"
+    timeout: 20000
 - runFlow:
     when:
       visible:
         id: "onboarding_skip"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_skip"
 - runFlow:
@@ -28,6 +27,7 @@ appId: com.pocketagent.android
       visible:
         text: "Skip"
     commands:
+      - hideKeyboard
       - tapOn:
           text: "Skip"
 - runFlow:
@@ -35,6 +35,7 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_next"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_next"
 - runFlow:
@@ -42,6 +43,7 @@ appId: com.pocketagent.android
       visible:
         text: "Next"
     commands:
+      - hideKeyboard
       - tapOn:
           text: "Next"
 - runFlow:
@@ -49,6 +51,7 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_next"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_next"
 - runFlow:
@@ -56,6 +59,7 @@ appId: com.pocketagent.android
       visible:
         text: "Next"
     commands:
+      - hideKeyboard
       - tapOn:
           text: "Next"
 - runFlow:
@@ -63,6 +67,7 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_get_started"
     commands:
+      - hideKeyboard
       - tapOn:
           id: "onboarding_get_started"
 - runFlow:
@@ -70,6 +75,7 @@ appId: com.pocketagent.android
       visible:
         text: "Get started"
     commands:
+      - hideKeyboard
       - tapOn:
           text: "Get started"
 - runFlow:
@@ -80,33 +86,8 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000
-- runFlow:
-    when:
-      visible: "Setup"
-    commands:
-      - tapOn:
-          id: "send_button"
-- runFlow:
-    when:
-      visible: "Load last used"
-    commands:
-      - tapOn: "Load last used"
-- runFlow:
-    when:
-      visible:
-        id: "refresh_button"
-    commands:
-      - tapOn:
-          id: "refresh_button"
-- extendedWaitUntil:
-    notVisible: "Setup"
-    timeout: 300000
-- runFlow:
-    when:
-      visible: "Model library"
-    commands:
-      - back
+- runFlow: ensure-runtime-loaded.yaml
 - extendedWaitUntil:
     visible:
       id: "session_drawer_button"
-    timeout: 20000
+    timeout: 30000

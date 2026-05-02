@@ -1,5 +1,4 @@
 appId: com.pocketagent.android
 ---
 - runFlow: bootstrap-cloud-startup.yaml
-- runFlow: ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"

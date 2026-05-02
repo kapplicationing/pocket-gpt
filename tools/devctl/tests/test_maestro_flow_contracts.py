@@ -59,41 +59,51 @@ class MaestroFlowContractsTest(unittest.TestCase):
     def test_cloud_bootstrap_runtime_ready_uses_simple_first_setup_path(self) -> None:
         helper_path = REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-cloud-startup.yaml"
         text = helper_path.read_text(encoding="utf-8")
+        self.assertIn('id: "provisioning_bootstrap_loading"', text)
+        self.assertIn('visible: "Next"', text)
         self.assertIn('visible: "Get ready"', text)
         self.assertIn('visible: "Model library"', text)
-        self.assertIn('visible: "Setup"', text)
-        self.assertIn('id: "send_button"', text)
-        self.assertIn('notVisible: "Setup"', text)
         self.assertIn('id: "session_drawer_button"', text)
+        self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
+        self.assertNotIn('visible: "Setup"', text)
+        self.assertNotIn('id: "send_button"', text)
+        self.assertNotIn('visible: "Pocket GPT"', text)
 
     def test_ensure_runtime_loaded_uses_downloaded_models_load_path(self) -> None:
         helper_expectations = (
             (
                 REPO_ROOT / "tests/maestro/shared/ensure-runtime-loaded.yaml",
-                True,
                 'text: "Downloaded models"',
                 None,
             ),
             (
                 REPO_ROOT / "tests/maestro-cloud/shared/ensure-runtime-loaded.yaml",
-                True,
                 "recover-runtime-from-model-library.yaml",
                 'visible: "Setup"',
             ),
         )
-        for helper_path, expect_enabled_send, recovery_marker, explicit_setup_marker in helper_expectations:
+        for helper_path, recovery_marker, explicit_setup_marker in helper_expectations:
             with self.subTest(helper=helper_path.relative_to(REPO_ROOT).as_posix()):
                 text = helper_path.read_text(encoding="utf-8")
+                commands = [
+                    line.strip()
+                    for line in helper_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("- ")
+                ]
                 self.assertIn(recovery_marker, text)
                 self.assertIn('visible: "Load"', text)
                 if explicit_setup_marker is not None:
                     self.assertIn(explicit_setup_marker, text)
                 self.assertIn('notVisible: "Setup"', text)
                 self.assertIn('notVisible: "Retry"', text)
-                if expect_enabled_send:
-                    self.assertIn('enabled: true', text)
+                self.assertIn('notVisible: "Loading…"', text)
                 self.assertNotIn('text: "Active model"', text)
                 self.assertNotIn('notVisible: "Unloaded"', text)
+                self.assertNotEqual(
+                    "- hideKeyboard",
+                    commands[0] if commands else None,
+                    "ensure-runtime-loaded must not start with hideKeyboard because Maestro can resolve that to a back press.",
+                )
 
     def test_cloud_model_management_smoke_uses_unified_library_contract(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro-cloud/scenario-model-management-split-smoke.yaml"

@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui.state
 
+import androidx.compose.runtime.Immutable
 import com.pocketagent.core.RuntimeExecutionStats
 import com.pocketagent.core.ChatToolCall
 import com.pocketagent.runtime.ChatStreamEvent
@@ -7,6 +8,7 @@ import com.pocketagent.runtime.ChatStreamDelta
 import com.pocketagent.runtime.RuntimeGenerationTimeoutException
 import kotlinx.coroutines.TimeoutCancellationException
 
+@Immutable
 data class StreamReducerState(
     val requestId: String,
     val accumulatedText: String = "",
@@ -20,6 +22,7 @@ data class StreamReducerState(
     }
 }
 
+@Immutable
 data class StreamTerminalState(
     val requestId: String,
     val finishReason: String,

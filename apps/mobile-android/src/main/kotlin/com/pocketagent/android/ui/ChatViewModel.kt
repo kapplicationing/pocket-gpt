@@ -4,6 +4,7 @@ import android.util.Log
 import com.pocketagent.android.BuildConfig
 import com.pocketagent.android.data.chat.SessionPersistence
 import com.pocketagent.android.runtime.ChatRuntimeService
+import com.pocketagent.android.runtime.AppDispatchers
 import com.pocketagent.android.runtime.GpuProbeFailureReason
 import com.pocketagent.android.runtime.GpuProbeResult
 import com.pocketagent.android.runtime.GpuProbeStatus
@@ -32,6 +33,7 @@ import com.pocketagent.android.runtime.PresetBackingStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.android.ui.state.ChatSessionUiModel
+import com.pocketagent.android.ui.state.activeSession
 import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.CompletionSettings
 import com.pocketagent.android.ui.state.ComposerUiState
@@ -50,6 +52,7 @@ import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.StartupProbeState
+import com.pocketagent.android.ui.state.StreamingState
 import com.pocketagent.android.ui.state.StreamTerminalState
 import com.pocketagent.android.ui.state.UiError
 import com.pocketagent.android.ui.state.UiErrorMapper
@@ -63,14 +66,15 @@ import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlin.math.abs
 import kotlinx.coroutines.isActive
@@ -81,7 +85,8 @@ class ChatViewModel internal constructor(
     internal val runtimeFacade: ChatRuntimeService,
     sessionPersistence: SessionPersistence,
     internal val presetBackingStore: PresetBackingStore,
-    internal val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    internal val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
+    internal val ioDispatcher: CoroutineDispatcher = dispatchers.io,
     internal val runtimeGenerationTimeoutMs: Long = 0L,
     private val runtimeStartupProbeTimeoutMs: Long = DEFAULT_RUNTIME_STARTUP_PROBE_TIMEOUT_MS,
     internal val sendController: ChatSendController = ChatSendController(runtimeFacade, ioDispatcher),
@@ -117,6 +122,62 @@ class ChatViewModel internal constructor(
 ) : ViewModel() {
     internal val _uiState = MutableStateFlow(ChatUiState())
     val uiState = _uiState.asStateFlow()
+    val bootstrapCompletedFlow: StateFlow<Boolean> = _uiState
+        .map { it.bootstrapCompleted }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.bootstrapCompleted)
+    val composerFlow: StateFlow<ComposerUiState> = _uiState
+        .map { it.composer }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.composer)
+    val runtimeFlow: StateFlow<RuntimeUiState> = _uiState
+        .map { it.runtime }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.runtime)
+    val sessionsFlow: StateFlow<List<ChatSessionUiModel>> = _uiState
+        .map { it.sessions }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.sessions)
+    val activeSessionIdFlow: StateFlow<String?> = _uiState
+        .map { it.activeSessionId }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.activeSessionId)
+    val activeSessionFlow: StateFlow<ChatSessionUiModel?> = _uiState
+        .map { it.activeSession() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.activeSession())
+    val currentThinkingEnabledFlow: StateFlow<Boolean> = _uiState
+        .map { state -> state.activeSession()?.completionSettings?.showThinking == true }
+        .distinctUntilChanged()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Lazily,
+            _uiState.value.activeSession()?.completionSettings?.showThinking == true,
+        )
+    // Narrow flow for the active session's completion settings. Used by the Completion
+    // Settings modal sheet, which previously read state.activeSession()?.completionSettings
+    // off the full uiState — that observation pulled the entire ChatUiState through Compose
+    // and re-evaluated the O(N) activeSession() lookup on every emission, even during typing.
+    val currentCompletionSettingsFlow: StateFlow<CompletionSettings> = _uiState
+        .map { state -> state.activeSession()?.completionSettings ?: CompletionSettings() }
+        .distinctUntilChanged()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Lazily,
+            _uiState.value.activeSession()?.completionSettings ?: CompletionSettings(),
+        )
+    val activeSurfaceFlow: StateFlow<ModalSurface> = _uiState
+        .map { it.activeSurface }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.activeSurface)
+    val advancedUnlockedFlow: StateFlow<Boolean> = _uiState
+        .map { it.advancedUnlocked }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.advancedUnlocked)
+    val streamingFlow: StateFlow<StreamingState> = _uiState
+        .map { it.streaming }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.streaming)
     internal var gpuProbeRefreshJob: Job? = null
     @Volatile
     internal var activeSendRequestId: String? = null
@@ -180,7 +241,9 @@ class ChatViewModel internal constructor(
         val now = System.currentTimeMillis()
         if (now - lastKeepAliveTouchAtMs >= COMPOSER_KEEP_ALIVE_TOUCH_DEBOUNCE_MS) {
             lastKeepAliveTouchAtMs = now
-            runtimeFacade.touchKeepAlive()
+            viewModelScope.launch(ioDispatcher) {
+                runtimeFacade.touchKeepAlive()
+            }
         }
     }
 
@@ -223,7 +286,7 @@ class ChatViewModel internal constructor(
     }
 
     fun toggleSessionThinking() {
-        val activeSession = _uiState.value.activeSession ?: return
+        val activeSession = _uiState.value.activeSession() ?: return
         updateSessionCompletionSettingsInternal(
             activeSession.completionSettings.copy(
                 showThinking = !activeSession.completionSettings.showThinking,
@@ -370,31 +433,26 @@ class ChatViewModel internal constructor(
         text: String,
         isThinking: Boolean? = null,
     ) {
-        updateActiveSession(sessionId) { session ->
-            val updatedMessages = session.messages.map { message ->
-                if (message.id != messageId) {
-                    message
-                } else {
-                    message.copy(
-                        content = text,
-                        isStreaming = true,
-                        isThinking = isThinking ?: message.isThinking,
-                        interaction = (message.interaction ?: PersistedInteractionMessage(
-                            role = message.role.name,
-                            parts = listOf(PersistedInteractionPart(type = "text", text = "")),
-                        )).copy(
-                            parts = listOf(PersistedInteractionPart(type = "text", text = text)),
-                            metadata = (message.interaction?.metadata ?: emptyMap()) + (
-                                "state" to if (isThinking == true) "thinking" else "streaming"
-                            ),
-                        ),
-                    )
-                }
+        _uiState.update { state ->
+            val current = state.streaming
+            val nextThinking = isThinking ?: current.isThinking
+            if (
+                current.sessionId == sessionId &&
+                current.messageId == messageId &&
+                current.text == text &&
+                current.isThinking == nextThinking
+            ) {
+                state
+            } else {
+                state.copy(
+                    streaming = StreamingState(
+                        sessionId = sessionId,
+                        messageId = messageId,
+                        text = text,
+                        isThinking = nextThinking,
+                    ),
+                )
             }
-            session.copy(
-                messages = updatedMessages,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            )
         }
     }
 
@@ -447,6 +505,13 @@ class ChatViewModel internal constructor(
                 updatedAtEpochMs = System.currentTimeMillis(),
             )
         }
+        _uiState.update { state ->
+            if (state.streaming.sessionId == sessionId && state.streaming.messageId == messageId) {
+                state.copy(streaming = StreamingState())
+            } else {
+                state
+            }
+        }
     }
 
     internal fun appendSystemMessage(
@@ -475,7 +540,11 @@ class ChatViewModel internal constructor(
         sessionId: String,
         messageId: String,
     ): String? {
-        val session = _uiState.value.sessions.firstOrNull { it.id == sessionId } ?: return null
+        val state = _uiState.value
+        if (state.streaming.sessionId == sessionId && state.streaming.messageId == messageId) {
+            return state.streaming.text
+        }
+        val session = state.sessions.firstOrNull { it.id == sessionId } ?: return null
         return session.messages.firstOrNull { it.id == messageId }?.content
     }
 

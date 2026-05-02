@@ -49,7 +49,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.pocketagent.android.R
 import com.pocketagent.android.ui.state.ChatSessionUiModel
-import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
 import java.util.Calendar
@@ -112,7 +111,8 @@ private fun groupSessionsByDate(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SessionDrawer(
-    state: ChatUiState,
+    sessions: List<ChatSessionUiModel>,
+    activeSessionId: String?,
     onCreateSession: () -> Unit,
     onSwitchSession: (String) -> Unit,
     onDeleteSession: (ChatSessionUiModel) -> Unit,
@@ -121,8 +121,8 @@ internal fun SessionDrawer(
     val haptic = LocalHapticFeedback.current
     val createSessionDescription = stringResource(id = R.string.a11y_create_session)
     var searchQuery by remember { mutableStateOf("") }
-    val visibleSessions = state.sessions.filterNot { it.id in hiddenSessionIds }
-    val groupedSessions = remember(state.sessions, searchQuery, hiddenSessionIds) {
+    val visibleSessions = sessions.filterNot { it.id in hiddenSessionIds }
+    val groupedSessions = remember(sessions, searchQuery, hiddenSessionIds) {
         val filtered = if (searchQuery.isBlank()) {
             visibleSessions
         } else {
@@ -248,7 +248,7 @@ internal fun SessionDrawer(
                 ) {
                     SessionRow(
                         session = session,
-                        isActive = session.id == state.activeSessionId,
+                        isActive = session.id == activeSessionId,
                         onSwitchSession = onSwitchSession,
                     )
                 }

@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui.state
 
+import androidx.compose.runtime.Immutable
 import com.pocketagent.android.runtime.ProvisioningReadiness
 import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
 
@@ -18,6 +19,7 @@ enum class ChatGatePrimaryAction {
     REFRESH_RUNTIME_CHECKS,
 }
 
+@Immutable
 data class ChatGateState(
     val status: ChatGateStatus,
     val primaryAction: ChatGatePrimaryAction,

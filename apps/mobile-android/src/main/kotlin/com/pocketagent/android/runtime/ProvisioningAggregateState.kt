@@ -27,7 +27,7 @@ internal class DefaultProvisioningAggregateStore(
 ) {
     private val downloads = runtimeBindings.observeDownloads()
     private val downloadPreferences = runtimeBindings.observeDownloadPreferences()
-    private val lifecycle = runtimeBindings.observeModelLifecycle()
+    private val lifecycle = runtimeBindings.observeModelLifecycle(coroutineScope)
     private val _state = MutableStateFlow(
         ProvisioningAggregateState(
             snapshot = runtimeBindings.currentProvisioningSnapshot(),

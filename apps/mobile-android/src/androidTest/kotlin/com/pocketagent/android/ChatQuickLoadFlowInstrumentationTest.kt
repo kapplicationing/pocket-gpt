@@ -1,5 +1,6 @@
 package com.pocketagent.android
 
+import com.pocketagent.android.ui.state.activeSession
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
@@ -229,7 +230,7 @@ private fun QuickLoadTestApp(
         ) {
             Text("Send")
         }
-        state.activeSession?.messages?.forEach { message ->
+        state.activeSession()?.messages?.forEach { message ->
             Text(message.content)
         }
     }

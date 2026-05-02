@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 
 class StoredModelSidecarMetadataTest {
     @Test
@@ -90,6 +91,42 @@ class StoredModelSidecarMetadataTest {
             assertEquals(4, decoded.parameters.headCountKv)
             assertEquals(256000, decoded.parameters.vocabularySize)
             assertNull(decoded.promptProfileId)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `sidecar metadata read is cached until file changes`() {
+        val file = File.createTempFile("pocketgpt-sidecar-cache", ".json")
+        try {
+            StoredModelSidecarMetadataStore.write(
+                metadataFile = file,
+                metadata = StoredModelSidecarMetadata(
+                    modelId = "qwen3.5-0.8b-q4",
+                    version = "q4_0",
+                    sourceKind = ModelSourceKind.LOCAL_IMPORT,
+                ),
+            )
+
+            val first = StoredModelSidecarMetadataStore.read(file)
+            val second = StoredModelSidecarMetadataStore.read(file)
+
+            assertSame(first, second)
+
+            StoredModelSidecarMetadataStore.write(
+                metadataFile = file,
+                metadata = StoredModelSidecarMetadata(
+                    modelId = "qwen3.5-0.8b-q4",
+                    version = "q8_0_extended",
+                    sourceKind = ModelSourceKind.HUGGING_FACE,
+                ),
+            )
+
+            val changed = StoredModelSidecarMetadataStore.read(file)
+
+            assertNotNull(changed)
+            assertEquals("q8_0_extended", changed.version)
         } finally {
             file.delete()
         }

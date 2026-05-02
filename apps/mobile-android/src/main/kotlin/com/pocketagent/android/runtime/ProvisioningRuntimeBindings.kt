@@ -10,6 +10,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 internal class ProvisioningRuntimeBindings(
@@ -17,7 +18,7 @@ internal class ProvisioningRuntimeBindings(
     val observeDownloads: () -> StateFlow<List<DownloadTaskState>>,
     val observeDownloadPreferences: () -> StateFlow<DownloadPreferencesState>,
     val currentDownloadPreferences: () -> DownloadPreferencesState,
-    val observeModelLifecycle: () -> StateFlow<RuntimeModelLifecycleSnapshot>,
+    val observeModelLifecycle: (CoroutineScope) -> StateFlow<RuntimeModelLifecycleSnapshot>,
     val currentModelLifecycle: () -> RuntimeModelLifecycleSnapshot,
     val importModelFromUri: suspend (modelId: String, sourceUri: Uri) -> RuntimeModelImportResult,
     val loadModelDistributionManifest: suspend () -> ModelDistributionManifest,
@@ -54,8 +55,8 @@ internal fun appRuntimeProvisioningBindings(context: Context): ProvisioningRunti
         currentDownloadPreferences = {
             AppRuntimeDependencies.currentDownloadPreferences(appContext)
         },
-        observeModelLifecycle = {
-            AppRuntimeDependencies.observeModelLifecycle(appContext)
+        observeModelLifecycle = { scope ->
+            AppRuntimeDependencies.observeModelLifecycle(appContext, scope)
         },
         currentModelLifecycle = {
             AppRuntimeDependencies.currentModelLifecycle(appContext)

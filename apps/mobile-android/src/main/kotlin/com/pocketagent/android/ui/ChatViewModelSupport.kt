@@ -3,6 +3,7 @@ package com.pocketagent.android.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.pocketagent.android.data.chat.SessionPersistence
+import com.pocketagent.android.runtime.AppDispatchers
 import com.pocketagent.android.runtime.ChatRuntimeService
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.ProvisioningGateway
@@ -128,6 +129,7 @@ class ChatViewModelFactory internal constructor(
     private val presetBackingStore: PresetBackingStore,
     private val deviceStateProvider: DeviceStateProvider = DeviceStateProvider.DEFAULT,
     private val runtimeTuning: RuntimeTuning = RuntimeTuning.DISABLED,
+    private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -136,6 +138,7 @@ class ChatViewModelFactory internal constructor(
                 runtimeFacade = runtimeFacade,
                 sessionPersistence = sessionPersistence,
                 presetBackingStore = presetBackingStore,
+                dispatchers = dispatchers,
                 deviceStateProvider = deviceStateProvider,
                 runtimeTuning = runtimeTuning,
             ) as T

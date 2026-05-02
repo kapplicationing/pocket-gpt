@@ -41,6 +41,7 @@ data class MessageUiModel(
     val totalLatencyMs: Long? = null,
 )
 
+@Immutable
 data class PersistedInteractionMessage(
     val role: String,
     val parts: List<PersistedInteractionPart> = emptyList(),
@@ -49,11 +50,13 @@ data class PersistedInteractionMessage(
     val metadata: Map<String, String> = emptyMap(),
 )
 
+@Immutable
 data class PersistedInteractionPart(
     val type: String,
     val text: String? = null,
 )
 
+@Immutable
 data class PersistedToolCall(
     val id: String,
     val name: String,
@@ -93,6 +96,7 @@ data class ChatSessionUiModel(
     val messageCount: Int = messages.size,
 )
 
+@Immutable
 data class ComposerUiState(
     val text: String = "",
     val isSending: Boolean = false,
@@ -101,6 +105,7 @@ data class ComposerUiState(
     val isCancelling: Boolean = false,
 )
 
+@Immutable
 data class RuntimeUiState(
     val offlineOnly: Boolean = true,
     val routingMode: RoutingMode = RoutingMode.AUTO,
@@ -148,6 +153,14 @@ data class RuntimeUiState(
     val lastError: String? = null,
     val sendElapsedMs: Long? = null,
     val sendSlowState: String? = null,
+)
+
+@Immutable
+data class StreamingState(
+    val sessionId: String? = null,
+    val messageId: String? = null,
+    val text: String = "",
+    val isThinking: Boolean = false,
 )
 
 enum class RuntimeKeepAlivePreference {
@@ -199,11 +212,13 @@ enum class FirstSessionStage {
     ADVANCED_UNLOCKED,
 }
 
+@Immutable
 data class FirstSessionTelemetryEvent(
     val eventName: String,
     val eventTimeUtc: String,
 )
 
+@Immutable
 data class ChatUiState(
     val bootstrapCompleted: Boolean = false,
     val sessions: List<ChatSessionUiModel> = emptyList(),
@@ -211,6 +226,7 @@ data class ChatUiState(
     val composer: ComposerUiState = ComposerUiState(),
     val runtime: RuntimeUiState = RuntimeUiState(),
     val defaultThinkingEnabled: Boolean = false,
+    val streaming: StreamingState = StreamingState(),
     val activeSurface: ModalSurface = ModalSurface.None,
     val onboardingPage: Int = 0,
     val firstSessionStage: FirstSessionStage = FirstSessionStage.ONBOARDING,
@@ -218,7 +234,13 @@ data class ChatUiState(
     val firstAnswerCompleted: Boolean = false,
     val followUpCompleted: Boolean = false,
     val firstSessionTelemetryEvents: List<FirstSessionTelemetryEvent> = emptyList(),
-) {
-    val activeSession: ChatSessionUiModel?
-        get() = sessions.firstOrNull { it.id == activeSessionId }
-}
+)
+
+// Intentionally an extension function, NOT a property getter on @Immutable ChatUiState.
+// A custom getter on a data class breaks the Compose @Immutable contract (same
+// equality must imply same outputs) and runs an O(N) scan on every access — including
+// hot paths like _uiState.map { it.activeSession }. Callers should hold activeSessionId
+// + sessions narrowly via dedicated flows (see ChatViewModel.activeSessionFlow) and
+// only resolve when they truly need the resolved session.
+fun ChatUiState.activeSession(): ChatSessionUiModel? =
+    sessions.firstOrNull { it.id == activeSessionId }

@@ -3,6 +3,7 @@ package com.pocketagent.android.ui.controllers
 import com.pocketagent.android.ui.launchSafeSingleImagePaths
 import com.pocketagent.android.ui.clearError
 import com.pocketagent.android.ui.state.ChatSessionUiModel
+import com.pocketagent.android.ui.state.activeSession
 import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.CompletionSettings
 import com.pocketagent.android.ui.state.ComposerUiState
@@ -36,7 +37,7 @@ class AndroidChatConversationService(
         state: ChatUiState,
         settings: CompletionSettings,
     ): ChatStateUpdate? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         return ChatStateUpdate(
             state = state.updateSession(activeSession.id) { session ->
                 session.copy(completionSettings = settings)
@@ -69,7 +70,7 @@ class AndroidChatConversationService(
     }
 
     internal fun startEditing(state: ChatUiState, messageId: String): ChatUiState? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         val message = activeSession.messages.firstOrNull { it.id == messageId } ?: return null
         if (message.role != com.pocketagent.android.ui.state.MessageRole.USER) {
             return null
@@ -97,7 +98,7 @@ class AndroidChatConversationService(
     }
 
     internal fun submitEdit(state: ChatUiState): ChatStateUpdate? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         val editingId = state.composer.editingMessageId ?: return null
         val editIndex = activeSession.messages.indexOfFirst { it.id == editingId }
         if (editIndex < 0) {
@@ -120,7 +121,7 @@ class AndroidChatConversationService(
         state: ChatUiState,
         messageId: String,
     ): ChatStateUpdate? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         val messageIndex = activeSession.messages.indexOfFirst { it.id == messageId }
         if (messageIndex < 0) {
             return null
@@ -263,7 +264,7 @@ class AndroidChatConversationService(
         imageMessage: MessageUiModel,
         loadingDetail: String = "Loading runtime model...",
     ): PreparedImageAnalysis? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         return PreparedImageAnalysis(
             state = state.updateSession(activeSession.id) { session ->
                 session.copy(
@@ -330,7 +331,7 @@ class AndroidChatConversationService(
         toolCallId: String,
         loadingDetail: String = "Preparing local tool...",
     ): PreparedToolExecution? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         return PreparedToolExecution(
             state = state.updateSession(activeSession.id) { session ->
                 session.copy(
@@ -353,7 +354,7 @@ class AndroidChatConversationService(
         state: ChatUiState,
         diagnosticsMessage: MessageUiModel,
     ): ChatStateUpdate? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         return ChatStateUpdate(
             state = state.updateSession(activeSession.id) { session ->
                 session.copy(
@@ -372,7 +373,7 @@ class AndroidChatConversationService(
         errorMessage: MessageUiModel,
         uiError: UiError,
     ): ChatStateUpdate? {
-        val activeSession = state.activeSession ?: return null
+        val activeSession = state.activeSession() ?: return null
         return ChatStateUpdate(
             state = state.updateSession(activeSession.id) { session ->
                 session.copy(
@@ -386,7 +387,7 @@ class AndroidChatConversationService(
         )
     }
 
-    internal fun activeSession(state: ChatUiState): ChatSessionUiModel? = state.activeSession
+    internal fun activeSession(state: ChatUiState): ChatSessionUiModel? = state.activeSession()
 
     private fun ChatUiState.updateSession(
         sessionId: String,

@@ -4,6 +4,7 @@ import com.pocketagent.android.runtime.modelmanager.InstalledArtifactDescriptor
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,9 +30,26 @@ data class StoredModelSidecarMetadata(
 )
 
 internal object StoredModelSidecarMetadataStore {
+    private data class CachedRead(
+        val lastModified: Long,
+        val length: Long,
+        val metadata: StoredModelSidecarMetadata?,
+    )
+
+    private val readCache = ConcurrentHashMap<String, CachedRead>()
+
     fun read(metadataFile: File): StoredModelSidecarMetadata? {
         if (!metadataFile.exists() || !metadataFile.isFile) {
+            readCache.remove(metadataFile.absolutePath)
             return null
+        }
+        val cacheKey = metadataFile.absolutePath
+        val lastModified = metadataFile.lastModified()
+        val length = metadataFile.length()
+        readCache[cacheKey]?.let { cached ->
+            if (cached.lastModified == lastModified && cached.length == length) {
+                return cached.metadata
+            }
         }
         return runCatching {
             val json = JSONObject(metadataFile.readText())
@@ -48,7 +66,13 @@ internal object StoredModelSidecarMetadataStore {
                 artifacts = artifacts,
                 parameters = parameters,
             )
-        }.getOrNull()
+        }.getOrNull().also { parsed ->
+            readCache[cacheKey] = CachedRead(
+                lastModified = lastModified,
+                length = length,
+                metadata = parsed,
+            )
+        }
     }
 
     fun write(
@@ -64,6 +88,11 @@ internal object StoredModelSidecarMetadataStore {
             .put("parameters", encodeParameters(metadata.parameters))
         metadataFile.parentFile?.mkdirs()
         metadataFile.writeText(json.toString())
+        readCache[metadataFile.absolutePath] = CachedRead(
+            lastModified = metadataFile.lastModified(),
+            length = metadataFile.length(),
+            metadata = metadata,
+        )
     }
 
     private fun encodeArtifacts(artifacts: List<InstalledArtifactDescriptor>): JSONArray {

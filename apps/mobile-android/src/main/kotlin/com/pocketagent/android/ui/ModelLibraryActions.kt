@@ -32,23 +32,23 @@ internal class ModelLibraryActions(
         chatAppLaunchers.launchDownloadFlow(version)
     }
 
-    fun pauseDownload(taskId: String) {
-        provisioningViewModel.pauseDownload(taskId)
+    suspend fun pauseDownload(taskId: String) {
+        provisioningViewModel.pauseDownloadAsync(taskId)
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_paused))
     }
 
-    fun resumeDownload(taskId: String) {
-        provisioningViewModel.resumeDownload(taskId)
+    suspend fun resumeDownload(taskId: String) {
+        provisioningViewModel.resumeDownloadAsync(taskId)
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_resumed))
     }
 
-    fun retryDownload(taskId: String) {
-        provisioningViewModel.retryDownload(taskId)
+    suspend fun retryDownload(taskId: String) {
+        provisioningViewModel.retryDownloadAsync(taskId)
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_retried))
     }
 
-    fun cancelDownload(taskId: String) {
-        provisioningViewModel.cancelDownload(taskId)
+    suspend fun cancelDownload(taskId: String) {
+        provisioningViewModel.cancelDownloadAsync(taskId)
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_download_cancelled))
     }
 
@@ -150,7 +150,7 @@ internal class ModelLibraryActions(
 
     suspend fun refreshAll() {
         provisioningViewModel.refreshManifest()
-        provisioningViewModel.refreshDownloads()
+        provisioningViewModel.refreshDownloadsAsync()
         viewModel.refreshRuntimeReadiness()
         provisioningViewModel.setStatusMessage(
             context.getString(R.string.ui_model_refresh_runtime_feedback),

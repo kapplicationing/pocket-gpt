@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui
 
+import com.pocketagent.android.ui.state.activeSession
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.android.ui.controllers.ChatStateUpdate
 import com.pocketagent.android.ui.state.CompletionSettings
@@ -87,7 +88,7 @@ internal fun ChatViewModel.deleteSessionInternal(sessionId: String) {
 
 internal fun ChatViewModel.attachImageInternal(imagePath: String) {
     val snapshot = _uiState.value
-    val activeSession = snapshot.activeSession ?: return
+    val activeSession = snapshot.activeSession() ?: return
     if (!sendFlow.isRuntimeReadyForSend(snapshot.runtime)) {
         applyBlockedRuntimeGuardrail(
             sessionId = activeSession.id,
@@ -190,7 +191,7 @@ internal fun ChatViewModel.runToolInternal(toolName: String, jsonArgs: String) {
 }
 
 internal fun ChatViewModel.exportDiagnosticsInternal() {
-    val activeSessionId = _uiState.value.activeSession?.id ?: return
+    val activeSessionId = _uiState.value.activeSession()?.id ?: return
     viewModelScope.launch(ioDispatcher) {
         runCatching { runtimeFacade.exportDiagnostics() }
             .onSuccess { diagnostics ->

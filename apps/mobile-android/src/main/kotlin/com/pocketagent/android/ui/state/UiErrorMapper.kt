@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui.state
 
+import androidx.compose.runtime.Immutable
 import com.pocketagent.android.runtime.errorCodeName
 import com.pocketagent.runtime.ImageAnalysisResult
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
@@ -14,6 +15,7 @@ enum class RecoveryAction {
     NONE,
 }
 
+@Immutable
 data class UiError(
     val code: String,
     val userMessage: String,

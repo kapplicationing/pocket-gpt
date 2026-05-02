@@ -143,9 +143,9 @@ internal fun ChatViewModel.skipOnboardingInternal() {
 
 internal fun ChatViewModel.refreshRuntimeReadinessInternal(statusDetailOverride: String? = null) {
     val activeRequestId = activeSendRequestId
-    val activeSessionId = _uiState.value.activeSessionId
     viewModelScope.launch(ioDispatcher) {
         activeRequestId?.let(runtimeFacade::cancelGenerationByRequest)
+        val activeSessionId = _uiState.value.activeSessionId
         activeSessionId?.let { sessionId ->
             runtimeFacade.cancelGeneration(SessionId(sessionId))
         }

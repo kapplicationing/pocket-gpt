@@ -34,9 +34,11 @@ import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.pocketagent.android.MainActivity
 import com.pocketagent.android.R
+import com.pocketagent.android.runtime.AppOperationTrace
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -58,16 +60,43 @@ internal object VoiceModelCatalog {
     private const val ROOT_DIR = "offas-voice-models"
     private const val ASR_DIR = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
     private const val KWS_DIR = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile"
+    private const val STATUS_CACHE_TTL_MS = 1_000L
 
-    fun root(context: Context): File = File(context.filesDir, ROOT_DIR)
+    private data class CachedStatus(
+        val computedAtEpochMs: Long,
+        val status: VoiceModelStatus,
+    )
+
+    private val rootCache = ConcurrentHashMap<String, File>()
+    private val statusCache = ConcurrentHashMap<String, CachedStatus>()
+
+    fun root(context: Context): File {
+        val appContext = context.applicationContext
+        return rootCache.getOrPut(appContext.packageName) {
+            File(appContext.filesDir, ROOT_DIR)
+        }
+    }
 
     fun status(context: Context): VoiceModelStatus {
+        val root = root(context)
+        val cacheKey = root.absolutePath
+        val now = System.currentTimeMillis()
+        statusCache[cacheKey]?.let { cached ->
+            if (now - cached.computedAtEpochMs <= STATUS_CACHE_TTL_MS) {
+                return cached.status
+            }
+        }
         val missing = mutableListOf<String>()
         requiredAsrFiles(context).filterNot { it.exists() }.forEach { missing += it.absolutePath }
         return VoiceModelStatus(
             ready = missing.isEmpty(),
             missingPaths = missing,
-        )
+        ).also { status ->
+            statusCache[cacheKey] = CachedStatus(
+                computedAtEpochMs = now,
+                status = status,
+            )
+        }
     }
 
     fun hasDedicatedWakeWordModel(context: Context): Boolean {
@@ -606,7 +635,9 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
     }
 
     private suspend fun runServiceLoop(directCapture: Boolean) {
-        val modelStatus = VoiceModelCatalog.status(applicationContext)
+        val modelStatus = AppOperationTrace.suspendSection(name = "voice.catalog_status") {
+            VoiceModelCatalog.status(applicationContext)
+        }
         if (!modelStatus.ready) {
             handleBlockingPrerequisiteFailure(
                 error = "Voice models missing: ${modelStatus.missingPaths.joinToString()}",
@@ -614,7 +645,9 @@ class OffasListenerService : Service(), TextToSpeech.OnInitListener {
             )
             return
         }
-        engine = engine ?: SherpaOnnxOffasVoiceEngine(applicationContext)
+        engine = engine ?: AppOperationTrace.section(name = "voice.engine_init") {
+            SherpaOnnxOffasVoiceEngine(applicationContext)
+        }
         OffasRuntime.scheduleRestartAlarm(applicationContext)
         settingsStore.updateServiceState(VoiceServiceState.STARTING)
         val transcript = engine?.awaitWakeAndCommand(

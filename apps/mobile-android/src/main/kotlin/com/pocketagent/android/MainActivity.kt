@@ -12,8 +12,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import com.pocketagent.android.runtime.AppOperationTrace
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
@@ -21,11 +27,14 @@ import com.pocketagent.android.ui.ModelProvisioningViewModel
 import com.pocketagent.android.ui.ModelProvisioningViewModelFactory
 import com.pocketagent.android.ui.PocketAgentApp
 import com.pocketagent.android.ui.PocketAgentTheme
+import com.pocketagent.android.ui.ProvisioningBootstrapScreen
 import com.pocketagent.android.ui.controllers.AndroidTelemetryDeviceStateProvider
 import com.pocketagent.android.data.chat.AndroidSessionPersistence
+import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.voice.OffasListenerService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // TODO: Add material3-window-size-class dependency to build.gradle.kts:
 //   implementation("androidx.compose.material3:material3-window-size-class:<version>")
@@ -33,6 +42,11 @@ import kotlinx.coroutines.launch
 // import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 
 class MainActivity : ComponentActivity() {
+    @Volatile
+    private var warmedSessionPersistence: AndroidSessionPersistence? = null
+    @Volatile
+    private var warmedVoiceController: VoiceActivationController? = null
+
     private val foregroundRuntimeServices by lazy(LazyThreadSafetyMode.NONE) {
         resolveAppForegroundRuntimeServices(applicationContext)
     }
@@ -48,7 +62,9 @@ class MainActivity : ComponentActivity() {
     private val viewModel: ChatViewModel by viewModels {
         ChatViewModelFactory(
             runtimeFacade = runtimeGateway,
-            sessionPersistence = AndroidSessionPersistence(applicationContext),
+            sessionPersistence = checkNotNull(warmedSessionPersistence) {
+                "Session persistence must be warmed before ChatViewModel creation"
+            },
             presetBackingStore = foregroundRuntimeServices.presetBackingStore,
             deviceStateProvider = AndroidTelemetryDeviceStateProvider(applicationContext),
             runtimeTuning = runtimeTuning,
@@ -82,17 +98,35 @@ class MainActivity : ComponentActivity() {
             // Pass windowSizeClass to PocketAgentApp for adaptive layouts.
             PocketAgentTheme {
                 Surface {
-                    PocketAgentApp(
-                        viewModel = viewModel,
-                        provisioningViewModel = provisioningViewModel,
-                    )
+                    var runtimeReady by remember { mutableStateOf(false) }
+                    LaunchedEffect(foregroundRuntimeServices) {
+                        withContext(Dispatchers.IO) {
+                            AppOperationTrace.suspendSection(name = "startup.foreground_runtime_warmup") {
+                                foregroundRuntimeServices.warmUp()
+                                warmedSessionPersistence = AndroidSessionPersistence(applicationContext)
+                                warmedVoiceController = VoiceActivationController(applicationContext)
+                            }
+                        }
+                        runtimeReady = true
+                    }
+                    if (runtimeReady) {
+                        LaunchedEffect(Unit) {
+                            viewModel.refreshRuntimeReadiness()
+                        }
+                        PocketAgentApp(
+                            viewModel = viewModel,
+                            provisioningViewModel = provisioningViewModel,
+                            voiceController = checkNotNull(warmedVoiceController) {
+                                "Voice controller must be warmed before composition"
+                            },
+                        )
+                    } else {
+                        ProvisioningBootstrapScreen()
+                    }
                 }
             }
         }
         createNotificationChannels()
-        lifecycleScope.launch {
-            viewModel.refreshRuntimeReadiness()
-        }
     }
 
     private fun createNotificationChannels() {

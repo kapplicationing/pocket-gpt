@@ -126,6 +126,23 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `metered download warning check has async UI-facing path`() = runTest(dispatcher) {
+        val version = sampleDownloadVersion()
+        val gateway = FakeProvisioningGateway().apply {
+            shouldWarnForMeteredLargeDownloadResult = true
+        }
+        val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        val shouldWarn = viewModel.shouldWarnForMeteredLargeDownloadAsync(version)
+        advanceUntilIdle()
+
+        assertTrue(shouldWarn)
+        assertEquals(version, gateway.lastWarnVersion)
+    }
+
+
+    @Test
     fun `manifest and version actions delegate through gateway`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)

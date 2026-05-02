@@ -53,7 +53,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pocketagent.android.R
-import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
@@ -64,7 +63,7 @@ import java.util.Locale
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun OfflineAndStatusHeader(
-    state: ChatUiState,
+    runtime: RuntimeUiState,
     modelLoadingState: ModelLoadingState,
     onOpenModels: () -> Unit,
     canLoadLastUsedModel: Boolean,
@@ -74,7 +73,7 @@ internal fun OfflineAndStatusHeader(
     onRefresh: () -> Unit,
     isOffline: Boolean = false,
 ) {
-    var showTechnicalDetails by remember(state.runtime.lastErrorTechnicalDetail) {
+    var showTechnicalDetails by remember(runtime.lastErrorTechnicalDetail) {
         mutableStateOf(false)
     }
     val loadedLifecycleNotice = (modelLoadingState as? ModelLoadingState.Loaded)
@@ -82,8 +81,8 @@ internal fun OfflineAndStatusHeader(
         ?.takeIf { detail -> detail.isNotBlank() }
 
     val isReadyAndClean = modelLoadingState is ModelLoadingState.Loaded
-        && state.runtime.modelRuntimeStatus == ModelRuntimeStatus.READY
-        && state.runtime.lastErrorUserMessage == null
+        && runtime.modelRuntimeStatus == ModelRuntimeStatus.READY
+        && runtime.lastErrorUserMessage == null
         && loadedLifecycleNotice == null
     val lifecycleAnimationKey = modelLoadingState.visualStateKey()
 
@@ -223,16 +222,16 @@ internal fun OfflineAndStatusHeader(
                     }
 
                     if (modelLoadingState is ModelLoadingState.Loaded &&
-                        state.runtime.modelRuntimeStatus != ModelRuntimeStatus.READY
+                        runtime.modelRuntimeStatus != ModelRuntimeStatus.READY
                     ) {
                         LinearProgressIndicator(
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        state.runtime.modelStatusDetail?.takeIf { it.isNotBlank() }?.let { detail ->
+                        runtime.modelStatusDetail?.takeIf { it.isNotBlank() }?.let { detail ->
                             Text(
                                 text = buildString {
                                     append(detail)
-                                    state.runtime.sendElapsedMs?.let { elapsedMs ->
+                                    runtime.sendElapsedMs?.let { elapsedMs ->
                                         append(" (")
                                         append(formatSendElapsed(elapsedMs))
                                         append(")")
@@ -242,7 +241,7 @@ internal fun OfflineAndStatusHeader(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        state.runtime.sendSlowState?.takeIf { it.isNotBlank() }?.let { slowState ->
+                        runtime.sendSlowState?.takeIf { it.isNotBlank() }?.let { slowState ->
                             Text(
                                 text = slowState,
                                 style = MaterialTheme.typography.bodySmall,
@@ -256,7 +255,7 @@ internal fun OfflineAndStatusHeader(
                             TextButton(
                                 onClick = onRefresh,
                                 modifier = Modifier.testTag("refresh_button"),
-                                enabled = state.runtime.startupProbeState != StartupProbeState.RUNNING,
+                                enabled = runtime.startupProbeState != StartupProbeState.RUNNING,
                             ) {
                                 Text(stringResource(id = R.string.ui_refresh_runtime_checks))
                             }
@@ -276,11 +275,11 @@ internal fun OfflineAndStatusHeader(
                     }
 
                     AnimatedVisibility(
-                        visible = state.runtime.lastErrorUserMessage != null,
+                        visible = runtime.lastErrorUserMessage != null,
                         enter = fadeIn() + expandVertically(),
                         exit = fadeOut() + shrinkVertically(),
                     ) {
-                        state.runtime.lastErrorUserMessage?.let { errorMessage ->
+                        runtime.lastErrorUserMessage?.let { errorMessage ->
                             Surface(
                                 color = MaterialTheme.colorScheme.errorContainer,
                                 shape = MaterialTheme.shapes.medium,
@@ -302,7 +301,7 @@ internal fun OfflineAndStatusHeader(
                                         )
                                     }
                                     if (showTechnicalDetails) {
-                                        state.runtime.lastErrorTechnicalDetail?.let { technical ->
+                                        runtime.lastErrorTechnicalDetail?.let { technical ->
                                             Text(
                                                 text = technical,
                                                 style = MaterialTheme.typography.bodySmall,
@@ -311,7 +310,7 @@ internal fun OfflineAndStatusHeader(
                                         }
                                     }
                                     Text(
-                                        text = stringResource(id = state.runtime.recoveryHintTextResId()),
+                                        text = stringResource(id = runtime.recoveryHintTextResId()),
                                         modifier = Modifier.padding(top = 6.dp),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onErrorContainer,

@@ -130,23 +130,25 @@ internal fun rememberChatAppLaunchers(
         }
     }
     val launchDownloadFlow: (ModelDistributionVersion) -> Unit = { version ->
-        when {
-            provisioningViewModel.shouldWarnForMeteredLargeDownload(version) -> {
-                appViewModel.setPendingMeteredWarningVersion(version)
-            }
+        scope.launch {
+            when {
+                provisioningViewModel.shouldWarnForMeteredLargeDownloadAsync(version) -> {
+                    appViewModel.setPendingMeteredWarningVersion(version)
+                }
 
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
-                appViewModel.setPendingNotificationPermissionVersion(version)
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
+                    appViewModel.setPendingNotificationPermissionVersion(version)
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
 
-            else -> beginDownload(
-                context = context,
-                scope = scope,
-                provisioningViewModel = provisioningViewModel,
-                version = version,
-            )
+                else -> beginDownload(
+                    context = context,
+                    scope = scope,
+                    provisioningViewModel = provisioningViewModel,
+                    version = version,
+                )
+            }
         }
     }
     val toggleVoiceActivation: (Boolean) -> Unit = { enabled ->

@@ -129,6 +129,21 @@ android {
         }
     }
 
+    signingConfigs {
+        // Reuse the well-known Android debug keystore so the benchmark variant is installable
+        // on developer/CI devices without provisioning a custom signing key. The benchmark
+        // variant is NEVER published; it is the perf-measurement APK only.
+        create("benchmark") {
+            val debugKeystore = File(System.getProperty("user.home"), ".android/debug.keystore")
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -136,6 +151,19 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        // Performance-measurement variant: production-grade ART (no DEBUGGABLE flag, no Compose
+        // debug-source instrumentation, AOT eligible) but without minification, so traces and
+        // crash reports retain readable symbols. Use this — never `debug` — for perf-baseline,
+        // gfxinfo measurement, and any merge/release jank gate. See
+        // `docs/architecture/android-performance-contract.md`.
+        create("benchmark") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            isDebuggable = false
+            isProfileable = true
+            matchingFallbacks += listOf("release")
+            signingConfig = signingConfigs.getByName("benchmark")
         }
     }
 
@@ -157,6 +185,12 @@ android {
         buildConfig = true
     }
 
+}
+
+composeCompiler {
+    stabilityConfigurationFile = layout.projectDirectory.file("compose-stability.conf")
+    reportsDestination = layout.buildDirectory.dir("compose-reports")
+    metricsDestination = layout.buildDirectory.dir("compose-metrics")
 }
 
 dependencies {

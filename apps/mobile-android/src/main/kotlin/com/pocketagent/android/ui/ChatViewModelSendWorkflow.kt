@@ -1,5 +1,7 @@
 package com.pocketagent.android.ui
 
+import com.pocketagent.android.runtime.AppOperationTrace
+import com.pocketagent.android.ui.state.activeSession
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.android.ui.controllers.ToolLoopOutcome
 import com.pocketagent.android.ui.state.ComposerUiState
@@ -27,7 +29,7 @@ import kotlinx.coroutines.launch
 
 internal fun ChatViewModel.sendMessageInternal() {
     val snapshot = _uiState.value
-    val activeSession = snapshot.activeSession ?: return
+    val activeSession = snapshot.activeSession() ?: return
     val prompt = snapshot.composer.text.trim()
     if (prompt.isBlank() || snapshot.composer.isSending) {
         return
@@ -68,22 +70,27 @@ internal fun ChatViewModel.sendMessageInternal() {
         )
     }
     persistState()
-    val sessionAfterUserMessage = _uiState.value.activeSession ?: return
+    val sessionAfterUserMessage = _uiState.value.activeSession() ?: return
 
     val assistantMessageId = newMessageId(prefix = "assistant-stream")
     val requestId = newRequestId()
     val previousResponseId = timelineProjector.latestAssistantRequestId(sessionAfterUserMessage)
     val transcriptMessages = timelineProjector.toTranscript(sessionAfterUserMessage)
-    val sendPreparation = sendFlow.prepareChatStream(
-        sessionId = SessionId(activeSession.id),
-        requestId = requestId,
-        messages = transcriptMessages,
-        promptHint = prompt,
-        previousResponseId = previousResponseId,
-        runtime = snapshot.runtime,
-        completionSettings = activeSession.completionSettings,
-        prepare = runtimeFacade::prepareChatStream,
-    )
+    val sendPreparation = AppOperationTrace.section(
+        name = "chat.prepare_stream",
+        detail = { "messages=${transcriptMessages.size}" },
+    ) {
+        sendFlow.prepareChatStream(
+            sessionId = SessionId(activeSession.id),
+            requestId = requestId,
+            messages = transcriptMessages,
+            promptHint = prompt,
+            previousResponseId = previousResponseId,
+            runtime = snapshot.runtime,
+            completionSettings = activeSession.completionSettings,
+            prepare = runtimeFacade::prepareChatStream,
+        )
+    }
     val currentDeviceState = sendPreparation.deviceState
     val preparedStream = sendPreparation.preparedStream
     val performanceConfig = preparedStream.plan.effectiveConfig
@@ -334,19 +341,24 @@ internal fun ChatViewModel.sendMessageInternal() {
                 null
             }
             // Finalize the message with per-message generation metrics
-            finalizeStreamingMessage(
-                sessionId = activeSession.id,
-                messageId = messageId,
-                finalText = finalText,
-                reasoningContent = terminal.reasoningContent,
-                toolCalls = terminal.toolCalls.toPersistedToolCalls(),
-                requestId = terminal.requestId,
-                finishReason = terminal.finishReason,
-                terminalEventSeen = terminal.terminalEventSeen,
-                firstTokenMs = effectiveFirstToken,
-                tokensPerSec = tokensPerSecEstimate,
-                totalLatencyMs = effectiveCompletion,
-            )
+            AppOperationTrace.section(
+                name = "chat.streaming_finalize",
+                detail = { "chars=${finalText.length}|first_token_ms=${effectiveFirstToken ?: -1}" },
+            ) {
+                finalizeStreamingMessage(
+                    sessionId = activeSession.id,
+                    messageId = messageId,
+                    finalText = finalText,
+                    reasoningContent = terminal.reasoningContent,
+                    toolCalls = terminal.toolCalls.toPersistedToolCalls(),
+                    requestId = terminal.requestId,
+                    finishReason = terminal.finishReason,
+                    terminalEventSeen = terminal.terminalEventSeen,
+                    firstTokenMs = effectiveFirstToken,
+                    tokensPerSec = tokensPerSecEstimate,
+                    totalLatencyMs = effectiveCompletion,
+                )
+            }
             val resolvedRuntimeStats = runtimeStats ?: RuntimeExecutionStats(
                 prefillMs = effectivePrefill,
                 decodeMs = effectiveDecode,
@@ -489,19 +501,25 @@ internal fun ChatViewModel.sendMessageInternal() {
                     return
                 }
                 val loopSnapshot = _uiState.value
-                val loopSession = loopSnapshot.activeSession ?: return
+                val loopSession = loopSnapshot.activeSession() ?: return
                 val followUpAssistantMessageId = newMessageId(prefix = "assistant-stream")
                 val followUpRequestId = newRequestId()
-                val followUpSendPreparation = sendFlow.prepareChatStream(
-                    sessionId = SessionId(activeSession.id),
-                    requestId = followUpRequestId,
-                    messages = timelineProjector.toTranscript(loopSession),
-                    promptHint = promptHint,
-                    previousResponseId = timelineProjector.latestAssistantRequestId(loopSession),
-                    runtime = loopSnapshot.runtime,
-                    completionSettings = loopSession.completionSettings,
-                    prepare = runtimeFacade::prepareChatStream,
-                )
+                val followUpTranscript = timelineProjector.toTranscript(loopSession)
+                val followUpSendPreparation = AppOperationTrace.section(
+                    name = "chat.prepare_stream.tool_follow_up",
+                    detail = { "messages=${followUpTranscript.size}|round=$round" },
+                ) {
+                    sendFlow.prepareChatStream(
+                        sessionId = SessionId(activeSession.id),
+                        requestId = followUpRequestId,
+                        messages = followUpTranscript,
+                        promptHint = promptHint,
+                        previousResponseId = timelineProjector.latestAssistantRequestId(loopSession),
+                        runtime = loopSnapshot.runtime,
+                        completionSettings = loopSession.completionSettings,
+                        prepare = runtimeFacade::prepareChatStream,
+                    )
+                }
                 val followUpDeviceState = followUpSendPreparation.deviceState
                 val followUpPreparedStream = followUpSendPreparation.preparedStream
                 val followUpPerformanceConfig = followUpPreparedStream.plan.effectiveConfig

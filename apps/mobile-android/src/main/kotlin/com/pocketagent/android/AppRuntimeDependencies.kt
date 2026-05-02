@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.pocketagent.android.runtime.AndroidRuntimeTuningStore
+import com.pocketagent.android.runtime.AppOperationTrace
+import com.pocketagent.android.runtime.MainThreadGuard
 import com.pocketagent.android.runtime.ModelAdmissionAction
 import com.pocketagent.android.runtime.ModelAdmissionPolicy
 import com.pocketagent.android.runtime.ProvisioningMutationResult
@@ -112,6 +114,7 @@ object AppRuntimeDependencies {
     }
 
     fun currentProvisioningSnapshot(context: Context): RuntimeProvisioningSnapshot {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.currentProvisioningSnapshot")
         return graphManager.getOrCreateRuntimeGraph(context).provisioningStore.snapshot()
     }
 
@@ -166,33 +169,42 @@ object AppRuntimeDependencies {
     fun listInstalledVersions(
         context: Context,
         modelId: String,
-    ) = graphManager.getOrCreateRuntimeGraph(context).provisioningStore.listInstalledVersions(modelId)
+    ): List<com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor> {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.listInstalledVersions")
+        return graphManager.getOrCreateRuntimeGraph(context).provisioningStore.listInstalledVersions(modelId)
+    }
 
     fun setActiveVersion(
         context: Context,
         modelId: String,
         version: String,
     ): ProvisioningMutationResult {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.setActiveVersion")
         val graph = graphManager.getOrCreateRuntimeGraph(context)
-        val installed = graph.provisioningStore.listInstalledVersions(modelId)
-            .firstOrNull { descriptor -> descriptor.version == version }
-            ?: return ProvisioningMutationResult.NotFound(modelId = modelId, version = version)
-        val activationDecision = graph.modelAdmissionPolicy.evaluate(
-            action = ModelAdmissionAction.ACTIVATE,
-            subject = installed.toAdmissionSubject(),
-        )
-        if (!activationDecision.allowed) {
-            return ProvisioningMutationResult.Blocked(activationDecision.asRuntimeDomainException().domainError)
-        }
-        val changed = graph.provisioningStore.setActiveVersion(modelId, version)
-        if (changed) {
-            installProductionRuntime(context)
-        }
-        lifecycleCoordinator.reconcileLifecycleState(graph)
-        return if (changed) {
-            ProvisioningMutationResult.Applied
-        } else {
-            ProvisioningMutationResult.NoChange(detail = "set_active_version_no_change")
+        return AppOperationTrace.section(
+            name = "provisioning.set_active_version",
+            detail = { "model=$modelId|version=$version" },
+        ) {
+            val installed = graph.provisioningStore.listInstalledVersions(modelId)
+                .firstOrNull { descriptor -> descriptor.version == version }
+                ?: return@section ProvisioningMutationResult.NotFound(modelId = modelId, version = version)
+            val activationDecision = graph.modelAdmissionPolicy.evaluate(
+                action = ModelAdmissionAction.ACTIVATE,
+                subject = installed.toAdmissionSubject(),
+            )
+            if (!activationDecision.allowed) {
+                return@section ProvisioningMutationResult.Blocked(activationDecision.asRuntimeDomainException().domainError)
+            }
+            val changed = graph.provisioningStore.setActiveVersion(modelId, version)
+            if (changed) {
+                installProductionRuntime(context)
+            }
+            lifecycleCoordinator.reconcileLifecycleState(graph)
+            if (changed) {
+                ProvisioningMutationResult.Applied
+            } else {
+                ProvisioningMutationResult.NoChange(detail = "set_active_version_no_change")
+            }
         }
     }
 
@@ -200,16 +212,22 @@ object AppRuntimeDependencies {
         context: Context,
         modelId: String,
     ): ProvisioningMutationResult {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.clearActiveVersion")
         val graph = graphManager.getOrCreateRuntimeGraph(context)
-        val changed = graph.provisioningStore.clearActiveVersion(modelId)
-        if (changed) {
-            installProductionRuntime(context)
-        }
-        lifecycleCoordinator.reconcileLifecycleState(graph)
-        return if (changed) {
-            ProvisioningMutationResult.Applied
-        } else {
-            ProvisioningMutationResult.NoChange(detail = "clear_active_version_no_change")
+        return AppOperationTrace.section(
+            name = "provisioning.clear_active_version",
+            detail = { "model=$modelId" },
+        ) {
+            val changed = graph.provisioningStore.clearActiveVersion(modelId)
+            if (changed) {
+                installProductionRuntime(context)
+            }
+            lifecycleCoordinator.reconcileLifecycleState(graph)
+            if (changed) {
+                ProvisioningMutationResult.Applied
+            } else {
+                ProvisioningMutationResult.NoChange(detail = "clear_active_version_no_change")
+            }
         }
     }
 
@@ -218,48 +236,55 @@ object AppRuntimeDependencies {
         modelId: String,
         version: String,
     ): ProvisioningMutationResult {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.removeVersion")
         val graph = graphManager.getOrCreateRuntimeGraph(context)
-        val installedVersions = graph.provisioningStore.listInstalledVersions(modelId)
-        if (installedVersions.none { descriptor -> descriptor.version == version }) {
-            return ProvisioningMutationResult.NotFound(modelId = modelId, version = version)
-        }
-        if (installedVersions.any { descriptor -> descriptor.version == version && descriptor.isActive }) {
-            return ProvisioningMutationResult.Blocked(
-                RuntimeDomainError(
-                    code = RuntimeErrorCodes.PROVISIONING_REMOVE_ACTIVE_VERSION_BLOCKED,
-                    userMessage = "Couldn't remove this model version while it is active.",
-                    technicalDetail = "model=$modelId|version=$version|reason=active_selection",
-                ),
+        return AppOperationTrace.section(
+            name = "provisioning.remove_version",
+            detail = { "model=$modelId|version=$version" },
+        ) {
+            val installedVersions = graph.provisioningStore.listInstalledVersions(modelId)
+            if (installedVersions.none { descriptor -> descriptor.version == version }) {
+                return@section ProvisioningMutationResult.NotFound(modelId = modelId, version = version)
+            }
+            if (installedVersions.any { descriptor -> descriptor.version == version && descriptor.isActive }) {
+                return@section ProvisioningMutationResult.Blocked(
+                    RuntimeDomainError(
+                        code = RuntimeErrorCodes.PROVISIONING_REMOVE_ACTIVE_VERSION_BLOCKED,
+                        userMessage = "Couldn't remove this model version while it is active.",
+                        technicalDetail = "model=$modelId|version=$version|reason=active_selection",
+                    ),
+                )
+            }
+            val loaded = graph.runtimeFacade.loadedModel()
+            val guardedLoadedVersion = loadedVersionForRemovalGuard(
+                loadedModel = loaded,
+                installedVersions = installedVersions,
             )
-        }
-        val loaded = graph.runtimeFacade.loadedModel()
-        val guardedLoadedVersion = loadedVersionForRemovalGuard(
-            loadedModel = loaded,
-            installedVersions = installedVersions,
-        )
-        if (loaded != null && loaded.modelId == modelId && guardedLoadedVersion == version) {
-            return ProvisioningMutationResult.Blocked(
-                RuntimeDomainError(
-                    code = RuntimeErrorCodes.PROVISIONING_REMOVE_ACTIVE_VERSION_BLOCKED,
-                    userMessage = "Couldn't remove this model version while it is loaded.",
-                    technicalDetail = "model=$modelId|version=$version|reason=loaded",
-                ),
-            )
-        }
-        val removed = graph.provisioningStore.removeVersion(modelId, version)
-        if (removed) {
-            installProductionRuntime(context)
-            graph.modelDownloadManager.refresh()
-        }
-        lifecycleCoordinator.reconcileLifecycleState(graph)
-        return if (removed) {
-            ProvisioningMutationResult.Applied
-        } else {
-            ProvisioningMutationResult.NoChange(detail = "remove_version_no_change")
+            if (loaded != null && loaded.modelId == modelId && guardedLoadedVersion == version) {
+                return@section ProvisioningMutationResult.Blocked(
+                    RuntimeDomainError(
+                        code = RuntimeErrorCodes.PROVISIONING_REMOVE_ACTIVE_VERSION_BLOCKED,
+                        userMessage = "Couldn't remove this model version while it is loaded.",
+                        technicalDetail = "model=$modelId|version=$version|reason=loaded",
+                    ),
+                )
+            }
+            val removed = graph.provisioningStore.removeVersion(modelId, version)
+            if (removed) {
+                installProductionRuntime(context)
+                graph.modelDownloadManager.refresh()
+            }
+            lifecycleCoordinator.reconcileLifecycleState(graph)
+            if (removed) {
+                ProvisioningMutationResult.Applied
+            } else {
+                ProvisioningMutationResult.NoChange(detail = "remove_version_no_change")
+            }
         }
     }
 
     fun storageSummary(context: Context): StorageSummary {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.storageSummary")
         return graphManager.getOrCreateRuntimeGraph(context).provisioningStore.storageSummary()
     }
 
@@ -329,8 +354,11 @@ object AppRuntimeDependencies {
         graphManager.getOrCreateRuntimeGraph(context).modelDownloadManager.acknowledgeLargeDownloadCellularWarning()
     }
 
-    fun observeModelLifecycle(context: Context): StateFlow<RuntimeModelLifecycleSnapshot> {
-        return lifecycleCoordinator.observeModelLifecycle(context)
+    fun observeModelLifecycle(
+        context: Context,
+        scope: CoroutineScope,
+    ): StateFlow<RuntimeModelLifecycleSnapshot> {
+        return lifecycleCoordinator.observeModelLifecycle(context, scope)
     }
 
     fun currentModelLifecycle(context: Context): RuntimeModelLifecycleSnapshot {

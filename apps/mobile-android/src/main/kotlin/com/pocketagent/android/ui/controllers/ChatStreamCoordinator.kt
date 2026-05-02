@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui.controllers
 
+import android.util.Log
 import com.pocketagent.android.runtime.ChatRuntimeService
 import com.pocketagent.android.ui.state.StreamReducerState
 import com.pocketagent.android.ui.state.StreamStateReducer
@@ -63,6 +64,7 @@ class ChatStreamCoordinator(
         }
 
         var streamCollector: Job? = null
+        var firstTokenLogged = false
         val prefillTimeoutWatchdog = launch {
             delay(requestTimeoutMs + terminalWatchdogGraceMs)
             if (streamFirstTokenMs() != null || hasTerminal()) {
@@ -95,6 +97,16 @@ class ChatStreamCoordinator(
                     }
                     if (previousTerminal != null) return@collect
                     if (nextState.firstTokenMs != null) {
+                        if (!firstTokenLogged) {
+                            firstTokenLogged = true
+                            runCatching {
+                                Log.i(
+                                    "PocketGPTPerf",
+                                    "PERF_OP|name=chat.first_token|duration_ms=${nextState.firstTokenMs}|" +
+                                        "request_id=${request.requestId}",
+                                )
+                            }
+                        }
                         prefillTimeoutWatchdog.cancel()
                     }
                     onEvent(event, nextState)

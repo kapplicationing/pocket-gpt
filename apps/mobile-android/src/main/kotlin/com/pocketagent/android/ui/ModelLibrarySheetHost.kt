@@ -6,6 +6,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,8 +25,8 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ModelLibrarySheetHost(
     activeSurface: ModalSurface,
-    modelLibraryState: ModelLibraryUiState,
-    runtimeModelState: RuntimeModelUiState,
+    provisioningViewModel: ModelProvisioningViewModel,
+    defaultGetReadyModelId: String?,
     modelLoadingState: ModelLoadingState,
     routingMode: RoutingMode,
     presetBackingStore: PresetBackingStore,
@@ -36,6 +37,13 @@ internal fun ModelLibrarySheetHost(
         return
     }
 
+    val provisioningState by provisioningViewModel.uiState.collectAsState()
+    val modelLibraryState = remember(provisioningState, defaultGetReadyModelId) {
+        provisioningState.toModelLibraryUiState(defaultGetReadyModelId)
+    } ?: return
+    val runtimeModelState = remember(provisioningState) {
+        provisioningState.toRuntimeModelUiState()
+    } ?: return
     val scope = rememberCoroutineScope()
     val runtimeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pendingRemoveVersion by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -58,16 +66,16 @@ internal fun ModelLibrarySheetHost(
                         actions.importModel(event.modelId)
                     }
                     is ModelSheetEvent.DownloadVersion -> actions.downloadVersion(event.version)
-                    is ModelSheetEvent.PauseDownload -> {
+                    is ModelSheetEvent.PauseDownload -> scope.launch {
                         actions.pauseDownload(event.taskId)
                     }
-                    is ModelSheetEvent.ResumeDownload -> {
+                    is ModelSheetEvent.ResumeDownload -> scope.launch {
                         actions.resumeDownload(event.taskId)
                     }
-                    is ModelSheetEvent.RetryDownload -> {
+                    is ModelSheetEvent.RetryDownload -> scope.launch {
                         actions.retryDownload(event.taskId)
                     }
-                    is ModelSheetEvent.CancelDownload -> {
+                    is ModelSheetEvent.CancelDownload -> scope.launch {
                         actions.cancelDownload(event.taskId)
                     }
                     is ModelSheetEvent.SetDefaultVersion -> {

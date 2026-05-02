@@ -48,16 +48,20 @@ import androidx.compose.ui.unit.dp
 import com.pocketagent.android.R
 import com.pocketagent.android.ui.state.ChatSessionUiModel
 import com.pocketagent.android.ui.theme.LocalReduceMotion
-import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
 import com.pocketagent.android.ui.state.MessageRole
+import com.pocketagent.android.ui.state.MessageUiModel
 import com.pocketagent.android.ui.state.ModelLoadingState
+import com.pocketagent.android.ui.state.RuntimeUiState
+import com.pocketagent.android.ui.state.StreamingState
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ChatScreenBody(
-    state: ChatUiState,
+    runtime: RuntimeUiState,
+    activeSession: ChatSessionUiModel?,
+    streaming: StreamingState,
     modelLoadingState: ModelLoadingState,
     onSuggestedPrompt: (String) -> Unit,
     onOpenModels: () -> Unit,
@@ -79,7 +83,7 @@ internal fun ChatScreenBody(
             .padding(PocketAgentDimensions.screenPadding),
     ) {
         OfflineAndStatusHeader(
-            state = state,
+            runtime = runtime,
             modelLoadingState = modelLoadingState,
             onOpenModels = onOpenModels,
             canLoadLastUsedModel = canLoadLastUsedModel,
@@ -91,8 +95,9 @@ internal fun ChatScreenBody(
         )
         Spacer(modifier = Modifier.height(PocketAgentDimensions.sectionSpacing).animateContentSize())
         MessageList(
-            activeSession = state.activeSession,
-            runtimeStatusDetail = state.runtime.modelStatusDetail,
+            activeSession = activeSession,
+            streaming = streaming,
+            runtimeStatusDetail = runtime.modelStatusDetail,
             onSuggestedPrompt = onSuggestedPrompt,
             onOpenToolDialog = onOpenToolDialog,
             onEditMessage = onEditMessage,
@@ -109,6 +114,7 @@ internal fun ChatScreenBody(
 @Composable
 private fun MessageList(
     activeSession: ChatSessionUiModel?,
+    streaming: StreamingState,
     runtimeStatusDetail: String?,
     onSuggestedPrompt: (String) -> Unit,
     onOpenToolDialog: () -> Unit,
@@ -125,6 +131,15 @@ private fun MessageList(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val latestMessage = activeSession?.messages?.lastOrNull()
+    val latestDisplayContent = if (
+        latestMessage?.isStreaming == true &&
+        streaming.sessionId == activeSession?.id &&
+        streaming.messageId == latestMessage.id
+    ) {
+        streaming.text
+    } else {
+        latestMessage?.content
+    }
     val isNearBottom by remember(listState, activeSession?.id) {
         derivedStateOf {
             val layoutInfo = listState.layoutInfo
@@ -144,7 +159,7 @@ private fun MessageList(
         }
     }
 
-    LaunchedEffect(activeSession?.id, activeSession?.messages?.size, latestMessage?.content, latestMessage?.isStreaming) {
+    LaunchedEffect(activeSession?.id, activeSession?.messages?.size, latestDisplayContent, latestMessage?.isStreaming) {
         val messages = activeSession?.messages ?: return@LaunchedEffect
         if (messages.isNotEmpty() && isNearBottom) {
             listState.animateScrollToItem(index = messages.lastIndex)
@@ -209,6 +224,7 @@ private fun MessageList(
                 contentType = { messages[it].kind },
             ) { index ->
                 val message = messages[index]
+                val renderedMessage = message.withStreamingText(activeSession.id, streaming)
                 val prevMessage = messages.getOrNull(index - 1)
                 val nextMessage = messages.getOrNull(index + 1)
                 val isFirstInGroup = prevMessage?.role != message.role
@@ -233,7 +249,7 @@ private fun MessageList(
 
                 if (reduceMotion) {
                     MessageBubble(
-                        message = message,
+                        message = renderedMessage,
                         runtimeStatusDetail = runtimeStatusDetail,
                         onEditMessage = onEditMessage,
                         onRegenerateMessage = onRegenerateMessage,
@@ -253,7 +269,7 @@ private fun MessageList(
                         ),
                     ) {
                         MessageBubble(
-                            message = message,
+                            message = renderedMessage,
                             runtimeStatusDetail = runtimeStatusDetail,
                             onEditMessage = onEditMessage,
                             onRegenerateMessage = onRegenerateMessage,
@@ -287,4 +303,17 @@ private fun MessageList(
             }
         }
     }
+}
+
+private fun MessageUiModel.withStreamingText(
+    sessionId: String,
+    streaming: StreamingState,
+): MessageUiModel {
+    if (!isStreaming || streaming.sessionId != sessionId || streaming.messageId != id) {
+        return this
+    }
+    return copy(
+        content = streaming.text,
+        isThinking = streaming.isThinking,
+    )
 }

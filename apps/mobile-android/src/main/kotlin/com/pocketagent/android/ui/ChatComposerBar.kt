@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
@@ -39,7 +38,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.Alignment
@@ -147,11 +150,14 @@ internal fun ComposerBar(
             .imePadding()
             .animateContentSize(),
     ) {
+        // No verticalScroll on this Column: the inner OutlinedTextField already scrolls its
+        // text via maxLines, and the Column is bounded by heightIn(max = 280.dp). Wrapping
+        // the whole composer in a scroll container forced an extra layout pass per keystroke.
+        // See docs/architecture/android-performance-contract.md (2026-05-02 RCA).
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 280.dp)
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = PocketAgentDimensions.sectionSpacing, vertical = verticalPadding),
         ) {
             if (shouldShowChatGateInlineCard(chatGateState)) {
@@ -353,9 +359,32 @@ private fun ComposerInputRow(
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(compactSpacing),
     ) {
+        // IME state is held LOCALLY in the composition as a TextFieldValue. The String overload
+        // of OutlinedTextField forces Compose to rebuild a fresh TextFieldValue (including
+        // selection/composition spans) on every recomposition triggered by the upstream
+        // ViewModel emission, which causes a per-keystroke double recompose and IME re-sync.
+        //
+        // Strategy: keep the field's truth here (TextFieldValue), forward only the text to
+        // ViewModel.onTextChanged for downstream consumers (gate state, send button enable
+        // logic, persistence). Reconcile back ONLY when the upstream `text` was set by code
+        // outside the composer (e.g. cancelEdit clears, or applyComposerDraft).
+        // See docs/architecture/android-performance-contract.md (2026-05-02 RCA).
+        var fieldValue by remember {
+            mutableStateOf(TextFieldValue(text = text, selection = TextRange(text.length)))
+        }
+        if (fieldValue.text != text && text != fieldValue.text) {
+            // External update from outside the composer (e.g. cancelEdit, applyComposerDraft).
+            fieldValue = TextFieldValue(text = text, selection = TextRange(text.length))
+        }
         OutlinedTextField(
-            value = text,
-            onValueChange = onTextChanged,
+            value = fieldValue,
+            onValueChange = { newValue ->
+                val textChanged = newValue.text != fieldValue.text
+                fieldValue = newValue
+                if (textChanged) {
+                    onTextChanged(newValue.text)
+                }
+            },
             modifier = Modifier
                 .weight(1f)
                 .testTag("composer_input")

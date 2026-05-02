@@ -24,6 +24,7 @@ import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
 import com.pocketagent.android.ui.state.ChatGateStatus
 import com.pocketagent.android.ui.state.ChatSessionUiModel
+import com.pocketagent.android.ui.state.activeSession
 import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ComposerUiState
 import com.pocketagent.android.ui.state.MessageKind
@@ -173,7 +174,7 @@ private fun TestChatScreenBody(
                 modifier = Modifier.testTag("runtime_error_banner"),
             )
         }
-        state.activeSession?.messages?.forEach { message ->
+        state.activeSession()?.messages?.forEach { message ->
             if (message.role == MessageRole.ASSISTANT && message.isStreaming && message.content.isBlank()) {
                 Text("Preparing response…")
             } else {

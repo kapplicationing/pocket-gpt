@@ -6,6 +6,7 @@ import com.pocketagent.core.model.ModelSpecProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 
 internal interface AppForegroundRuntimeServices {
     val runtimeTuning: AndroidRuntimeTuningStore
@@ -14,6 +15,8 @@ internal interface AppForegroundRuntimeServices {
     val eligibilitySignalsProvider: ModelEligibilitySignalsProvider
     val presetBackingStore: PresetBackingStore
     val modelSpecProvider: ModelSpecProvider
+
+    suspend fun warmUp()
 }
 
 internal class DefaultAppForegroundRuntimeServices(
@@ -66,5 +69,17 @@ internal class DefaultAppForegroundRuntimeServices(
 
     override val modelSpecProvider: ModelSpecProvider by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AppRuntimeDependencies.modelSpecProvider(appContext)
+    }
+
+    override suspend fun warmUp() = withContext(Dispatchers.IO) {
+        runtimeTuning
+        deviceGpuOffloadSupport
+        gpuOffloadQualifier
+        runtimeGateway
+        provisioningGateway
+        eligibilitySignalsProvider
+        presetBackingStore
+        modelSpecProvider
+        Unit
     }
 }

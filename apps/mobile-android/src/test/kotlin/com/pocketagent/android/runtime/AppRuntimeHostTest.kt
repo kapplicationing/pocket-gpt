@@ -57,6 +57,8 @@ private object HostOwnedForegroundRuntimeServices : AppForegroundRuntimeServices
         get() = throw AssertionError("Not used in host resolution tests")
     override val modelSpecProvider: ModelSpecProvider
         get() = HostOwnedModelSpecProvider
+
+    override suspend fun warmUp() = Unit
 }
 
 private object HostOwnedModelSpecProvider : ModelSpecProvider {

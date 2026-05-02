@@ -1,18 +1,22 @@
 package com.pocketagent.android.ui.state
 
+import androidx.compose.runtime.Immutable
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.runtime.RuntimeLoadedModel
 
+@Immutable
 sealed interface ModelLoadingState {
     val loadedModel: RuntimeLoadedModel?
     val lastUsedModel: RuntimeLoadedModel?
 
+    @Immutable
     data class Idle(
         override val loadedModel: RuntimeLoadedModel? = null,
         override val lastUsedModel: RuntimeLoadedModel? = null,
         val updatedAtEpochMs: Long = System.currentTimeMillis(),
     ) : ModelLoadingState
 
+    @Immutable
     data class Loading(
         val requestedModel: RuntimeLoadedModel?,
         override val loadedModel: RuntimeLoadedModel?,
@@ -22,6 +26,7 @@ sealed interface ModelLoadingState {
         val timestampMs: Long,
     ) : ModelLoadingState
 
+    @Immutable
     data class Loaded(
         val model: RuntimeLoadedModel,
         override val lastUsedModel: RuntimeLoadedModel?,
@@ -31,6 +36,7 @@ sealed interface ModelLoadingState {
         override val loadedModel: RuntimeLoadedModel = model
     }
 
+    @Immutable
     data class Offloading(
         override val loadedModel: RuntimeLoadedModel?,
         override val lastUsedModel: RuntimeLoadedModel?,
@@ -39,6 +45,7 @@ sealed interface ModelLoadingState {
         val timestampMs: Long,
     ) : ModelLoadingState
 
+    @Immutable
     data class Error(
         val requestedModel: RuntimeLoadedModel?,
         override val loadedModel: RuntimeLoadedModel?,

@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui
 
+import com.pocketagent.android.ui.state.activeSession
 import android.net.Uri
 import com.pocketagent.android.data.chat.SessionPersistence
 import com.pocketagent.android.data.chat.SessionStateLoadResult
@@ -116,7 +117,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        val activeSession = state.activeSession!!
+        val activeSession = state.activeSession()!!
         assertTrue(activeSession.messages.any { it.role == MessageRole.USER && it.content == "hello ui" })
         assertTrue(activeSession.messages.any { it.role == MessageRole.ASSISTANT && it.content.contains("response for hello ui") })
         assertEquals("auto", state.runtime.activeModelId)
@@ -142,7 +143,7 @@ class ChatViewModelTest {
         )
         advanceUntilIdle()
 
-        val messages = viewModel.uiState.value.activeSession!!.messages
+        val messages = viewModel.uiState.value.activeSession()!!.messages
         assertTrue(messages.any { it.role == MessageRole.USER && it.content.contains("Run tool: calculator") })
         assertTrue(messages.any { it.role == MessageRole.ASSISTANT && it.toolName == "calculator" })
         assertTrue(messages.any { it.role == MessageRole.TOOL && it.toolName == "calculator" && it.content.contains("tool:calculator") })
@@ -301,7 +302,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val activeSession = viewModel.uiState.value.activeSession!!
+        val activeSession = viewModel.uiState.value.activeSession()!!
         assertTrue(activeSession.messages.any { it.role == MessageRole.ASSISTANT && it.content.contains("response for quick load prompt") })
         assertTrue(activeSession.messages.any { it.role == MessageRole.ASSISTANT && it.content.contains("response for follow up prompt") })
         assertTrue(activeSession.messages.any { it.role == MessageRole.ASSISTANT && it.content.contains("response for after reload prompt") })
@@ -371,7 +372,7 @@ class ChatViewModelTest {
         viewModel.switchSession("session-2")
         advanceUntilIdle()
 
-        val activeSession = viewModel.uiState.value.activeSession!!
+        val activeSession = viewModel.uiState.value.activeSession()!!
         assertEquals("session-2", activeSession.id)
         assertTrue(activeSession.messagesLoaded)
         assertEquals(2, activeSession.messages.size)
@@ -576,21 +577,21 @@ class ChatViewModelTest {
         viewModel.onComposerChanged("session one message")
         viewModel.sendMessage()
         advanceUntilIdle()
-        val firstSessionId = viewModel.uiState.value.activeSession!!.id
+        val firstSessionId = viewModel.uiState.value.activeSession()!!.id
 
         viewModel.createSession()
-        val secondSessionId = viewModel.uiState.value.activeSession!!.id
+        val secondSessionId = viewModel.uiState.value.activeSession()!!.id
         viewModel.onComposerChanged("session two message")
         viewModel.sendMessage()
         advanceUntilIdle()
 
         viewModel.switchSession(firstSessionId)
-        val firstSession = viewModel.uiState.value.activeSession!!
+        val firstSession = viewModel.uiState.value.activeSession()!!
         assertTrue(firstSession.messages.any { it.content == "session one message" })
         assertFalse(firstSession.messages.any { it.content == "session two message" })
 
         viewModel.switchSession(secondSessionId)
-        val secondSession = viewModel.uiState.value.activeSession!!
+        val secondSession = viewModel.uiState.value.activeSession()!!
         assertTrue(secondSession.messages.any { it.content == "session two message" })
     }
 
@@ -605,16 +606,16 @@ class ChatViewModelTest {
         )
         advanceUntilIdle()
 
-        val initialSessionId = viewModel.uiState.value.activeSession!!.id
+        val initialSessionId = viewModel.uiState.value.activeSession()!!.id
 
         viewModel.deleteSession(initialSessionId)
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
         assertEquals(1, state.sessions.size)
-        assertTrue(state.activeSession != null)
-        assertTrue(state.activeSession!!.id != initialSessionId)
-        assertEquals("New chat", state.activeSession!!.title)
+        assertTrue(state.activeSession() != null)
+        assertTrue(state.activeSession()!!.id != initialSessionId)
+        assertEquals("New chat", state.activeSession()!!.title)
     }
 
     @Test
@@ -631,7 +632,7 @@ class ChatViewModelTest {
         viewModel.attachImage("/tmp/test-image.jpg")
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertTrue(active.messages.any { it.kind == MessageKind.IMAGE && it.role == MessageRole.USER })
         assertTrue(active.messages.any { it.kind == MessageKind.IMAGE && it.role == MessageRole.ASSISTANT })
     }
@@ -650,7 +651,7 @@ class ChatViewModelTest {
         viewModel.attachImage("/tmp/bad-image.jpg")
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-RUNTIME-001") })
         assertEquals("UI-RUNTIME-001", viewModel.uiState.value.runtime.lastErrorCode)
     }
@@ -669,7 +670,7 @@ class ChatViewModelTest {
         viewModel.attachImage("/tmp/invalid.tiff")
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-IMG-VAL-001") })
         assertEquals("UI-IMG-VAL-001", viewModel.uiState.value.runtime.lastErrorCode)
     }
@@ -687,19 +688,19 @@ class ChatViewModelTest {
 
         viewModel.runTool("calculator", """{"expression":"4*9"}""")
         advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.activeSession!!.messages.any { it.role == MessageRole.TOOL && it.content.contains("tool:calculator") })
+        assertTrue(viewModel.uiState.value.activeSession()!!.messages.any { it.role == MessageRole.TOOL && it.content.contains("tool:calculator") })
 
         runtime.failTool = true
         viewModel.runTool("calculator", """{"expression":"4*9"}""")
         advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.activeSession!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-RUNTIME-001") })
+        assertTrue(viewModel.uiState.value.activeSession()!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-RUNTIME-001") })
         assertEquals("UI-RUNTIME-001", viewModel.uiState.value.runtime.lastErrorCode)
 
         runtime.failTool = false
         runtime.returnToolValidationError = true
         viewModel.runTool("calculator", """{"expression":"4*9"}""")
         advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.activeSession!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-TOOL-SCHEMA-001") })
+        assertTrue(viewModel.uiState.value.activeSession()!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-TOOL-SCHEMA-001") })
         assertEquals("UI-TOOL-SCHEMA-001", viewModel.uiState.value.runtime.lastErrorCode)
     }
 
@@ -737,7 +738,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertFalse(active.messages.any { it.role == MessageRole.USER && it.content == "hello while blocked" })
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-STARTUP-001") })
         assertEquals("UI-STARTUP-001", viewModel.uiState.value.runtime.lastErrorCode)
@@ -866,7 +867,7 @@ class ChatViewModelTest {
         viewModel.attachImage("/tmp/blocked-image.jpg")
         advanceUntilIdle()
 
-        val systemMessages = viewModel.uiState.value.activeSession!!
+        val systemMessages = viewModel.uiState.value.activeSession()!!
             .messages
             .filter { it.role == MessageRole.SYSTEM }
             .takeLast(2)
@@ -893,13 +894,13 @@ class ChatViewModelTest {
 
         viewModel.onComposerChanged("cancel placeholder")
         viewModel.sendMessage()
-        val beforeCancelMessages = viewModel.uiState.value.activeSession!!.messages
+        val beforeCancelMessages = viewModel.uiState.value.activeSession()!!.messages
         assertTrue(beforeCancelMessages.any(::shouldRenderInThreadLoadingPlaceholder))
 
         viewModel.cancelActiveSend()
         advanceUntilIdle()
 
-        val afterCancelMessages = viewModel.uiState.value.activeSession!!.messages
+        val afterCancelMessages = viewModel.uiState.value.activeSession()!!.messages
         assertFalse(afterCancelMessages.any(::shouldRenderInThreadLoadingPlaceholder))
         assertFalse(viewModel.uiState.value.composer.isSending)
         assertFalse(viewModel.uiState.value.composer.isCancelling)
@@ -925,7 +926,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-RUNTIME-001") })
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("timed out") })
         assertEquals("UI-RUNTIME-001", viewModel.uiState.value.runtime.lastErrorCode)
@@ -950,7 +951,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         val assistant = active.messages.lastOrNull { it.role == MessageRole.ASSISTANT && it.content.contains("partial") }
 
         assertTrue(assistant != null)
@@ -980,7 +981,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         val assistant = active.messages.lastOrNull { it.role == MessageRole.ASSISTANT && it.content.contains("chunk") }
         val terminalSystem = active.messages.lastOrNull { it.role == MessageRole.SYSTEM && it.finishReason == "failed:jni_utf8_stream_error" }
 
@@ -1038,7 +1039,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertFalse(active.messages.any { it.role == MessageRole.USER && it.content == "hello degraded mode" })
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-STARTUP-001") })
     }
@@ -1064,7 +1065,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertFalse(active.messages.any { it.role == MessageRole.USER && it.content == "hello virtual time" })
         assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-STARTUP-001") })
     }
@@ -1107,7 +1108,7 @@ class ChatViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val active = viewModel.uiState.value.activeSession!!
+        val active = viewModel.uiState.value.activeSession()!!
         assertTrue(active.messages.any { it.role == MessageRole.USER && it.content == "hello optional warning" })
         assertEquals(null, viewModel.uiState.value.runtime.lastErrorCode)
     }
@@ -1175,7 +1176,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         assertEquals(RoutingMode.QWEN3_1_7B, viewModel.uiState.value.runtime.routingMode)
-        assertTrue(viewModel.uiState.value.activeSession!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("diag=ok") })
+        assertTrue(viewModel.uiState.value.activeSession()!!.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("diag=ok") })
     }
 
     @Test

@@ -1,11 +1,14 @@
 package com.pocketagent.android.ui
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.android.ui.resolveDefaultGetReadyVersion
 import com.pocketagent.android.runtime.DefaultModelCatalogEligibilityEvaluator
+import com.pocketagent.android.runtime.AppDispatchers
+import com.pocketagent.android.runtime.AppOperationTrace
 import com.pocketagent.android.runtime.ModelCatalogEligibilityEvaluator
 import com.pocketagent.android.runtime.ModelCatalogEligibilitySnapshot
 import com.pocketagent.android.runtime.ModelEligibilitySignalsProvider
@@ -29,13 +32,17 @@ import com.pocketagent.runtime.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@Immutable
 data class ModelProvisioningUiState(
     val snapshot: RuntimeProvisioningSnapshot? = null,
     val lifecycle: RuntimeModelLifecycleSnapshot = RuntimeModelLifecycleSnapshot.initial(),
@@ -49,6 +56,7 @@ data class ModelProvisioningUiState(
     val enqueuingModelIds: Set<String> = emptySet(),
 )
 
+@Immutable
 data class ModelLibraryUiState(
     val snapshot: RuntimeProvisioningSnapshot,
     val manifest: ModelDistributionManifest,
@@ -62,6 +70,7 @@ data class ModelLibraryUiState(
     val enqueuingModelIds: Set<String> = emptySet(),
 )
 
+@Immutable
 data class RuntimeModelUiState(
     val snapshot: RuntimeProvisioningSnapshot,
     val lifecycle: RuntimeModelLifecycleSnapshot,
@@ -108,14 +117,23 @@ class ModelProvisioningViewModel internal constructor(
     private val gateway: ProvisioningGateway,
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
+    private val ioDispatcher: CoroutineDispatcher = dispatchers.io,
 ) : ViewModel(), ModelOperationHandler {
     private val aggregateState = MutableStateFlow(gateway.observeProvisioningAggregateState().value)
     private val localUiState = MutableStateFlow(ModelProvisioningLocalUiState())
     private val _modelLoadingState = MutableStateFlow(aggregateState.value.lifecycle.toModelLoadingState())
-    private val _uiState = MutableStateFlow(buildUiState())
+    private val _uiState = MutableStateFlow(aggregateState.value.toModelProvisioningUiState(localUiState.value))
     val uiState = _uiState.asStateFlow()
     val modelLoadingState = _modelLoadingState.asStateFlow()
+    val provisioningSnapshotFlow = _uiState
+        .map { it.snapshot }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.snapshot)
+    val downloadsFlow = _uiState
+        .map { it.downloads }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.downloads)
     private val modelOperationStateLock = Any()
 
     @Volatile
@@ -128,12 +146,13 @@ class ModelProvisioningViewModel internal constructor(
     private var lastModelOperationKey: String? = null
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
+            _uiState.value = buildUiState()
             gateway.observeProvisioningAggregateState().collect { aggregate ->
                 setAggregateState(aggregate)
             }
         }
-        viewModelScope.launch { refreshManifest() }
+        viewModelScope.launch(ioDispatcher) { refreshManifest() }
     }
 
     fun refreshSnapshot() {
@@ -143,10 +162,10 @@ class ModelProvisioningViewModel internal constructor(
     }
 
     suspend fun refreshManifest() {
-        val seeded = withContext(ioDispatcher) {
-            gateway.seedProvisioningAggregateState()
+        withContext(ioDispatcher) {
+            val seeded = gateway.seedProvisioningAggregateState()
+            setAggregateState(seeded)
         }
-        setAggregateState(seeded)
     }
 
     fun setStatusMessage(message: String?) {
@@ -170,6 +189,7 @@ class ModelProvisioningViewModel internal constructor(
         return result
     }
 
+    @Deprecated("UI paths must use listInstalledVersionsAsync so disk-backed reads stay on the IO dispatcher.")
     fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
         return gateway.listInstalledVersions(modelId = modelId)
     }
@@ -180,6 +200,7 @@ class ModelProvisioningViewModel internal constructor(
         }
     }
 
+    @Deprecated("UI paths must use setActiveVersionAsync so provisioning mutations stay on the IO dispatcher.")
     fun setActiveVersion(modelId: String, version: String): ProvisioningMutationResult {
         return gateway.setActiveVersion(modelId = modelId, version = version)
     }
@@ -190,6 +211,7 @@ class ModelProvisioningViewModel internal constructor(
         }
     }
 
+    @Deprecated("UI paths must use clearActiveVersionAsync so provisioning mutations stay on the IO dispatcher.")
     fun clearActiveVersion(modelId: String): ProvisioningMutationResult {
         return gateway.clearActiveVersion(modelId = modelId)
     }
@@ -200,6 +222,7 @@ class ModelProvisioningViewModel internal constructor(
         }
     }
 
+    @Deprecated("UI paths must use removeVersionAsync so provisioning mutations stay on the IO dispatcher.")
     fun removeVersion(modelId: String, version: String): ProvisioningMutationResult {
         return gateway.removeVersion(modelId = modelId, version = version)
     }
@@ -240,12 +263,17 @@ class ModelProvisioningViewModel internal constructor(
             ),
         )
         return withContext(ioDispatcher) {
-            finalizeModelOperation(
-                token = token,
-                result = gateway.loadInstalledModel(modelId = modelId, version = version),
-                fallbackModelId = modelId,
-                fallbackVersion = version,
-            )
+            AppOperationTrace.suspendSection(
+                name = "model.load",
+                detail = { "model=$modelId|version=$version" },
+            ) {
+                finalizeModelOperation(
+                    token = token,
+                    result = gateway.loadInstalledModel(modelId = modelId, version = version),
+                    fallbackModelId = modelId,
+                    fallbackVersion = version,
+                )
+            }
         }
     }
 
@@ -267,12 +295,17 @@ class ModelProvisioningViewModel internal constructor(
             ),
         )
         return withContext(ioDispatcher) {
-            finalizeModelOperation(
-                token = token,
-                result = gateway.loadLastUsedModel(),
-                fallbackModelId = lastUsed?.modelId,
-                fallbackVersion = lastUsed?.modelVersion,
-            )
+            AppOperationTrace.suspendSection(
+                name = "model.load_last_used",
+                detail = { "model=${lastUsed?.modelId.orEmpty()}|version=${lastUsed?.modelVersion.orEmpty()}" },
+            ) {
+                finalizeModelOperation(
+                    token = token,
+                    result = gateway.loadLastUsedModel(),
+                    fallbackModelId = lastUsed?.modelId,
+                    fallbackVersion = lastUsed?.modelVersion,
+                )
+            }
         }
     }
 
@@ -293,12 +326,17 @@ class ModelProvisioningViewModel internal constructor(
             ),
         )
         return withContext(ioDispatcher) {
-            finalizeModelOperation(
-                token = token,
-                result = gateway.offloadModel(reason = reason),
-                fallbackModelId = currentModel?.modelId,
-                fallbackVersion = currentModel?.modelVersion,
-            )
+            AppOperationTrace.suspendSection(
+                name = "model.offload",
+                detail = { "reason=$reason|model=${currentModel?.modelId.orEmpty()}" },
+            ) {
+                finalizeModelOperation(
+                    token = token,
+                    result = gateway.offloadModel(reason = reason),
+                    fallbackModelId = currentModel?.modelId,
+                    fallbackVersion = currentModel?.modelVersion,
+                )
+            }
         }
     }
 
@@ -317,36 +355,94 @@ class ModelProvisioningViewModel internal constructor(
         }
     }
 
+    @Deprecated("UI paths must use shouldWarnForMeteredLargeDownloadAsync so preference/network-backed checks stay on IO.")
     fun shouldWarnForMeteredLargeDownload(version: ModelDistributionVersion): Boolean {
         return gateway.shouldWarnForMeteredLargeDownload(version)
     }
 
+    suspend fun shouldWarnForMeteredLargeDownloadAsync(version: ModelDistributionVersion): Boolean {
+        return withContext(ioDispatcher) {
+            gateway.shouldWarnForMeteredLargeDownload(version)
+        }
+    }
+
+    @Deprecated("UI paths must use setDownloadWifiOnlyEnabledAsync so preference writes stay on IO.")
     fun setDownloadWifiOnlyEnabled(enabled: Boolean) {
         gateway.setDownloadWifiOnlyEnabled(enabled)
     }
 
+    suspend fun setDownloadWifiOnlyEnabledAsync(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            gateway.setDownloadWifiOnlyEnabled(enabled)
+        }
+        refreshSnapshot()
+    }
+
+    @Deprecated("UI paths must use acknowledgeLargeDownloadCellularWarningAsync so preference writes stay on IO.")
     fun acknowledgeLargeDownloadCellularWarning() {
         gateway.acknowledgeLargeDownloadCellularWarning()
     }
 
+    suspend fun acknowledgeLargeDownloadCellularWarningAsync() {
+        withContext(ioDispatcher) {
+            gateway.acknowledgeLargeDownloadCellularWarning()
+        }
+        refreshSnapshot()
+    }
+
+    @Deprecated("UI paths must use pauseDownloadAsync so scheduler-backed work stays on IO.")
     fun pauseDownload(taskId: String) {
         gateway.pauseDownload(taskId)
     }
 
+    suspend fun pauseDownloadAsync(taskId: String) {
+        withContext(ioDispatcher) {
+            gateway.pauseDownload(taskId)
+        }
+    }
+
+    @Deprecated("UI paths must use resumeDownloadAsync so scheduler-backed work stays on IO.")
     fun resumeDownload(taskId: String) {
         gateway.resumeDownload(taskId)
     }
 
+    suspend fun resumeDownloadAsync(taskId: String) {
+        withContext(ioDispatcher) {
+            gateway.resumeDownload(taskId)
+        }
+    }
+
+    @Deprecated("UI paths must use retryDownloadAsync so scheduler-backed work stays on IO.")
     fun retryDownload(taskId: String) {
         gateway.retryDownload(taskId)
     }
 
+    suspend fun retryDownloadAsync(taskId: String) {
+        withContext(ioDispatcher) {
+            gateway.retryDownload(taskId)
+        }
+    }
+
+    @Deprecated("UI paths must use cancelDownloadAsync so scheduler-backed work stays on IO.")
     fun cancelDownload(taskId: String) {
         gateway.cancelDownload(taskId)
     }
 
+    suspend fun cancelDownloadAsync(taskId: String) {
+        withContext(ioDispatcher) {
+            gateway.cancelDownload(taskId)
+        }
+    }
+
+    @Deprecated("UI paths must use refreshDownloadsAsync so scheduler-backed work stays on IO.")
     fun refreshDownloads() {
         gateway.syncDownloadsFromScheduler()
+    }
+
+    suspend fun refreshDownloadsAsync() {
+        withContext(ioDispatcher) {
+            gateway.syncDownloadsFromScheduler()
+        }
     }
 
     private fun userMessageFor(error: Throwable): String {
@@ -360,24 +456,39 @@ class ModelProvisioningViewModel internal constructor(
         _uiState.value = buildUiState()
     }
 
-    private inline fun updateAggregateState(
+    private fun updateAggregateState(
         transform: (ProvisioningAggregateState) -> ProvisioningAggregateState,
     ) {
         aggregateState.update(transform)
-        _uiState.value = buildUiState()
+        publishUiStateFromIo()
     }
 
-    private inline fun updateLocalUiState(
+    private fun updateLocalUiState(
         transform: (ModelProvisioningLocalUiState) -> ModelProvisioningLocalUiState,
     ) {
         localUiState.update(transform)
-        _uiState.value = buildUiState()
+        _uiState.value = buildUiStateWithoutEligibility(eligibility = _uiState.value.eligibility)
+        publishUiStateFromIo()
+    }
+
+    private fun publishUiStateFromIo() {
+        viewModelScope.launch(ioDispatcher) {
+            _uiState.value = buildUiState()
+        }
     }
 
     private fun buildUiState(): ModelProvisioningUiState {
         return aggregateState.value.toModelProvisioningUiState(localUiState.value).withEligibility(
             evaluator = eligibilityEvaluator,
             signalsProvider = eligibilitySignalsProvider,
+        )
+    }
+
+    private fun buildUiStateWithoutEligibility(
+        eligibility: ModelCatalogEligibilitySnapshot = ModelCatalogEligibilitySnapshot(),
+    ): ModelProvisioningUiState {
+        return aggregateState.value.toModelProvisioningUiState(localUiState.value).copy(
+            eligibility = eligibility,
         )
     }
 
@@ -446,6 +557,7 @@ class ModelProvisioningViewModelFactory internal constructor(
     private val gateway: ProvisioningGateway,
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
+    private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -454,6 +566,7 @@ class ModelProvisioningViewModelFactory internal constructor(
                 gateway = gateway,
                 eligibilityEvaluator = eligibilityEvaluator,
                 eligibilitySignalsProvider = eligibilitySignalsProvider,
+                dispatchers = dispatchers,
             ) as T
         }
         throw IllegalArgumentException("Unsupported ViewModel class: ${modelClass.name}")

@@ -3,8 +3,11 @@ package com.pocketagent.android
 import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
+import com.pocketagent.android.runtime.AppDispatchers
+import com.pocketagent.android.runtime.AppOperationTrace
 import com.pocketagent.android.runtime.ModelAdmissionAction
 import com.pocketagent.android.runtime.ModelAdmissionPolicy
+import com.pocketagent.android.runtime.MainThreadGuard
 import com.pocketagent.android.runtime.toAdmissionSubject
 import com.pocketagent.android.runtime.ModelMemoryEstimator
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
@@ -14,9 +17,11 @@ import com.pocketagent.nativebridge.ModelLoadingStage
 import com.pocketagent.nativebridge.ModelLifecycleState
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -26,6 +31,7 @@ internal class AppRuntimeLifecycleCoordinator(
     private val installProductionRuntime: (Context) -> Unit,
     private val memoryEstimateRecorder: (ModelMemoryEstimator.EstimationResult?) -> Unit,
     private val modelAdmissionPolicyProvider: (Context) -> ModelAdmissionPolicy,
+    private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
 ) {
     private val lifecycleCommandMutex = Mutex()
     private val lifecycleState = MutableStateFlow(RuntimeModelLifecycleSnapshot.initial())
@@ -53,12 +59,18 @@ internal class AppRuntimeLifecycleCoordinator(
         memoryEstimateRecorder(null)
     }
 
-    fun observeModelLifecycle(context: Context): StateFlow<RuntimeModelLifecycleSnapshot> {
-        reconcileLifecycleState(graphProvider(context))
+    fun observeModelLifecycle(
+        context: Context,
+        scope: CoroutineScope,
+    ): StateFlow<RuntimeModelLifecycleSnapshot> {
+        scope.launch(dispatchers.io) {
+            reconcileLifecycleState(graphProvider(context))
+        }
         return lifecycleState.asStateFlow()
     }
 
     fun currentModelLifecycle(context: Context): RuntimeModelLifecycleSnapshot {
+        MainThreadGuard.assertNotMainThread("AppRuntimeLifecycleCoordinator.currentModelLifecycle")
         reconcileLifecycleState(graphProvider(context))
         return lifecycleState.value
     }
@@ -81,114 +93,119 @@ internal class AppRuntimeLifecycleCoordinator(
             queuedOffload = false,
             updatedAtEpochMs = System.currentTimeMillis(),
         )
-        return lifecycleCommandMutex.withLock {
-            if (token != lifecycleActionToken) {
-                val cancelled = cancelledByNewerRequestResult(detail = "load:$modelId@$version")
-                applyLifecycleCommandResult(cancelled, requestedModel = requestedModel)
-                return@withLock cancelled
-            }
-            val graph = graphProvider(context)
-            val installed = graph.provisioningStore
-                .listInstalledVersions(modelId)
-                .firstOrNull { descriptor -> descriptor.version == version }
-            if (installed == null) {
-                val missing = RuntimeModelLifecycleCommandResult.rejected(
-                    code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
-                    detail = "installed_version_not_found:$modelId@$version",
+        return AppOperationTrace.suspendSection(
+            name = "runtime.lifecycle.load_model",
+            detail = { "model=$modelId|version=$version" },
+        ) {
+            lifecycleCommandMutex.withLock {
+                if (token != lifecycleActionToken) {
+                    val cancelled = cancelledByNewerRequestResult(detail = "load:$modelId@$version")
+                    applyLifecycleCommandResult(cancelled, requestedModel = requestedModel)
+                    return@withLock cancelled
+                }
+                val graph = graphProvider(context)
+                val installed = graph.provisioningStore
+                    .listInstalledVersions(modelId)
+                    .firstOrNull { descriptor -> descriptor.version == version }
+                if (installed == null) {
+                    val missing = RuntimeModelLifecycleCommandResult.rejected(
+                        code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
+                        detail = "installed_version_not_found:$modelId@$version",
+                    )
+                    applyLifecycleCommandResult(missing, requestedModel = requestedModel)
+                    return@withLock missing
+                }
+                val file = java.io.File(installed.absolutePath)
+                if (!file.exists() || !file.isFile) {
+                    val missing = RuntimeModelLifecycleCommandResult.rejected(
+                        code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
+                        detail = "installed_file_missing:${installed.absolutePath}",
+                    )
+                    applyLifecycleCommandResult(missing, requestedModel = requestedModel)
+                    return@withLock missing
+                }
+                val admissionDecision = modelAdmissionPolicyProvider(context).evaluate(
+                    action = ModelAdmissionAction.LOAD,
+                    subject = installed.toAdmissionSubject(),
                 )
-                applyLifecycleCommandResult(missing, requestedModel = requestedModel)
-                return@withLock missing
-            }
-            val file = java.io.File(installed.absolutePath)
-            if (!file.exists() || !file.isFile) {
-                val missing = RuntimeModelLifecycleCommandResult.rejected(
-                    code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
-                    detail = "installed_file_missing:${installed.absolutePath}",
-                )
-                applyLifecycleCommandResult(missing, requestedModel = requestedModel)
-                return@withLock missing
-            }
-            val admissionDecision = modelAdmissionPolicyProvider(context).evaluate(
-                action = ModelAdmissionAction.LOAD,
-                subject = installed.toAdmissionSubject(),
-            )
-            if (!admissionDecision.allowed) {
-                val rejected = admissionDecision.asLifecycleRejectedResult()
-                applyLifecycleCommandResult(rejected, requestedModel = requestedModel)
-                return@withLock rejected
-            }
-            lifecycleState.value = lifecycleState.value.copy(
-                loadingDetail = "Checking available memory...",
-                loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.PRECHECK,
-                loadingProgress = 0f,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            )
-            val memoryEstimate = runCatching {
-                val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                val memInfo = ActivityManager.MemoryInfo()
-                activityManager?.getMemoryInfo(memInfo)
-                val availableBytes = memInfo.availMem.takeIf { it > 0L }
-                ModelMemoryEstimator.estimate(
-                    modelFilePath = installed.absolutePath,
-                    availableMemoryBytes = availableBytes,
-                )
-            }.getOrNull()
-            memoryEstimateRecorder(memoryEstimate)
-            if (memoryEstimate?.fitsInMemory == false) {
-                Log.w(
-                    "AppRuntimeDeps",
-                    "MEMORY_WARNING|model=$modelId|estimated_mb=%.0f|available_mb=%.0f".format(
-                        memoryEstimate.estimatedMb,
-                        memoryEstimate.availableMemoryMb ?: 0.0,
-                    ),
-                )
-            }
-
-            val activated = graph.provisioningStore.setActiveVersion(modelId = modelId, version = version)
-            if (!activated) {
-                val failed = RuntimeModelLifecycleCommandResult.rejected(
-                    code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
-                    detail = "activation_failed:$modelId@$version",
-                )
-                applyLifecycleCommandResult(failed, requestedModel = requestedModel)
-                return@withLock failed
-            }
-            val previousModelLoaded = lifecycleState.value.loadedModel != null
-            if (previousModelLoaded) {
+                if (!admissionDecision.allowed) {
+                    val rejected = admissionDecision.asLifecycleRejectedResult()
+                    applyLifecycleCommandResult(rejected, requestedModel = requestedModel)
+                    return@withLock rejected
+                }
                 lifecycleState.value = lifecycleState.value.copy(
-                    loadingDetail = "Releasing previous model...",
-                    loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.UNLOADING_PREVIOUS,
-                    loadingProgress = 0.05f,
+                    loadingDetail = "Checking available memory...",
+                    loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.PRECHECK,
+                    loadingProgress = 0f,
                     updatedAtEpochMs = System.currentTimeMillis(),
                 )
-            }
-            lifecycleState.value = lifecycleState.value.copy(
-                loadingDetail = "Initializing runtime...",
-                loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.INITIALIZING_RUNTIME,
-                loadingProgress = 0.1f,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            )
-            installProductionRuntime(context)
-            lifecycleState.value = lifecycleState.value.copy(
-                loadingDetail = "Loading model...",
-                loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.LOADING_MODEL,
-                loadingProgress = 0.15f,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            )
-            val result = graph.runtimeFacade.loadModel(modelId = modelId, modelVersion = version)
-            if (token != lifecycleActionToken) {
-                if (result.success) {
-                    graph.runtimeFacade.offloadModel(reason = "cancelled_by_newer_request")
+                val memoryEstimate = runCatching {
+                    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                    val memInfo = ActivityManager.MemoryInfo()
+                    activityManager?.getMemoryInfo(memInfo)
+                    val availableBytes = memInfo.availMem.takeIf { it > 0L }
+                    ModelMemoryEstimator.estimate(
+                        modelFilePath = installed.absolutePath,
+                        availableMemoryBytes = availableBytes,
+                    )
+                }.getOrNull()
+                memoryEstimateRecorder(memoryEstimate)
+                if (memoryEstimate?.fitsInMemory == false) {
+                    Log.w(
+                        "AppRuntimeDeps",
+                        "MEMORY_WARNING|model=$modelId|estimated_mb=%.0f|available_mb=%.0f".format(
+                            memoryEstimate.estimatedMb,
+                            memoryEstimate.availableMemoryMb ?: 0.0,
+                        ),
+                    )
                 }
-                val cancelled = cancelledByNewerRequestResult(detail = "load:$modelId@$version")
-                applyLifecycleCommandResult(cancelled, requestedModel = requestedModel)
-                return@withLock cancelled
+
+                val activated = graph.provisioningStore.setActiveVersion(modelId = modelId, version = version)
+                if (!activated) {
+                    val failed = RuntimeModelLifecycleCommandResult.rejected(
+                        code = ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE,
+                        detail = "activation_failed:$modelId@$version",
+                    )
+                    applyLifecycleCommandResult(failed, requestedModel = requestedModel)
+                    return@withLock failed
+                }
+                val previousModelLoaded = lifecycleState.value.loadedModel != null
+                if (previousModelLoaded) {
+                    lifecycleState.value = lifecycleState.value.copy(
+                        loadingDetail = "Releasing previous model...",
+                        loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.UNLOADING_PREVIOUS,
+                        loadingProgress = 0.05f,
+                        updatedAtEpochMs = System.currentTimeMillis(),
+                    )
+                }
+                lifecycleState.value = lifecycleState.value.copy(
+                    loadingDetail = "Initializing runtime...",
+                    loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.INITIALIZING_RUNTIME,
+                    loadingProgress = 0.1f,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+                installProductionRuntime(context)
+                lifecycleState.value = lifecycleState.value.copy(
+                    loadingDetail = "Loading model...",
+                    loadingStage = com.pocketagent.nativebridge.ModelLoadingStage.LOADING_MODEL,
+                    loadingProgress = 0.15f,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+                val result = graph.runtimeFacade.loadModel(modelId = modelId, modelVersion = version)
+                if (token != lifecycleActionToken) {
+                    if (result.success) {
+                        graph.runtimeFacade.offloadModel(reason = "cancelled_by_newer_request")
+                    }
+                    val cancelled = cancelledByNewerRequestResult(detail = "load:$modelId@$version")
+                    applyLifecycleCommandResult(cancelled, requestedModel = requestedModel)
+                    return@withLock cancelled
+                }
+                if (result.success) {
+                    graph.provisioningStore.recordLastLoadedModel(modelId = modelId, version = version)
+                }
+                applyLifecycleCommandResult(result, requestedModel = requestedModel)
+                result
             }
-            if (result.success) {
-                graph.provisioningStore.recordLastLoadedModel(modelId = modelId, version = version)
-            }
-            applyLifecycleCommandResult(result, requestedModel = requestedModel)
-            result
         }
     }
 
@@ -217,16 +234,21 @@ internal class AppRuntimeLifecycleCoordinator(
             queuedOffload = false,
             updatedAtEpochMs = System.currentTimeMillis(),
         )
-        return lifecycleCommandMutex.withLock {
-            if (token != lifecycleActionToken) {
-                val cancelled = cancelledByNewerRequestResult(detail = "offload:$reason")
-                applyLifecycleCommandResult(cancelled, requestedModel = requestedModel)
-                return@withLock cancelled
+        return AppOperationTrace.suspendSection(
+            name = "runtime.lifecycle.offload_model",
+            detail = { "reason=$reason" },
+        ) {
+            lifecycleCommandMutex.withLock {
+                if (token != lifecycleActionToken) {
+                    val cancelled = cancelledByNewerRequestResult(detail = "offload:$reason")
+                    applyLifecycleCommandResult(cancelled, requestedModel = requestedModel)
+                    return@withLock cancelled
+                }
+                val graph = graphProvider(context)
+                val result = graph.runtimeFacade.offloadModel(reason = reason)
+                applyLifecycleCommandResult(result, requestedModel = requestedModel)
+                result
             }
-            val graph = graphProvider(context)
-            val result = graph.runtimeFacade.offloadModel(reason = reason)
-            applyLifecycleCommandResult(result, requestedModel = requestedModel)
-            result
         }
     }
 
@@ -240,50 +262,52 @@ internal class AppRuntimeLifecycleCoordinator(
         if (shouldSkipReconcile(graph)) {
             return
         }
-        val loaded = graph.runtimeFacade.loadedModel()
-        val activeGenerationCount = graph.runtimeFacade.activeGenerationCount()
-        val current = lifecycleState.value
-        val normalizedLoaded = normalizeLoadedModel(graph = graph, loaded = loaded)
-        val lastUsed = graph.provisioningStore.lastLoadedModel()?.let { ref ->
-            RuntimeLoadedModel(modelId = ref.modelId, modelVersion = ref.version)
-        }
-        val preserveCompletedDetail = shouldPreserveCompletedDetail(
-            current = current,
-            normalizedLoaded = normalizedLoaded,
-        )
-        val reconciledState = reconcileState(
-            current = current,
-            normalizedLoaded = normalizedLoaded,
-            activeGenerationCount = activeGenerationCount,
-        )
-        lifecycleState.value = current.copy(
-            state = reconciledState,
-            loadedModel = normalizedLoaded,
-            requestedModel = reconcileRequestedModel(
+        AppOperationTrace.section(name = "runtime.lifecycle.reconcile") {
+            val loaded = graph.runtimeFacade.loadedModel()
+            val activeGenerationCount = graph.runtimeFacade.activeGenerationCount()
+            val current = lifecycleState.value
+            val normalizedLoaded = normalizeLoadedModel(graph = graph, loaded = loaded)
+            val lastUsed = graph.provisioningStore.lastLoadedModel()?.let { ref ->
+                RuntimeLoadedModel(modelId = ref.modelId, modelVersion = ref.version)
+            }
+            val preserveCompletedDetail = shouldPreserveCompletedDetail(
                 current = current,
-                reconciledState = reconciledState,
-            ),
-            errorCode = keepFailedStateValue(reconciledState, current.errorCode),
-            errorDetail = keepFailedStateValue(reconciledState, current.errorDetail),
-            lastUsedModel = lastUsed,
-            queuedOffload = current.queuedOffload && activeGenerationCount > 0,
-            loadingDetail = reconcileLoadingField(
-                currentValue = current.loadingDetail,
-                preserveCompletedDetail = preserveCompletedDetail,
                 normalizedLoaded = normalizedLoaded,
-            ),
-            loadingStage = reconcileLoadingField(
-                currentValue = current.loadingStage,
-                preserveCompletedDetail = preserveCompletedDetail,
+            )
+            val reconciledState = reconcileState(
+                current = current,
                 normalizedLoaded = normalizedLoaded,
-            ),
-            loadingProgress = reconcileLoadingField(
-                currentValue = current.loadingProgress,
-                preserveCompletedDetail = preserveCompletedDetail,
-                normalizedLoaded = normalizedLoaded,
-            ),
-            updatedAtEpochMs = System.currentTimeMillis(),
-        )
+                activeGenerationCount = activeGenerationCount,
+            )
+            lifecycleState.value = current.copy(
+                state = reconciledState,
+                loadedModel = normalizedLoaded,
+                requestedModel = reconcileRequestedModel(
+                    current = current,
+                    reconciledState = reconciledState,
+                ),
+                errorCode = keepFailedStateValue(reconciledState, current.errorCode),
+                errorDetail = keepFailedStateValue(reconciledState, current.errorDetail),
+                lastUsedModel = lastUsed,
+                queuedOffload = current.queuedOffload && activeGenerationCount > 0,
+                loadingDetail = reconcileLoadingField(
+                    currentValue = current.loadingDetail,
+                    preserveCompletedDetail = preserveCompletedDetail,
+                    normalizedLoaded = normalizedLoaded,
+                ),
+                loadingStage = reconcileLoadingField(
+                    currentValue = current.loadingStage,
+                    preserveCompletedDetail = preserveCompletedDetail,
+                    normalizedLoaded = normalizedLoaded,
+                ),
+                loadingProgress = reconcileLoadingField(
+                    currentValue = current.loadingProgress,
+                    preserveCompletedDetail = preserveCompletedDetail,
+                    normalizedLoaded = normalizedLoaded,
+                ),
+                updatedAtEpochMs = System.currentTimeMillis(),
+            )
+        }
     }
 
     private fun nextLifecycleActionToken(): Long {

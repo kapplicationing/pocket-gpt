@@ -208,28 +208,41 @@ class AndroidGpuOffloadQualifier(
     now: () -> Long = { System.currentTimeMillis() },
 ) : GpuOffloadQualifier {
     private val appContext = context.applicationContext
-    private val appBuildSignature: String = runCatching {
-        val packageInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
-        val versionCode = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(packageInfo)
-        "${versionCode}:${packageInfo.lastUpdateTime}"
-    }.getOrDefault("${BuildConfig.VERSION_CODE}:${BuildConfig.VERSION_NAME}")
+    private val appBuildSignature: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        runCatching {
+            val packageInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            val versionCode = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(packageInfo)
+            "${versionCode}:${packageInfo.lastUpdateTime}"
+        }.getOrDefault("${BuildConfig.VERSION_CODE}:${BuildConfig.VERSION_NAME}")
+    }
 
-    private val delegate = InternalAndroidGpuOffloadQualifier(
-        probeClient = probeClient,
-        probeRequestResolver = probeRequestResolver,
-        backendDiagnosticsReader = backendDiagnosticsReader,
-        now = now,
-        appBuildSignature = appBuildSignature,
-        deviceFingerprint = Build.FINGERPRINT,
-        resultStore = SharedPrefsGpuProbeResultStore(
-            prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
-        ),
-    )
+    private val delegate by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        MainThreadGuard.assertNotMainThread("AndroidGpuOffloadQualifier.delegate")
+        InternalAndroidGpuOffloadQualifier(
+            probeClient = probeClient,
+            probeRequestResolver = probeRequestResolver,
+            backendDiagnosticsReader = backendDiagnosticsReader,
+            now = now,
+            appBuildSignature = appBuildSignature,
+            deviceFingerprint = Build.FINGERPRINT,
+            resultStore = SharedPrefsGpuProbeResultStore(
+                prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+            ),
+        )
+    }
 
     override fun evaluate(
         runtimeSupported: Boolean,
         deviceAdvisory: DeviceGpuOffloadAdvisory,
-    ): GpuProbeResult = delegate.evaluate(runtimeSupported, deviceAdvisory)
+    ): GpuProbeResult {
+        MainThreadGuard.assertNotMainThread("AndroidGpuOffloadQualifier.evaluate")
+        return AppOperationTrace.section(
+            name = "gpu.eligibility.evaluate",
+            detail = { "runtime_supported=$runtimeSupported" },
+        ) {
+            delegate.evaluate(runtimeSupported, deviceAdvisory)
+        }
+    }
 
     override fun diagnosticsLine(): String = delegate.diagnosticsLine()
 

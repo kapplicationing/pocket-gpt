@@ -2,6 +2,7 @@ package com.pocketagent.android.ui.controllers
 
 import com.pocketagent.android.ui.clearError
 import com.pocketagent.android.ui.state.ChatSessionUiModel
+import com.pocketagent.android.ui.state.activeSession
 import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ComposerUiState
 import com.pocketagent.android.ui.state.MessageKind
@@ -70,7 +71,7 @@ class AndroidChatConversationServiceTest {
         val update = service.submitEdit(state)
 
         assertNotNull(update)
-        assertEquals(0, update?.state?.activeSession?.messages?.size)
+        assertEquals(0, update?.state?.activeSession()?.messages?.size)
         assertEquals("updated draft", update?.state?.composer?.text)
         assertEquals(listOf("/tmp/a.png"), update?.state?.composer?.attachedImages)
         assertEquals(null, update?.state?.composer?.editingMessageId)
@@ -97,7 +98,7 @@ class AndroidChatConversationServiceTest {
         val update = service.regenerateResponse(state, "a2")
 
         assertNotNull(update)
-        assertEquals(listOf("u1", "a1"), update?.state?.activeSession?.messages?.map(MessageUiModel::id))
+        assertEquals(listOf("u1", "a1"), update?.state?.activeSession()?.messages?.map(MessageUiModel::id))
         assertEquals("hello", update?.state?.composer?.text)
         assertEquals(listOf("/tmp/first.png"), update?.state?.composer?.attachedImages)
         assertTrue(update?.shouldPersist == true)
@@ -114,7 +115,7 @@ class AndroidChatConversationServiceTest {
         assertNotNull(prepared)
         assertTrue(prepared?.state?.composer?.isSending == true)
         assertEquals(ModelRuntimeStatus.LOADING, prepared?.state?.runtime?.modelRuntimeStatus)
-        assertEquals(1, prepared?.state?.activeSession?.messages?.size)
+        assertEquals(1, prepared?.state?.activeSession()?.messages?.size)
 
         val completed = service.applyImageAnalysisSuccess(
             state = prepared!!.state,
@@ -126,7 +127,7 @@ class AndroidChatConversationServiceTest {
         assertFalse(completed.composer.isSending)
         assertEquals(ModelRuntimeStatus.READY, completed.runtime.modelRuntimeStatus)
         assertEquals("NATIVE_JNI", completed.runtime.runtimeBackend)
-        assertEquals(listOf("img-1", "img-2"), completed.activeSession?.messages?.map(MessageUiModel::id))
+        assertEquals(listOf("img-1", "img-2"), completed.activeSession()?.messages?.map(MessageUiModel::id))
     }
 
     @Test
@@ -147,7 +148,7 @@ class AndroidChatConversationServiceTest {
 
         assertNotNull(prepared)
         assertTrue(prepared?.state?.composer?.isSending == true)
-        assertEquals(2, prepared?.state?.activeSession?.messages?.size)
+        assertEquals(2, prepared?.state?.activeSession()?.messages?.size)
 
         val failedUpdate = service.appendDiagnosticsFailure(
             state = prepared!!.state,
@@ -160,7 +161,7 @@ class AndroidChatConversationServiceTest {
         )
 
         assertNotNull(failedUpdate)
-        assertEquals(3, failedUpdate?.state?.activeSession?.messages?.size)
+        assertEquals(3, failedUpdate?.state?.activeSession()?.messages?.size)
         assertEquals("UI-RUNTIME-001", failedUpdate?.state?.runtime?.lastErrorCode)
         assertTrue(failedUpdate?.shouldPersist == true)
     }

@@ -35,7 +35,7 @@ import com.pocketagent.core.ModelPreset
 internal fun PocketAgentTopBar(
     activeRuntimeModelLabel: String?,
     lastUsedModelLabel: String?,
-    modelLibraryState: ModelLibraryUiState,
+    hasInstalledModels: Boolean,
     onOpenSessionDrawer: () -> Unit,
     onModelPresetSelected: (ModelPreset) -> Unit,
     onOpenModelLibrary: () -> Unit,
@@ -43,9 +43,6 @@ internal fun PocketAgentTopBar(
 ) {
     val haptic = LocalHapticFeedback.current
     var showModelMenu by remember { mutableStateOf(false) }
-    val hasInstalledModels = remember(modelLibraryState) {
-        modelLibraryState.snapshot.models.any { model -> model.installedVersions.isNotEmpty() }
-    }
 
     TopAppBar(
         title = {

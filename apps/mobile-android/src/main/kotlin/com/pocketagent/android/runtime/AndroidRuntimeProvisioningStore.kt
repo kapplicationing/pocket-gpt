@@ -23,6 +23,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -43,12 +44,24 @@ class AndroidRuntimeProvisioningStore(
         .ifEmpty { baselineModelIdSet }
     @Volatile
     internal var migrationEnsured: Boolean = false
+    // Storage summary is cached for short repeated UI reads, but every owning
+    // mutation that can change model/download bytes explicitly invalidates it.
     @Volatile
     private var storageSummaryCache: StorageSummary? = null
     @Volatile
     private var storageSummaryCacheTimeMs: Long = 0L
+    // Storage roots are process-lifetime OS values; Android storage volume changes
+    // require process restart or explicit future invalidation.
+    private val externalStorageRootsCache = AtomicReference<Array<File?>?>(null)
+    private val managedStorageRootCache = AtomicReference<File?>(null)
+    // Last-loaded model is prefs-backed; writes update this cache and removals clear it.
+    @Volatile
+    private var lastLoadedModelCacheResolved: Boolean = false
+    @Volatile
+    private var lastLoadedModelCache: LastLoadedModelRef? = null
 
     fun snapshot(): RuntimeProvisioningSnapshot {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.snapshot")
         ensureMigrated()
         val corruptionSignals = mutableListOf<ProvisioningRecoverySignal>()
         corruptionSignals += drainMigrationCorruptionSignals()
@@ -312,11 +325,13 @@ class AndroidRuntimeProvisioningStore(
     }
 
     fun listInstalledVersions(modelId: String): List<ModelVersionDescriptor> {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.listInstalledVersions")
         ensureMigrated()
         return readInstalledVersions(modelSpecFor(modelId))
     }
 
     fun recordLastLoadedModel(modelId: String, version: String) {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.recordLastLoadedModel")
         val normalizedModelId = modelId.trim()
         val normalizedVersion = version.trim()
         if (normalizedModelId.isBlank() || normalizedVersion.isBlank()) {
@@ -326,19 +341,36 @@ class AndroidRuntimeProvisioningStore(
             .putString(PROVISIONING_LAST_LOADED_MODEL_ID_KEY, normalizedModelId)
             .putString(PROVISIONING_LAST_LOADED_MODEL_VERSION_KEY, normalizedVersion)
             .apply()
+        lastLoadedModelCache = LastLoadedModelRef(modelId = normalizedModelId, version = normalizedVersion)
+        lastLoadedModelCacheResolved = true
     }
 
     fun clearLastLoadedModel() {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.clearLastLoadedModel")
         prefs.edit()
             .remove(PROVISIONING_LAST_LOADED_MODEL_ID_KEY)
             .remove(PROVISIONING_LAST_LOADED_MODEL_VERSION_KEY)
             .apply()
+        lastLoadedModelCache = null
+        lastLoadedModelCacheResolved = true
     }
 
     internal fun lastLoadedModel(): LastLoadedModelRef? {
+        if (lastLoadedModelCacheResolved) {
+            return lastLoadedModelCache
+        }
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.lastLoadedModel")
         ensureMigrated()
-        val modelId = prefs.readOptional(PROVISIONING_LAST_LOADED_MODEL_ID_KEY) ?: return null
-        val version = prefs.readOptional(PROVISIONING_LAST_LOADED_MODEL_VERSION_KEY) ?: return null
+        val modelId = prefs.readOptional(PROVISIONING_LAST_LOADED_MODEL_ID_KEY) ?: run {
+            lastLoadedModelCache = null
+            lastLoadedModelCacheResolved = true
+            return null
+        }
+        val version = prefs.readOptional(PROVISIONING_LAST_LOADED_MODEL_VERSION_KEY) ?: run {
+            lastLoadedModelCache = null
+            lastLoadedModelCacheResolved = true
+            return null
+        }
         val installed = runCatching { readInstalledVersions(modelSpecFor(modelId)) }
             .getOrElse {
                 clearLastLoadedModel()
@@ -353,10 +385,14 @@ class AndroidRuntimeProvisioningStore(
             clearLastLoadedModel()
             return null
         }
-        return LastLoadedModelRef(modelId = modelId, version = version)
+        return LastLoadedModelRef(modelId = modelId, version = version).also { ref ->
+            lastLoadedModelCache = ref
+            lastLoadedModelCacheResolved = true
+        }
     }
 
     fun setActiveVersion(modelId: String, version: String): Boolean {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.setActiveVersion")
         val spec = modelSpecFor(modelId)
         return withModelLock(modelId) {
             ensureMigrated()
@@ -370,6 +406,7 @@ class AndroidRuntimeProvisioningStore(
     }
 
     fun clearActiveVersion(modelId: String): Boolean {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.clearActiveVersion")
         val spec = modelSpecFor(modelId)
         return withModelLock(modelId) {
             ensureMigrated()
@@ -389,6 +426,7 @@ class AndroidRuntimeProvisioningStore(
     }
 
     fun removeVersion(modelId: String, version: String): Boolean {
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.removeVersion")
         val spec = modelSpecFor(modelId)
         return withModelLock(modelId) {
             ensureMigrated()
@@ -404,6 +442,10 @@ class AndroidRuntimeProvisioningStore(
             writeStoredVersionEntries(spec, versions)
             if (prefs.readOptional(activeVersionKey(spec)) == version) {
                 prefs.edit().remove(activeVersionKey(spec)).apply()
+            }
+            if (lastLoadedModelCache?.modelId == modelId && lastLoadedModelCache?.version == version) {
+                lastLoadedModelCache = null
+                lastLoadedModelCacheResolved = false
             }
             deleteManagedFileIfOrphaned(
                 absolutePath = target.absolutePath,
@@ -459,6 +501,7 @@ class AndroidRuntimeProvisioningStore(
         storageSummaryCache?.let { cached ->
             if (now - storageSummaryCacheTimeMs < 2_000L) return cached
         }
+        MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.storageSummary")
         ensureMigrated()
         val storageRoot = managedStorageRoot()
         val usedByModels = allModelSpecs()
@@ -1175,6 +1218,9 @@ class AndroidRuntimeProvisioningStore(
     }
 
     private fun managedStorageRoot(): File {
+        managedStorageRootCache.get()?.let { cachedRoot ->
+            return cachedRoot
+        }
         val externalRoot = externalStorageRoots()
             .asSequence()
             .filterNotNull()
@@ -1186,12 +1232,18 @@ class AndroidRuntimeProvisioningStore(
                     candidate.exists() && candidate.isDirectory && candidate.canWrite()
                 }.getOrDefault(false)
             }
-        return externalRoot
             ?: error("External model storage is unavailable; app-private storage is not a supported canonical cache path.")
+        managedStorageRootCache.compareAndSet(null, externalRoot)
+        return managedStorageRootCache.get() ?: externalRoot
     }
 
     private fun externalStorageRoots(): Array<File?> {
-        return arrayOf(context.getExternalFilesDir(null))
+        externalStorageRootsCache.get()?.let { roots ->
+            return roots
+        }
+        val computed = arrayOf(context.getExternalFilesDir(null))
+        externalStorageRootsCache.compareAndSet(null, computed)
+        return externalStorageRootsCache.get() ?: computed
     }
 
     private fun mirrorInstalledModelToDownloads(

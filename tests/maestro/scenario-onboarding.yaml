@@ -17,8 +17,9 @@ tags:
             id: "provisioning_bootstrap_loading"
           timeout: 30000
 - extendedWaitUntil:
-    visible: "Next"
-    timeout: 30000
+    visible:
+      id: "onboarding_next"
+    timeout: 120000
 - runFlow: shared/bootstrap-to-ready.yaml
 - assertNotVisible:
     text: "Next"

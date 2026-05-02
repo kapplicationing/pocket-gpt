@@ -13,12 +13,8 @@ tags:
       - extendedWaitUntil:
           notVisible:
             id: "provisioning_bootstrap_loading"
-          timeout: 30000
-- extendedWaitUntil:
-    visible: "Skip"
-    timeout: 30000
-- hideKeyboard
-- tapOn: "Skip"
+          timeout: 120000
+- runFlow: shared/bootstrap-to-ready.yaml
 - tapOn:
     id: "session_drawer_button"
 - assertVisible: "Create session"

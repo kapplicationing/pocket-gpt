@@ -31,6 +31,7 @@ lanes:
       - :apps:mobile-android-host:test
     android_tasks:
       - :apps:mobile-android:testDebugUnitTest
+      - :apps:mobile-android:assembleBenchmark
 
   device:
     requires_android_sdk: false
@@ -115,6 +116,7 @@ lanes:
       - tests/maestro/scenario-b.yaml
       - tests/maestro/scenario-c.yaml
       - tests/maestro/scenario-activation-send-smoke.yaml
+      - tests/maestro/scenario-typing-jank-smoke.yaml
 
   journey:
     requires_android_sdk: true

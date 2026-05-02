@@ -1,0 +1,16 @@
+# Title: Typing jank smoke
+# Description: Reproduces the keyboard typing path used by scripts/dev/perf-baseline.sh.
+appId: com.pocketagent.android
+tags:
+  - smoke
+  - perf
+---
+- launchApp:
+    clearState: false
+- assertVisible:
+    id: composer_input
+- tapOn:
+    id: composer_input
+- inputText: "PocketGPT typing jank smoke text"
+- assertVisible:
+    text: "PocketGPT typing jank smoke text"

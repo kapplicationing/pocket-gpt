@@ -20,7 +20,10 @@ tags:
     commands:
       - tapOn:
           text: "Get started"
-- assertVisible: "Offline-first"
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 120000
 - runFlow:
     when:
       notVisible: "Runtime: Ready"

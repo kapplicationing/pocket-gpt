@@ -14,7 +14,10 @@ appId: com.pocketagent.android
     commands:
       - hideKeyboard
       - tapOn: "Get started"
-- assertVisible: "Offline-first"
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 120000
 - runFlow: open-advanced-controls.yaml
 - runFlow: open-model-library.yaml
 - scrollUntilVisible:

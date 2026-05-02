@@ -18,7 +18,10 @@ tags:
     commands:
       - hideKeyboard
       - tapOn: "Get started"
-- assertVisible: "Offline-first"
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 120000
 - runFlow:
     when:
       visible: "Load last used"

@@ -75,14 +75,69 @@ python3 tools/devctl/main.py lane maestro --include-tags model-management
 
 ## Runbook: Performance Regression Check
 
-Before UI/runtime refactors, or after touching `ChatViewModel` / `ChatApp`, run:
+Before UI/runtime refactors, or after touching `ChatViewModel` / `ChatApp`, run on
+the **`benchmark` build variant**, NEVER on `debug`:
 
 ```bash
-ANDROID_SERIAL=<serial> scripts/dev/perf-baseline.sh
+# First time, or after dependency/code changes: build and install benchmark APK
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
+
+# Subsequent runs (no rebuild)
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
+
+# Companion lane for broader perf coverage
 python3 tools/devctl/main.py lane maestro --include-tags perf
+
+# Compose stability review for hot composables
+bash scripts/dev/compose-report-hotpath.sh --build
 ```
 
-Pass criteria: jank rate <= 25% and 50th-percentile frame <= 18 ms.
+The `debug` variant carries a 30-50% Compose recompose tax (no AOT, debug source
+instrumentation, `MainThreadGuard` + `StrictMode` overhead). `perf-baseline.sh`
+refuses to measure debuggable builds without `--allow-debuggable`. See
+[android-performance-contract.md](../architecture/android-performance-contract.md)
+for the rationale and the 2026-05-02 RCA. For the broader operation-by-operation
+follow-up plan, see
+[`android-operational-performance-plan.md`](../operations/android-operational-performance-plan.md).
+
+Run the script three times and compare medians — the first run is always
+warmup-skewed because of cold ART, cold Compose runtime, and cold IME.
+
+Current thresholds (Pixel/Galaxy class on benchmark variant):
+
+- `janky_frames <= 20%`
+- `p50 <= 14 ms`
+- `p90 <= 25 ms`
+- `p99 <= 32 ms`
+
+Treat thresholds as ratcheting guardrails: loosening them requires written
+justification and reviewer sign-off. Do not accept the current app behavior as the
+long-term bar.
+
+### Hot-Path PR Checklist
+
+Use this checklist for changes touching ViewModels, `runtime/`, provisioning, or Compose
+shell files:
+
+- [ ] No disk, network, SharedPreferences first-read, native diagnostics, package-manager
+      calls, or filesystem probes run on the main thread.
+- [ ] Any sync runtime/provisioning method that can touch disk calls
+      `MainThreadGuard.assertNotMainThread(...)` or is documented as in-memory only.
+- [ ] Root/shell Compose observes narrow flows; full `uiState` collection stays behind a
+      visibility gate.
+- [ ] New `derivedStateOf {}` usages are wrapped in `remember {}`.
+- [ ] Every new UI state `data class` carries `@Immutable` (or is listed in
+      `apps/mobile-android/compose-stability.conf`).
+- [ ] No new property getters on `@Immutable` data classes.
+- [ ] High-frequency `OutlinedTextField`s (composer, search) use the `TextFieldValue`
+      overload with local `mutableStateOf`, not the `String` overload.
+- [ ] Hot-path caches document their lifetime and invalidation rule.
+- [ ] After Compose changes, regenerated `apps/mobile-android/build/compose-reports/`
+      and verified no new hot-path `unstable` parameters with
+      `bash scripts/dev/compose-report-hotpath.sh --build`.
+- [ ] Device evidence from
+      `ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build` is captured
+      for risky UI/runtime changes (3 runs, median compared).
 
 ## Runbook: Local Lifecycle E2E (First-Run Download -> Chat)
 

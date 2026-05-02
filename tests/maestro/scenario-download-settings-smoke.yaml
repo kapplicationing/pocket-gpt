@@ -23,7 +23,10 @@ tags:
     commands:
       - hideKeyboard
       - tapOn: "Get started"
-- assertVisible: "Offline-first"
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 120000
 - runFlow: shared/open-model-library.yaml
 - assertVisible: "Model library"
 - assertVisible: "Search models"

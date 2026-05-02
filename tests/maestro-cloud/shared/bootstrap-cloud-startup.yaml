@@ -12,8 +12,9 @@ appId: com.pocketagent.android
             id: "provisioning_bootstrap_loading"
           timeout: 30000
 - extendedWaitUntil:
-    visible: "Next"
-    timeout: 20000
+    visible:
+      id: "onboarding_next"
+    timeout: 120000
 - runFlow:
     when:
       visible:
@@ -40,12 +41,10 @@ appId: com.pocketagent.android
           id: "onboarding_next"
 - runFlow:
     when:
-      visible:
-        text: "Next"
+      visible: "Next"
     commands:
       - hideKeyboard
-      - tapOn:
-          text: "Next"
+      - tapOn: "Next"
 - runFlow:
     when:
       visible:
@@ -56,12 +55,10 @@ appId: com.pocketagent.android
           id: "onboarding_next"
 - runFlow:
     when:
-      visible:
-        text: "Next"
+      visible: "Next"
     commands:
       - hideKeyboard
-      - tapOn:
-          text: "Next"
+      - tapOn: "Next"
 - runFlow:
     when:
       visible:

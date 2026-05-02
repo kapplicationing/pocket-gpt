@@ -50,6 +50,19 @@ Use raw `adb` only for coordinate taps, keyevents, or shell ops the CLI does not
 - **clearState**: Use sparingly. It only resets app-private data and can invalidate seeded runtime state in `Android/media`.
 - **Screenshot-pack gates**: Do not treat a generic `connectedDebugAndroidTest` failure as product evidence until you confirm the required runner args (`screenshot_pack_dir`, `screenshot_pack_fallback_dir`) were present.
 - **Selector collisions**: When Maestro says an element is missing, run `device ui` first. Keyboard labels (e.g., `Send`) can collide with app labels. Prefer `id:` selectors.
+- **Build variant matters for performance flows**: The default `installDebug` APK
+  carries a ~30-50% Compose recompose tax. Functional Maestro flows (smoke,
+  journey, screenshot-pack) are fine on `debug` because they verify behaviour
+  and selectors, not frame budgets. Performance-sensitive flows or anything
+  asserting jank/timings must run on the `benchmark` variant
+  (`./gradlew :apps:mobile-android:assembleBenchmark` then `adb install -r ...`).
+  For typing-frame jank specifically, use `bash scripts/dev/perf-baseline.sh
+  --build`, never a Maestro flow on the debug APK.
+- **Operation-specific performance evidence**: Use
+  `docs/operations/android-operational-performance-plan.md` to decide when a
+  Maestro flow is functional evidence only (selectors, user journey) versus when
+  a benchmark-variant frame-budget run is required (typing, streaming markdown,
+  model library during downloads, model switching, voice activation).
 
 ## When Tests Fail: Triage
 

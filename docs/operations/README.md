@@ -17,6 +17,7 @@ This section is the cross-functional execution system.
 - QA operating doctrine: `docs/testing/qa-operating-principles.md`
 - Cloud-first QA operating model: `docs/testing/cloud-first-qa-operating-model.md`
 - Launch program learnings: `docs/operations/launch-program-learnings.md`
+- Android operational performance plan: `docs/operations/android-operational-performance-plan.md`
 
 ## Status Contract
 
@@ -27,6 +28,7 @@ This section is the cross-functional execution system.
 ## Documents
 
 - `execution-board.md`
+- `android-operational-performance-plan.md`
 - `launch-program-learnings.md`
 - `play-store-launch-program.md`
 - `play-store-submission-readiness.md`

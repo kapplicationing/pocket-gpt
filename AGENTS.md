@@ -16,6 +16,9 @@ This repo follows engineering excellence:
 4. For build/compile failures, use the global `code-health` skill and the Kotlin quality gate before treating the issue as a Maestro/testing problem.
 5. After UI selector changes, run `maestro-android lint` or `maestro-android audit-selectors` before widening to full lanes.
 6. For Compose UI refactors, read `.claude/skills/android-compose-ui-audit/SKILL.md` before changing shell/leaf ownership, undo flows, resource migrations, or accessibility semantics.
+7. For Android UI/runtime hot-path changes, follow `docs/architecture/android-performance-contract.md` and keep thread ownership, state fanout, and cache lifetime explicit. Annotate every UI state class with `@Immutable`, never put property getters on `@Immutable` data classes, and use the `TextFieldValue` overload for high-frequency text fields.
+8. **Never measure performance on the `debug` build.** The `debug` variant carries a ~30-50% Compose recompose tax. Always use `bash scripts/dev/perf-baseline.sh --build` (which assembles the `benchmark` variant). Functional tests (Maestro smoke/journey/screenshot-pack) on `debug` are fine — they verify behaviour, not frame budgets.
+9. For broad Android performance follow-up work, use `docs/operations/android-operational-performance-plan.md` to classify the operation first (startup, provisioning, model load/switch, streaming, model library, drawer search, onboarding, voice, tooling) before making localized fixes.
 
 ## Scoped On-Demand Device Flow (When And How)
 

@@ -182,6 +182,7 @@ _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "UNAVAILABLE: io exception",
     "Connection refused",
 )
+_MAESTRO_IPV4_JAVA_OPTION = "-Djava.net.preferIPv4Stack=true"
 _MAESTRO_LAUNCH_APP_KEY = "launchApp"
 _MAESTRO_CLEAR_STATE_KEY = "clearState"
 _SCREENSHOT_PACK_HARNESS_NOISE_MARKERS = (
@@ -905,6 +906,52 @@ def _run_maestro_transport_recovery(
         capture_output=True,
         env=run_env,
     )
+    context.run(
+        ["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_HOME"],
+        check=False,
+        capture_output=True,
+        env=run_env,
+    )
+    context.run(
+        ["adb", "-s", serial, "shell", "cmd", "statusbar", "collapse"],
+        check=False,
+        capture_output=True,
+        env=run_env,
+    )
+
+
+def _maestro_run_env(env: Mapping[str, str]) -> dict[str, str]:
+    run_env = dict(env)
+    current = run_env.get("JAVA_TOOL_OPTIONS", "").strip()
+    if _MAESTRO_IPV4_JAVA_OPTION not in current.split():
+        run_env["JAVA_TOOL_OPTIONS"] = (
+            f"{current} {_MAESTRO_IPV4_JAVA_OPTION}".strip() if current else _MAESTRO_IPV4_JAVA_OPTION
+        )
+    return run_env
+
+
+def _clear_stale_maestro_processes(
+    *,
+    context: RuntimeContext,
+    serial: str,
+    env: Mapping[str, str],
+) -> None:
+    patterns = [
+        f"maestro.cli.AppKt --device {serial}",
+        f"tools/maestro_android/main.py test --device {serial}",
+    ]
+    for pattern in patterns:
+        listing = context.run(
+            ["pgrep", "-af", pattern],
+            check=False,
+            capture_output=True,
+            env=env,
+        )
+        for line in (listing.stdout or "").splitlines():
+            pid = line.strip().split(maxsplit=1)[0:1]
+            if not pid or not pid[0].isdigit():
+                continue
+            context.run(["kill", pid[0]], check=False, capture_output=True, env=env)
 
 
 def _prepare_device_for_maestro(
@@ -917,6 +964,7 @@ def _prepare_device_for_maestro(
     commands = (
         ["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
         ["adb", "-s", serial, "shell", "wm", "dismiss-keyguard"],
+        ["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_HOME"],
         ["adb", "-s", serial, "shell", "cmd", "statusbar", "collapse"],
         ["adb", "-s", serial, "shell", "settings", "put", "system", "screen_off_timeout", "600000"],
         ["adb", "-s", serial, "shell", "svc", "power", "stayon", "true"],
@@ -928,6 +976,59 @@ def _prepare_device_for_maestro(
             capture_output=True,
             env=run_env,
         )
+
+
+def _ensure_maestro_transport_ready(
+    *,
+    context: RuntimeContext,
+    serial: str,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    run_env = env or context.env
+    _prepare_device_for_maestro(context=context, serial=serial, env=run_env)
+
+    state_result = context.run(
+        ["adb", "-s", serial, "get-state"],
+        check=False,
+        capture_output=True,
+        env=run_env,
+    )
+    shell_result = context.run(
+        ["adb", "-s", serial, "shell", "echo", "maestro-transport-ready"],
+        check=False,
+        capture_output=True,
+        env=run_env,
+    )
+    state_output = (state_result.stdout or "").strip()
+    if state_result.returncode == 0 and shell_result.returncode == 0 and (not state_output or state_output == "device"):
+        return
+
+    if not _is_tcpip_serial(serial):
+        return
+
+    if _is_tcpip_serial(serial):
+        _run_maestro_transport_recovery(context=context, serial=serial, env=run_env)
+        _prepare_device_for_maestro(context=context, serial=serial, env=run_env)
+        state_result = context.run(
+            ["adb", "-s", serial, "get-state"],
+            check=False,
+            capture_output=True,
+            env=run_env,
+        )
+        shell_result = context.run(
+            ["adb", "-s", serial, "shell", "echo", "maestro-transport-ready"],
+            check=False,
+            capture_output=True,
+            env=run_env,
+        )
+        state_output = (state_result.stdout or "").strip()
+        if state_result.returncode == 0 and shell_result.returncode == 0 and (not state_output or state_output == "device"):
+            return
+
+    raise DevctlError(
+        "DEVICE_ERROR",
+        f"Maestro transport not ready for {serial}; reconnect wireless debugging and retry.",
+    )
 
 
 def _remote_file_size_bytes(context: RuntimeContext, serial: str, path: str) -> int | None:
@@ -2797,15 +2898,10 @@ def _run_send_capture_stage(
     debug_output_dir.mkdir(parents=True, exist_ok=True)
 
     kickoff_flow = capture_root / "send-kickoff.yaml"
+    bootstrap_runtime_ready = REPO_ROOT / "tests/maestro/shared/bootstrap-runtime-ready.yaml"
+    bootstrap_runtime_ready_ref = os.path.relpath(bootstrap_runtime_ready, capture_root)
     strict_mode = mode == "strict"
     fast_smoke_mode = mode == "fast-smoke"
-    ready_wait_lines = [
-        "- extendedWaitUntil:",
-        "    visible:",
-        "      id: \"send_button\"",
-        "      enabled: true",
-        f"    timeout: {reply_timeout_seconds * 1000}",
-    ] if strict_mode else []
     runtime_clean_assert_lines = [
         "- assertNotVisible: \"UI-RUNTIME-001\"",
     ] if strict_mode else []
@@ -2814,78 +2910,8 @@ def _run_send_capture_stage(
             [
                 f"appId: {app_package}",
                 "---",
-                "- launchApp",
+                f"- runFlow: {bootstrap_runtime_ready_ref}",
                 "- takeScreenshot: \"send-kickoff-01-launch\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Skip\"",
-                "    commands:",
-                "      - tapOn: \"Skip\"",
-                "- runFlow:",
-                "    when:",
-                "      visible:",
-                "        id: \"onboarding_skip\"",
-                "    commands:",
-                "      - tapOn:",
-                "          id: \"onboarding_skip\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Skip\"",
-                "    commands:",
-                "      - tapOn: \"Skip\"",
-                "- runFlow:",
-                "    when:",
-                "      visible:",
-                "        id: \"onboarding_next\"",
-                "    commands:",
-                "      - tapOn:",
-                "          id: \"onboarding_next\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Next\"",
-                "    commands:",
-                "      - tapOn: \"Next\"",
-                "- runFlow:",
-                "    when:",
-                "      visible:",
-                "        id: \"onboarding_get_started\"",
-                "    commands:",
-                "      - tapOn:",
-                "          id: \"onboarding_get_started\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Get started\"",
-                "    commands:",
-                "      - tapOn: \"Get started\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Get ready\"",
-                "    commands:",
-                "      - tapOn: \"Get ready\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Model library\"",
-                "    commands:",
-                "      - back",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Load last used\"",
-                "    commands:",
-                "      - tapOn: \"Load last used\"",
-                "- runFlow:",
-                "    when:",
-                "      visible:",
-                "        id: \"refresh_button\"",
-                "    commands:",
-                "      - tapOn:",
-                "          id: \"refresh_button\"",
-                "- runFlow:",
-                "    when:",
-                "      visible: \"Setup\"",
-                "    commands:",
-                "      - tapOn:",
-                "          id: \"send_button\"",
-                *ready_wait_lines,
                 *runtime_clean_assert_lines,
                 "- takeScreenshot: \"send-kickoff-02-ready\"",
                 "- tapOn:",
@@ -2924,11 +2950,15 @@ def _run_send_capture_stage(
     started = time.monotonic()
     kickoff_outputs: list[str] = []
     kickoff_result = None
+    effective_env = _maestro_run_env(effective_env)
+    _ensure_maestro_transport_ready(context=context, serial=serial, env=effective_env)
     for attempt in range(2):
+        _clear_stale_maestro_processes(context=context, serial=serial, env=effective_env)
         context.run(["adb", "-s", serial, "forward", "--remove-all"], check=False, env=effective_env)
         context.run(["adb", "-s", serial, "shell", "am", "force-stop", app_package], check=False, env=effective_env)
+        maestro_args = ["--reinstall-driver"] if attempt > 0 else []
         result = context.run(
-            [maestro_bin, "--device", serial, "test", str(kickoff_flow), "--debug-output", str(debug_output_dir)],
+            [maestro_bin, "--device", serial, "test", *maestro_args, str(kickoff_flow), "--debug-output", str(debug_output_dir)],
             check=False,
             capture_output=True,
             env=effective_env,
@@ -4202,8 +4232,10 @@ def _run_maestro_flow(
     started = time.monotonic()
     result = None
     attempt_outputs: list[str] = []
-    run_env = env or context.env
+    run_env = _maestro_run_env(env or context.env)
+    _ensure_maestro_transport_ready(context=context, serial=serial, env=run_env)
     for attempt in range(2):
+        _clear_stale_maestro_processes(context=context, serial=serial, env=run_env)
         # Clear stale adb forwards that can block Maestro TcpForwarder sessions on long-lived devices.
         context.run(
             ["adb", "-s", serial, "forward", "--remove-all"],
@@ -4218,8 +4250,9 @@ def _run_maestro_flow(
                 capture_output=True,
                 env=run_env,
             )
+        maestro_args = ["--reinstall-driver"] if attempt > 0 else []
         run_result = context.run(
-            [maestro_bin, "--device", serial, "test", str(flow_path), "--debug-output", str(debug_output_dir)],
+            [maestro_bin, "--device", serial, "test", *maestro_args, str(flow_path), "--debug-output", str(debug_output_dir)],
             check=False,
             capture_output=True,
             env=run_env,

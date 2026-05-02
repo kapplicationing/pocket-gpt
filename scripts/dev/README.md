@@ -313,8 +313,10 @@ Use two lanes on purpose:
 Commands:
 
 ```bash
-bash scripts/dev/maestro-cloud-gpu-model-matrix.sh --dry-run --api-levels 29,31,34 --models tiny
+bash scripts/dev/maestro-cloud-gpu-model-matrix.sh --dry-run --api-levels 29,31,34 --models qwen_0_8b_tiny
+bash scripts/dev/maestro-cloud-gpu-model-matrix.sh --api-key-env MAESTRO_CLOUD_API_KEY_2 --models qwen_0_8b
 bash scripts/dev/maestro-cloud-upload-status.sh --help
+bash scripts/dev/maestro-cloud-upload-status.sh --api-key-env MAESTRO_CLOUD_API_KEY label:mupload_123
 bash scripts/dev/maestro-gpu-real-device-matrix.sh --dry-run --serial <serial> --models tiny,qwen_0_8b
 ```
 
@@ -326,21 +328,25 @@ Plan doc:
 
 Use this when you want hosted device coverage without a local emulator/phone. Under `QA-14`, this is the target default path for machine-verifiable hosted reruns once artifact parity is proven. Keep `devctl` and the physical-device canary for local preflight, device-specific forensics, and promotion evidence until that parity is established.
 
+Recommended hosted QA ladder:
+
+1. rebuild or confirm the APK is from the current branch tip
+2. run one focused hosted scenario first when isolating a new issue
+3. run the hosted smoke suite second
+4. run local authoritative lanes (`android-instrumented`, `journey`, pinned local `maestro`) after the hosted contract is stable
+5. use the physical-device canary for OEM confirmation and final brush, not for first discovery
+
 ```bash
-set -a
-source .env
-set +a
-: "${MAESTRO_CLOUD_API_KEY:?Set MAESTRO_CLOUD_API_KEY in .env}"
-./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleDebug
-APK_PATH="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
-maestro cloud --android-api-level 34 --device-locale en_US --app-file "${APK_PATH}" --flows tests/maestro-cloud/ --include-tags cloud-smoke
+bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY
+bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY_2
+bash scripts/dev/maestro-cloud-smoke-parallel.sh
 ```
 
 Optional:
 
-1. Set project explicitly when needed: `--project-id <project-id>`
-2. Prefer tag-scoped runs for stable hosted smoke: `--include-tags cloud-smoke` or dedicated wrappers such as `bash scripts/dev/maestro-cloud-smoke.sh`
-3. Add CI metadata: `--branch "$GITHUB_REF_NAME" --commit-sha "$GITHUB_SHA"`
+1. Prefer the wrapper commands above instead of copying a raw `maestro cloud --api-key ...` command into shell history.
+2. Pick the cloud account explicitly with `--api-key-env MAESTRO_CLOUD_API_KEY` or `--api-key-env MAESTRO_CLOUD_API_KEY_2`.
+3. Use `bash scripts/dev/maestro-cloud-smoke-parallel.sh` only when you intentionally want both configured accounts to run the same smoke suite in parallel.
 4. Android device model selection is not deterministic in our current lane. As of March 15, 2026 with Maestro CLI `2.2.0`, Android cloud runs executed on `Pixel 6`; use `--android-api-level` and `--device-locale` as the reliable selectors.
 5. Maestro Cloud Android binaries should include `arm64-v8a` or be multi-arch. Quick local check:
 
@@ -358,10 +364,36 @@ maestro cloud --android-api-level 34 \
   --output tmp/maestro-cloud-first-run.xml
 ```
 
+Full hosted smoke suite on Maestro Cloud:
+
+```bash
+bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY
+```
+
 Focused model-management split smoke on Maestro Cloud:
 
 ```bash
-bash scripts/dev/maestro-cloud-smoke.sh
+maestro cloud --android-api-level 34 \
+  --app-file "${APK_PATH}" \
+  --flows tests/maestro-cloud/scenario-model-management-split-smoke.yaml \
+  --format junit \
+  --output tmp/maestro-cloud-model-management.xml
+```
+
+Poll a launched upload directly:
+
+```bash
+bash scripts/dev/maestro-cloud-upload-status.sh \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --project-id <project-id> \
+  account-1:<upload-id>
+```
+
+Long-running hosted GPU checks can target either account intentionally:
+
+```bash
+bash scripts/dev/maestro-cloud-gpu-benchmark.sh --api-key-env MAESTRO_CLOUD_API_KEY_2
+bash scripts/dev/maestro-cloud-gpu-model-matrix.sh --api-key-env MAESTRO_CLOUD_API_KEY_2 --dry-run
 ```
 
 Important:
@@ -369,6 +401,8 @@ Important:
 1. `maestro cloud` runs the Maestro flow files directly.
 2. It does not run `devctl` device health checks, real-runtime provisioning preflight, per-device lock handling, or local benchmark artifact/logcat capture contracts.
 3. Keep `devctl lane maestro`, `devctl lane journey`, and the physical-device canary as the current promotion/closure path until QA-14 artifact parity is complete.
+4. Record the upload id, upload URL, project id, and app binary id for every hosted run you want to reference later.
+5. If hosted uploads are `launched=true` but still `PENDING`, treat that as hosted infrastructure latency until a real flow verdict exists.
 
 ## Artifact Pruning
 

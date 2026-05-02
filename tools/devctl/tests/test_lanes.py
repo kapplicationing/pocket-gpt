@@ -659,10 +659,81 @@ class LanesTest(unittest.TestCase):
         self.assertEqual(2, maestro_attempts)
         self.assertGreaterEqual(len(forward_resets), 2)
         self.assertEqual(2, len(seen_envs))
-        self.assertTrue(all(env == overridden_env for env in seen_envs))
+        self.assertTrue(all(env["BASE_ENV"] == "1" for env in seen_envs))
+        self.assertTrue(all(env["ADB_SERIAL"] == "SER123" for env in seen_envs))
+        self.assertTrue(all(env["ANDROID_SERIAL"] == "SER123" for env in seen_envs))
+        self.assertTrue(all("-Djava.net.preferIPv4Stack=true" in env.get("JAVA_TOOL_OPTIONS", "") for env in seen_envs))
         self.assertIn("=== attempt 1 ===", output)
         self.assertIn("=== attempt 2 ===", output)
         self.assertIn("Unable to launch app", output)
+
+    def test_send_capture_kickoff_probes_transport_before_launch(self) -> None:
+        configs = load_devctl_configs(REPO_ROOT)
+
+        class Result:
+            def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        issued_commands: list[list[str]] = []
+
+        def fake_run(command, **_kwargs):
+            cmd = list(command)
+            issued_commands.append(cmd)
+            if cmd and cmd[0] == "maestro":
+                return Result(returncode=0, stdout="ok\n", stderr="")
+            if cmd[:4] == ["adb", "-s", "SER123", "get-state"]:
+                return Result(returncode=0, stdout="device\n", stderr="")
+            if cmd[:5] == ["adb", "-s", "SER123", "shell", "echo"]:
+                return Result(returncode=0, stdout="maestro-transport-ready\n", stderr="")
+            return Result(returncode=0, stdout="", stderr="")
+
+        context = RuntimeContext(repo_root=REPO_ROOT, configs=configs, env={}, run=fake_run)
+        snapshot = SendCaptureSnapshot(
+            second=0,
+            screenshot=None,
+            window_dump=None,
+            chat_state_snapshot=None,
+            runtime_status="Ready",
+            backend="NATIVE_JNI",
+            active_model_id="QWEN_0_8B",
+            placeholder_visible=False,
+            runtime_error_visible=False,
+            timeout_message_visible=False,
+            streaming_text_visible=False,
+            response_visible=True,
+            response_role="assistant",
+            response_non_empty=True,
+            first_token_seen=True,
+            request_id="req-transport",
+            finish_reason="stop",
+            terminal_event_seen=True,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "tools.devctl.lanes._capture_send_snapshot", return_value=snapshot
+        ), mock.patch(
+            "tools.devctl.lanes._capture_logcat", return_value=None
+        ), mock.patch(
+            "tools.devctl.lanes._collect_maestro_screenshots", return_value=[]
+        ):
+            result = _run_send_capture_stage(
+                context=context,
+                maestro_bin="maestro",
+                serial="SER123",
+                app_package="com.pocketagent.android",
+                run_root=Path(tmpdir),
+                prompt="hello",
+                reply_timeout_seconds=60,
+                capture_intervals=[0],
+                mode="fast-smoke",
+            )
+
+        self.assertEqual("passed", result.status)
+        self.assertIn(["adb", "-s", "SER123", "get-state"], issued_commands)
+        self.assertIn(["adb", "-s", "SER123", "shell", "echo", "maestro-transport-ready"], issued_commands)
+        self.assertIn(["adb", "-s", "SER123", "shell", "input", "keyevent", "KEYCODE_HOME"], issued_commands)
 
     def test_send_capture_kickoff_failure_populates_required_qa13_fields(self) -> None:
         configs = load_devctl_configs(REPO_ROOT)
@@ -805,11 +876,19 @@ class LanesTest(unittest.TestCase):
                 self.stderr = stderr
 
         maestro_attempts = 0
+        maestro_commands: list[list[str]] = []
+        issued_commands: list[list[str]] = []
 
         def fake_run(command, **_kwargs):
             nonlocal maestro_attempts
             cmd = list(command)
+            issued_commands.append(cmd)
+            if cmd[:2] == ["pgrep", "-af"]:
+                return Result(returncode=0, stdout="4321 /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java -classpath /Users/mkamar/.maestro/lib/* maestro.cli.AppKt --device SER123 test\n", stderr="")
+            if cmd[:1] == ["kill"]:
+                return Result(returncode=0, stdout="", stderr="")
             if cmd and cmd[0] == "maestro":
+                maestro_commands.append(cmd)
                 maestro_attempts += 1
                 if maestro_attempts == 1:
                     return Result(returncode=1, stderr="TimeoutException: TcpForwarder")
@@ -838,8 +917,11 @@ class LanesTest(unittest.TestCase):
         self.assertEqual(2, maestro_attempts)
         self.assertIn("=== attempt 1 ===", output)
         self.assertIn("=== attempt 2 ===", output)
+        self.assertTrue(any("--reinstall-driver" in command for command in maestro_commands))
         self.assertIn("TcpForwarder", output)
         self.assertIsNone(result.failure_signature)
+        self.assertTrue(any(command[:2] == ["pgrep", "-af"] for command in issued_commands))
+        self.assertTrue(any(command[:1] == ["kill"] for command in issued_commands))
 
     def test_run_maestro_flow_transient_retry_recovers_tcp_transport(self) -> None:
         configs = load_devctl_configs(REPO_ROOT)
@@ -970,7 +1052,10 @@ class LanesTest(unittest.TestCase):
             )
 
         self.assertEqual(1, len(seen_envs))
-        self.assertEqual(overridden_env, seen_envs[0])
+        self.assertEqual("1", seen_envs[0]["BASE_ENV"])
+        self.assertEqual("SER123", seen_envs[0]["ADB_SERIAL"])
+        self.assertEqual("SER123", seen_envs[0]["ANDROID_SERIAL"])
+        self.assertIn("-Djava.net.preferIPv4Stack=true", seen_envs[0]["JAVA_TOOL_OPTIONS"])
 
     def test_run_maestro_flow_force_stops_app_on_retry_when_package_supplied(self) -> None:
         configs = load_devctl_configs(REPO_ROOT)

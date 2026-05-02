@@ -49,6 +49,8 @@ _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "Connection refused",
 )
 
+_MAESTRO_IPV4_JAVA_OPTION = "-Djava.net.preferIPv4Stack=true"
+
 _PRODUCT_UI_FAILURE_MARKERS = (
     "Element not found",
     "Assertion",
@@ -220,6 +222,15 @@ def _device_env(serial: str) -> dict[str, str]:
     return env
 
 
+def _with_gradle_serial_flag(command: Sequence[str], serial: str) -> list[str]:
+    command_list = list(command)
+    if not command_list or command_list[0] not in {"./gradlew", "gradle"}:
+        return command_list
+    if any(arg.startswith("-Pandroid.injected.device.serial=") for arg in command_list):
+        return command_list
+    return [command_list[0], f"-Pandroid.injected.device.serial={serial}", *command_list[1:]]
+
+
 def _is_tcpip_serial(serial: str) -> bool:
     return is_network_serial(serial)
 
@@ -245,6 +256,42 @@ def _latest_maestro_log_text(debug_dir: Path) -> str:
     return logs[-1].read_text(encoding="utf-8", errors="replace")
 
 
+def _maestro_run_env(env: dict[str, str]) -> dict[str, str]:
+    run_env = dict(env)
+    current = run_env.get("JAVA_TOOL_OPTIONS", "").strip()
+    if _MAESTRO_IPV4_JAVA_OPTION not in current.split():
+        run_env["JAVA_TOOL_OPTIONS"] = (
+            f"{current} {_MAESTRO_IPV4_JAVA_OPTION}".strip() if current else _MAESTRO_IPV4_JAVA_OPTION
+        )
+    return run_env
+
+
+def _clear_stale_maestro_processes(serial: str, env: dict[str, str]) -> None:
+    current_pid = os.getpid()
+    parent_pid = os.getppid()
+    killed_pids: set[int] = set()
+    patterns = [
+        f"maestro.cli.AppKt --device {serial}",
+        f"tools/maestro_android/main.py test --device {serial}",
+    ]
+    for pattern in patterns:
+        listing = run_subprocess(["pgrep", "-af", pattern], check=False, capture_output=True, env=env)
+        for line in (listing.stdout or "").splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if not parts:
+                continue
+            pid = parts[0]
+            if not pid.isdigit():
+                continue
+            pid_value = int(pid)
+            if pid_value in {current_pid, parent_pid}:
+                continue
+            if pid_value in killed_pids:
+                continue
+            killed_pids.add(pid_value)
+            run_subprocess(["kill", pid], check=False, capture_output=True, env=env)
+
+
 def _run_maestro_test_with_retry(
     *,
     serial: str,
@@ -256,12 +303,26 @@ def _run_maestro_test_with_retry(
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     attempt_outputs: list[str] = []
     result: subprocess.CompletedProcess[str] | None = None
+    run_env = _maestro_run_env(env)
     for attempt in range(2):
+        _clear_stale_maestro_processes(serial, run_env)
         run_subprocess(["adb", "-s", serial, "forward", "--remove-all"], check=False, capture_output=True, env=env)
         if attempt > 0:
             run_subprocess(["adb", "-s", serial, "shell", "am", "force-stop", app_id], check=False, capture_output=True, env=env)
-        cmd = ["maestro", "--device", serial, "test", str(flow), "--debug-output", str(debug_dir), "--format", output_format]
-        result = run_subprocess(cmd, capture_output=True, check=False, cwd=debug_dir, env=env)
+        maestro_args = ["--reinstall-driver"] if attempt > 0 else []
+        cmd = [
+            "maestro",
+            "--device",
+            serial,
+            "test",
+            *maestro_args,
+            str(flow),
+            "--debug-output",
+            str(debug_dir),
+            "--format",
+            output_format,
+        ]
+        result = run_subprocess(cmd, capture_output=True, check=False, cwd=debug_dir, env=run_env)
         combined = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
         maestro_log = _latest_maestro_log_text(debug_dir)
         transient_source = combined if _is_transient_maestro_failure(combined) else maestro_log
@@ -429,7 +490,7 @@ def _run_test(parsed: argparse.Namespace, config: MaestroAndroidConfig) -> None:
     if not parsed.no_build:
         run_subprocess(config.project.build_command)
     if not parsed.no_install:
-        run_subprocess(config.project.install_command, env=device_env)
+        run_subprocess(_with_gradle_serial_flag(config.project.install_command, serial), env=device_env)
     _ensure_app_installed(serial, config.project.app_id, allow_install_hint=parsed.no_install)
     apk_path = _resolve_apk(config)
 

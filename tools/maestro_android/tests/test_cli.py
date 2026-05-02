@@ -13,6 +13,39 @@ from tools.maestro_android.common import MaestroAndroidError
 
 
 class CliTest(unittest.TestCase):
+    def test_clear_stale_maestro_processes_skips_current_and_parent_pid(self) -> None:
+        issued_commands: list[list[str]] = []
+        original_run_subprocess = cli.run_subprocess
+        try:
+            current_pid = 4242
+            parent_pid = 3131
+
+            def fake_run_subprocess(command, **kwargs):
+                command_list = list(command)
+                issued_commands.append(command_list)
+                if command_list[:2] == ["pgrep", "-af"]:
+                    return subprocess.CompletedProcess(
+                        command_list,
+                        0,
+                        stdout=(
+                            f"{current_pid} python tools/maestro_android/main.py test --device SER123\n"
+                            f"{parent_pid} python some-parent-wrapper\n"
+                            "8080 java maestro.cli.AppKt --device SER123\n"
+                        ),
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(command_list, 0, stdout="", stderr="")
+
+            cli.run_subprocess = fake_run_subprocess  # type: ignore[assignment]
+            with mock.patch("tools.maestro_android.cli.os.getpid", return_value=current_pid), mock.patch(
+                "tools.maestro_android.cli.os.getppid", return_value=parent_pid
+            ):
+                cli._clear_stale_maestro_processes("SER123", {"ANDROID_SERIAL": "SER123"})
+        finally:
+            cli.run_subprocess = original_run_subprocess  # type: ignore[assignment]
+
+        self.assertEqual([["kill", "8080"]], [command for command in issued_commands if command[:1] == ["kill"]])
+
     def test_main_dispatches_lane(self) -> None:
         captured: list[list[str]] = []
         original = cli.run_subprocess
@@ -153,7 +186,12 @@ class CliTest(unittest.TestCase):
             cli._capture_logcat = original_capture_logcat  # type: ignore[assignment]
             cli.run_subprocess = original_run_subprocess  # type: ignore[assignment]
 
-        install_calls = [env for command, env in captured if command == config.project.install_command]
+        install_command = [
+            config.project.install_command[0],
+            "-Pandroid.injected.device.serial=SER123",
+            *config.project.install_command[1:],
+        ]
+        install_calls = [env for command, env in captured if command == install_command]
         self.assertEqual(1, len(install_calls))
         self.assertIsNotNone(install_calls[0])
         self.assertEqual("SER123", install_calls[0]["ANDROID_SERIAL"])
@@ -414,6 +452,8 @@ class CliTest(unittest.TestCase):
         config = cli.load_config()
         flow_path = cli.REPO_ROOT / "tests/maestro/scenario-a.yaml"
         maestro_attempts = 0
+        issued_commands: list[list[str]] = []
+        maestro_envs: list[dict[str, str] | None] = []
 
         original_resolve_serial = cli._resolve_serial
         original_select_flows = cli._select_flows
@@ -434,6 +474,9 @@ class CliTest(unittest.TestCase):
                 def fake_run_subprocess(command, **kwargs):
                     nonlocal maestro_attempts
                     command_list = list(command)
+                    issued_commands.append(command_list)
+                    if command_list[:3] == ["maestro", "--device", "SER123"]:
+                        maestro_envs.append(kwargs.get("env"))
                     if command_list[:5] == ["adb", "-s", "SER123", "shell", "pm"]:
                         return subprocess.CompletedProcess(command_list, 0, stdout="package:/tmp/base.apk\n", stderr="")
                     if command_list[:4] == ["adb", "-s", "SER123", "get-state"]:
@@ -479,6 +522,13 @@ class CliTest(unittest.TestCase):
         self.assertEqual(2, maestro_attempts)
         self.assertIn("UNAVAILABLE: io exception", output)
         self.assertIn("=== attempt 2 ===", output)
+        self.assertTrue(any("--reinstall-driver" in command for command in issued_commands if command and command[0] == "maestro"))
+        self.assertTrue(
+            any(
+                env and "-Djava.net.preferIPv4Stack=true" in env.get("JAVA_TOOL_OPTIONS", "")
+                for env in maestro_envs
+            )
+        )
 
 
 if __name__ == "__main__":

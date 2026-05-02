@@ -16,6 +16,8 @@
     <string name="ui_native_runtime_missing_hint">This build is missing the native runtime engine. Install a full app build, then reopen and refresh runtime checks.</string>
     <string name="ui_runtime_timeout_hint">Generation exceeded the response SLA and was cancelled. Retry, then switch to a lighter model if this repeats.</string>
     <string name="ui_runtime_backend_fallback_debug_warning">Debug fallback runtime is active (ADB). Native JNI runtime is unavailable, so behavior may differ from production.</string>
+    <string name="ui_provisioning_bootstrap_title">Preparing PocketAgent</string>
+    <string name="ui_provisioning_bootstrap_body">Checking runtime and model availability…</string>
     <string name="ui_open_model_setup">Open model library</string>
     <string name="ui_open_model_library">Open model library</string>
     <string name="ui_fix_model_setup">Fix model library</string>

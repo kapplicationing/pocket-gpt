@@ -141,6 +141,7 @@ class ChatStartupFlow(
         }
         return StartupBootstrapResult(
             state = ChatUiState(
+                bootstrapCompleted = true,
                 sessions = resolvedSessions,
                 activeSessionId = activeSessionId,
                 runtime = bootstrapRuntimeState,

@@ -167,7 +167,9 @@ class ChatViewModel internal constructor(
     )
 
     init {
-        bootstrapStateInternal()
+        viewModelScope.launch(ioDispatcher) {
+            bootstrapStateInternal()
+        }
     }
 
     fun onComposerChanged(text: String) {

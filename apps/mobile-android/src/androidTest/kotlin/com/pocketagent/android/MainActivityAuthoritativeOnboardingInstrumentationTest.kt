@@ -100,6 +100,38 @@ class MainActivityAuthoritativeOnboardingInstrumentationTest {
         composeRule.onNodeWithTag("send_button").assertIsDisplayed()
     }
 
+    @Test
+    fun provisioningBootstrapShowsLoadingSurfaceWhenSnapshotIsStillSeeding() {
+        val harness = AuthoritativeOnboardingHarness()
+        val runtimeGateway = AuthoritativeOnboardingRuntimeGateway(harness)
+        val viewModel = ChatViewModel(
+            runtimeFacade = runtimeGateway,
+            sessionPersistence = AuthoritativeInMemorySessionPersistence(
+                initialState = StoredChatState(
+                    onboardingCompleted = false,
+                    advancedUnlocked = false,
+                ),
+                bootstrapDelayMs = 1_500L,
+            ),
+            presetBackingStore = PresetModelMappingStore(composeRule.activity.applicationContext),
+        )
+        val provisioningViewModel = ModelProvisioningViewModel(AuthoritativeOnboardingProvisioningGateway(harness))
+
+        composeRule.setContent {
+            MaterialTheme {
+                Surface {
+                    PocketAgentApp(
+                        viewModel = viewModel,
+                        provisioningViewModel = provisioningViewModel,
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("provisioning_bootstrap_loading").assertIsDisplayed()
+        composeRule.onNodeWithText("Preparing PocketAgent").assertIsDisplayed()
+    }
+
     private fun hasNodeWithTag(tag: String): Boolean {
         return runCatching {
             composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
@@ -367,10 +399,18 @@ private class AuthoritativeOnboardingProvisioningGateway(
 
 private class AuthoritativeInMemorySessionPersistence(
     initialState: StoredChatState = StoredChatState(),
+    private val bootstrapDelayMs: Long = 0L,
 ) : SessionPersistence {
     private var current = initialState
 
     override fun loadState(): StoredChatState = current
+
+    override fun loadBootstrapState(): StoredChatState {
+        if (bootstrapDelayMs > 0L) {
+            Thread.sleep(bootstrapDelayMs)
+        }
+        return current
+    }
 
     override fun saveState(state: StoredChatState) {
         current = state

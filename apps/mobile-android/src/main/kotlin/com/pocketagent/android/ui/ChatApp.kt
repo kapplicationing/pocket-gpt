@@ -1,16 +1,22 @@
 package com.pocketagent.android.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,15 +28,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pocketagent.android.BuildConfig
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
-import com.pocketagent.android.voice.VoiceActivationController
+import com.pocketagent.android.ui.theme.PocketTheme
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
 import com.pocketagent.android.ui.state.ChatGateStatus
@@ -38,6 +48,7 @@ import com.pocketagent.android.ui.state.ComposerUiState
 import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.ui.state.resolveChatGateState
+import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelCatalog
@@ -61,7 +72,8 @@ fun PocketAgentApp(
     val provisioningState by provisioningViewModel.uiState.collectAsState()
     val context = LocalContext.current
     val downloads = provisioningState.downloads
-    if (provisioningState.snapshot == null) {
+    if (!state.bootstrapCompleted || provisioningState.snapshot == null) {
+        ProvisioningBootstrapScreen()
         return
     }
     val chatGateState by derivedStateOf {
@@ -129,10 +141,16 @@ fun PocketAgentApp(
     val defaultGetReadyModelId = remember { resolveDefaultGetReadyModelId(isDebugBuild = BuildConfig.DEBUG) }
     val modelLibraryState = remember(provisioningState, defaultGetReadyModelId) {
         provisioningState.toModelLibraryUiState(defaultGetReadyModelId)
-    } ?: return
+    } ?: run {
+        ProvisioningBootstrapScreen()
+        return
+    }
     val runtimeModelState = remember(provisioningState) {
         provisioningState.toRuntimeModelUiState()
-    } ?: return
+    } ?: run {
+        ProvisioningBootstrapScreen()
+        return
+    }
     LaunchedEffect(modelLoadingState) {
         viewModel.syncRuntimeModelLoadingState(modelLoadingState)
     }
@@ -485,4 +503,34 @@ private fun ChatComposerDock(
 
 internal fun canAttachImagesForModel(modelId: String?): Boolean {
     return modelId?.let(ModelCatalog::isVisionCapable) == true
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun ProvisioningBootstrapScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .semantics { testTagsAsResourceId = true }
+            .testTag("provisioning_bootstrap_loading"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(PocketTheme.spacing.md),
+        ) {
+            CircularProgressIndicator()
+            Text(
+                text = stringResource(id = R.string.ui_provisioning_bootstrap_title),
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_provisioning_bootstrap_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }

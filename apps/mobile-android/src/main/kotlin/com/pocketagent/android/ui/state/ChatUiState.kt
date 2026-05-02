@@ -205,6 +205,7 @@ data class FirstSessionTelemetryEvent(
 )
 
 data class ChatUiState(
+    val bootstrapCompleted: Boolean = false,
     val sessions: List<ChatSessionUiModel> = emptyList(),
     val activeSessionId: String? = null,
     val composer: ComposerUiState = ComposerUiState(),

@@ -73,6 +73,17 @@ python3 tools/devctl/main.py lane maestro --include-tags smoke
 python3 tools/devctl/main.py lane maestro --include-tags model-management
 ```
 
+## Runbook: Performance Regression Check
+
+Before UI/runtime refactors, or after touching `ChatViewModel` / `ChatApp`, run:
+
+```bash
+ANDROID_SERIAL=<serial> scripts/dev/perf-baseline.sh
+python3 tools/devctl/main.py lane maestro --include-tags perf
+```
+
+Pass criteria: jank rate <= 25% and 50th-percentile frame <= 18 ms.
+
 ## Runbook: Local Lifecycle E2E (First-Run Download -> Chat)
 
 ```bash
@@ -103,6 +114,20 @@ Promotion rule:
 1. After fix confirmation, add or update a stable flow under `tests/maestro/` if the journey is a recurring risk.
 2. Add targeted unit/contract tests for the logic branch that caused the failure.
 3. Run canonical lanes (`fast`, and risk-appropriate `android-instrumented`/`maestro`/`journey`) before merge.
+
+### Local Maestro Bootstrap Recovery
+
+If `lane maestro` or `lane journey --mode strict` fails with a `localhost:7001`
+gRPC error before any flow logic runs, the Maestro local driver did not bind.
+Run:
+
+```bash
+bash scripts/dev/maestro-local-bootstrap.sh --serial <serial>
+```
+
+Then re-run the lane. If the bootstrap probe fails twice in a row, switch to
+the wired USB path or the emulator-backed local smoke; do not retry the
+wireless serial in a loop.
 
 ## Runbook: Bundle Download E2E (Remote Manifest + Local Fixture Server)
 

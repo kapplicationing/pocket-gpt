@@ -238,9 +238,84 @@ What to do again:
 
 1. Classify this pattern as hosted infrastructure blocking, not as a product-flow failure.
 2. Preserve the upload id, upload URL, and app binary id so the hosted run can still be inspected externally if needed.
-3. Do not let a later null-status polling failure overwrite the last clean product finding from an earlier hosted run.
+3. Keep the cloud/device split explicit in status updates so a missing hosted verdict is not confused with a failed app flow.
 
-### 16A. A corrected local `journey` kickoff can still prove only harness truth, not product truth
+### 17. Local Maestro bootstrap on wireless Samsung devices needed both IPv4 binding and stale-process cleanup
+
+What happened:
+
+1. The first live local Maestro failure on Samsung was a gRPC bootstrap refusal at `localhost:7001` before app logic.
+2. Forcing Java to prefer IPv4 localhost binding inside the Maestro harness changed the failure immediately from bootstrap refusal to actual app-flow execution.
+3. Old `maestro.cli.AppKt` processes on the same wireless serial could remain resident across reruns and poison fresh attempts if they were not cleared first.
+4. Once the harness cleaned stale Maestro processes before each attempt, the retry path became materially more stable.
+
+What to do again:
+
+1. When a local Maestro run fails before app logic, test the launcher/transport before touching app code.
+2. Clear stale Maestro/java sessions for the same serial before retrying a flow.
+3. Prefer an explicit Java IPv4 localhost preference when the driver bootstrap keeps falling over `localhost/[::1]:7001`.
+
+### 18. Readiness means the send button is visible, not that it is enabled before typing
+
+What happened:
+1. Shared helpers had drifted into treating `send_button enabled=true` as a proxy for runtime readiness.
+2. In the real app, readiness and sendability are separate: the shell can be healthy while the composer is empty, and the button state changes with text entry and gate status.
+3. That mismatch created false negatives in both local and hosted flows.
+
+What to do again:
+1. Treat `runtime loaded`, `shell visible`, and `send ready` as separate contracts.
+2. Only assert `send_button enabled=true` inside flows that already typed text and are explicitly testing send behavior.
+3. Keep shared runtime helpers focused on the absence of blocking states, not on post-typing action state.
+
+### 19. Contract-lock before reruns saves more time than broad “try again” loops
+
+What happened:
+1. Several repeated failures were not new app regressions; they were stale assumptions inside shared helpers or scenario glue.
+2. Broad reruns before fixing those assumptions created churn without improving confidence.
+3. Once the team paused to read the UI code, inspect one screenshot, and correct the shared contract, the next reruns became much more informative.
+
+What to do again:
+1. Stop after the first repeated failure and verify the contract against code-truth before widening.
+2. Rerun only the smallest affected scenario set after the contract fix.
+3. Do not use full-lane reruns as the primary debugging tool.
+
+### 20. macOS Bash compatibility matters for local operator tooling
+
+What happened:
+1. The new dual-account cloud wrappers initially used `mapfile` and `local -n`, which are not available in the macOS Bash version on the operator machine.
+2. The scripts looked correct in isolation but failed at runtime on the actual workstation.
+3. This delayed the intended cloud parallelism until the wrappers were rewritten to portable Bash.
+
+What to do again:
+1. Treat macOS Bash 3 compatibility as part of the local tooling contract unless the script explicitly requires a newer shell.
+2. Run syntax and one real command-path validation on the operator machine, not just static review.
+3. Prefer simpler shell patterns when a wrapper is intended for frequent engineering use.
+
+### 21. Device pinning must apply to install as well as execution
+
+What happened:
+1. Narrow `maestro-android test --device ...` runs correctly targeted the requested serial for Maestro execution, but Gradle install still went to both attached devices.
+2. That caused cross-device contamination and made local diagnosis noisier than it needed to be.
+3. The fix was to inject `-Pandroid.injected.device.serial=<serial>` during install, not just export `ADB_SERIAL` and `ANDROID_SERIAL`.
+
+What to do again:
+1. Treat build, install, and execution as one device-pinning contract.
+2. Audit every wrapper that says “--device” to ensure it pins install as well as the test runner.
+3. Add regression tests for device-pinned install paths.
+
+### 22. Multi-account cloud parallelism is useful only when the status path is just as clear
+
+What happened:
+1. Running hosted smoke across two accounts increased useful concurrency immediately.
+2. But the operational value depended on having an equally clear way to poll each upload and associate it with the right project/account.
+3. Without the upload id, project id, and label captured together, the parallel runs would have been harder to interpret than a single serial run.
+
+What to do again:
+1. Record account label, project id, upload id, and upload URL for every hosted run.
+2. Keep single-account reruns explicit when isolating one issue, and use parallel fan-out only for stable smoke suites.
+3. Treat hosted queue latency separately from product-flow failures in every status update.
+
+### 23. A corrected local `journey` kickoff can still prove only harness truth, not product truth
 
 What happened:
 
@@ -254,7 +329,7 @@ What to do again:
 2. Preserve the corrected kickoff artifact alongside the failure log so reviewers can see that stale selector drift is no longer the reason the lane is red.
 3. Keep strict `journey` open as missing current-window proof until the harness-class blocker is cleared, but do not reopen already-fixed app contracts without new app-side evidence.
 
-### 17. Local authoritative onboarding proof and hosted send proof are different closure steps
+### 24. Local authoritative onboarding proof and hosted send proof are different closure steps
 
 What happened:
 
@@ -269,7 +344,7 @@ What to do again:
 3. Keep PM and launch-gate docs explicit about which part is implemented in code, which part has local authoritative proof, and which part still lacks current-window hosted or lane evidence.
 4. Use the repo-side cloud artifact parser to separate real hosted flow failures from Maestro Cloud polling failures before updating the board or PM handover.
 
-### 17B. A current-window pass should be named by artifact root, not just described in prose
+### 25. A current-window pass should be named by artifact root, not just described in prose
 
 What happened:
 
@@ -281,7 +356,7 @@ What to do again:
 1. When a current-window pass becomes the preserved authority, name its artifact root in the board, PM handover, or launch-program summary.
 2. Separate "this pass exists and should be preserved" from "the whole promotion evidence set is now complete."
 
-### 17. A lane is not authoritative if it only passes by assumption-skip
+### 26. A lane is not authoritative if it only passes by assumption-skip
 
 What happened:
 
@@ -295,7 +370,7 @@ What to do again:
 2. When a lane only needs a small contract, add a tiny dedicated selector instead of trying to repurpose a broader screenshot-oriented class.
 3. Keep the authoritative lane small enough that a real executed pass is easy to interpret.
 
-### 17A. Voice beta support copy must separate blockers from follow-up guidance
+### 27. Voice beta support copy must separate blockers from follow-up guidance
 
 What happened:
 
@@ -309,7 +384,7 @@ What to do again:
 2. Keep visible settings/support copy explicit about the difference between hard blockers and advisory follow-up.
 3. Preserve the current bounded device-action allowlist in docs and support guidance instead of implying a broader general voice agent surface.
 
-### 18. First-run reset now requires clearing database-backed state, not just legacy prefs
+### 28. First-run reset now requires clearing database-backed state, not just legacy prefs
 
 What happened:
 
@@ -323,7 +398,7 @@ What to do again:
 2. Re-audit reset helpers whenever persistence moves from one store to another.
 3. Prefer one explicit reset helper over scattered ad hoc cleanup logic in instrumentation tests.
 
-### 19. Multiple wireless canaries require explicit serial pinning or the lane will fail before app logic starts
+### 29. Multiple wireless canaries require explicit serial pinning or the lane will fail before app logic starts
 
 What happened:
 
@@ -337,7 +412,7 @@ What to do again:
 2. Treat the second wireless device as throughput for diagnosis or beta brush, not as a reason to loosen the authority split.
 3. Keep artifact notes explicit about which serial produced the evidence packet.
 
-### 20. Launch claims must be enforced in the visible composer behavior, not only in backend capability
+### 30. Launch claims must be enforced in the visible composer behavior, not only in backend capability
 
 What happened:
 
@@ -350,6 +425,19 @@ What to do again:
 1. Check that visible UI behavior matches the launch claim boundary, not just that the backend can technically handle more.
 2. Clamp or hide broader capability when the launch promise is intentionally narrower.
 3. Add targeted tests for the claim boundary so the surface cannot quietly widen again.
+
+### 31. Multi-account cloud execution needs explicit account intent and secret-safe operator output
+
+What happened:
+
+1. Once the repo supported both `MAESTRO_CLOUD_API_KEY` and `MAESTRO_CLOUD_API_KEY_2`, ad hoc cloud commands became easier to misread and easier to copy in a secret-leaking form.
+2. Parallel cloud fan-out is valuable, but only when the operator can tell clearly which account ran which upload and artifact root.
+
+What to do again:
+
+1. Default to wrapper scripts that take `--api-key-env` instead of pasting raw `--api-key` commands.
+2. Make wrapper output explicit about which account ran the upload and keep dry-run/help text redacted.
+3. Use the parallel wrapper only when both configured accounts are intentionally part of the same hosted rerun.
 
 ## Current Operating Rules Derived From These Learnings
 

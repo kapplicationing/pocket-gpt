@@ -224,26 +224,72 @@ bash scripts/ci/run_lifecycle_e2e.sh local-manual
 ## Runbook: Cloud Smoke (Hosted Machine-Verifiable Rerun)
 
 ```bash
-bash scripts/dev/maestro-cloud-smoke.sh
+bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY
 ```
 
 Use this as the hosted rerun path for machine-verifiable smoke coverage while `QA-14` is proving artifact parity against the local/devctl contract.
 This runs only flows tagged `cloud-smoke` under `tests/maestro-cloud/`.
 Use this before widening to a physical-device canary. Keep one narrow physical-device canary for OEM/runtime issues and the final pre-promotion brush, and keep long-running hosted benchmarks in dedicated scripts such as `bash scripts/dev/maestro-cloud-gpu-benchmark.sh`.
+Prefer the wrappers over copying a raw `maestro cloud --api-key ...` command into shell history.
+
+When multiple Maestro Cloud API keys are available, pick the account explicitly:
+
+```bash
+bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY
+bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY_2
+```
+
+To fan out the same smoke suite across both accounts in parallel:
+
+```bash
+bash scripts/dev/maestro-cloud-smoke-parallel.sh
+```
+
+To poll a previously launched upload directly:
+
+```bash
+bash scripts/dev/maestro-cloud-upload-status.sh \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --project-id <project-id> \
+  account-1:<upload-id>
+```
+
+Operator notes:
+
+1. Hosted uploads can be `launched=true` but still remain `PENDING` for a while; classify that as hosted infrastructure latency unless a real flow verdict exists.
+2. Keep the upload id, upload URL, and project id with the run note so polling and external inspection are possible later.
+3. Use the parallel wrapper only when you intentionally want both configured accounts to run the same suite. Keep single-account reruns explicit when isolating one issue.
 
 ## Runbook: Cloud GPU vs CPU Benchmark (Hosted Benchmark)
 
 Runs a minimal first-run hosted-device benchmark that requires GPU qualification to succeed, then compares GPU-on vs GPU-off send duration on the same cloud device.
 
 ```bash
-bash scripts/dev/maestro-cloud-gpu-benchmark.sh
+bash scripts/dev/maestro-cloud-gpu-benchmark.sh --api-key-env MAESTRO_CLOUD_API_KEY
 ```
 
 Single API level:
 
 ```bash
 bash scripts/dev/maestro-cloud-gpu-benchmark.sh --api-level 34
+bash scripts/dev/maestro-cloud-gpu-benchmark.sh --api-key-env MAESTRO_CLOUD_API_KEY_2 --api-level 34
 ```
+
+## Runbook: Failure Classification Before Rerun
+
+Use this before repeating any local or hosted lane:
+
+1. Read the first failing screenshot.
+2. Read the first failing runner output.
+3. Classify the failure as one of:
+   - `flow drift`
+   - `product bug`
+   - `device harness`
+   - `hosted infrastructure`
+4. Change only the thing that matches that class.
+5. Rerun only the smallest affected scenario or lane slice.
+
+Do not widen back to full `maestro`, strict `journey`, or dual-account cloud smoke until the smaller failing contract is corrected.
 
 ## Runbook: Runtime Tuning Analysis
 

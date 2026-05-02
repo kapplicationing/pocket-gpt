@@ -45,6 +45,90 @@ Last updated: 2026-04-25
 4. Runtime/UI change local check: use the relevant device lanes from the command contract.
 5. Weekly release rehearsal: use stage-2/device closure lanes plus the evidence packet.
 
+## Efficiency Techniques That Worked
+
+1. Lock the flow contract before rerunning broad lanes.
+   - Read the current app UI code and one first-failure screenshot before editing Maestro flows.
+   - Do not widen to `maestro`, `journey`, or cloud fan-out while a shared helper is still based on stale assumptions.
+2. Keep one scenario equal to one contract.
+   - `runtime-loaded` is different from `send-ready`.
+   - shell/navigation smoke is different from model-management smoke.
+   - mixed-purpose flows create noisy failures and rerun churn.
+3. Classify failures before rerunning.
+   - every failure should be tagged as `flow drift`, `product bug`, `device harness`, or `hosted infrastructure`.
+   - only rerun after something in that class changed.
+4. Preserve first-failure artifacts before retrying.
+   - first screenshot + logcat + runner output usually explain more than a later retried failure.
+5. Use cloud first for cheap parallel confirmation, then narrow device proof.
+   - hosted smoke is the fastest way to fan out deterministic coverage.
+   - attached devices should confirm cloud findings or cover OEM-only behavior, not rediscover the same flow logic.
+6. Keep the physical-device lane narrow.
+   - use one authoritative canary and one secondary debug device.
+   - do not treat every connected phone as equal gate evidence.
+
+## Tooling Used In Practice
+
+1. `python3 tools/devctl/main.py doctor`
+   - environment and lane preflight; use before any device or gate work.
+2. `bash scripts/dev/test.sh fast|merge`
+   - fast host confidence and merge-equivalent regression coverage.
+3. `python3 tools/devctl/main.py lane android-instrumented`
+   - authoritative startup/runtime smoke on device; best clean separator between product/runtime failures and Maestro-only failures.
+4. `python3 tools/devctl/main.py lane maestro`
+   - canonical local UI smoke with release-style preflight, seeded runtime state, and artifacts under `tmp/devctl-artifacts/`.
+5. `python3 tools/devctl/main.py lane journey`
+   - strict send/runtime evidence and send-capture validation.
+6. `maestro-android`
+   - scoped repros, selector linting, targeted device runs, and artifact inspection.
+   - best for fast local diagnosis when a full lane would be wasteful.
+7. `bash scripts/dev/maestro-cloud-smoke.sh`
+   - hosted smoke for machine-verifiable parallel reruns.
+8. `bash scripts/dev/maestro-cloud-smoke-parallel.sh`
+   - same hosted smoke suite across both configured Maestro Cloud accounts.
+9. `bash scripts/dev/maestro-cloud-upload-status.sh`
+   - explicit upload polling by `label:upload-id` and `project-id`.
+
+## Agent Skills Used In Practice
+
+1. `testing-android-maestro`
+   - used for lane selection, scoped repro guidance, selector drift triage, and deciding when to prefer `maestro-android` over raw `adb`.
+2. `debugging-pocket-gpt`
+   - used when a failure might be in app/runtime/native behavior rather than only in the flow harness.
+3. `code-health`
+   - used when build or Kotlin-quality issues needed to be separated from QA harness failures.
+4. `pocketgpt-coding-best-practices`
+   - used when test or tooling changes touched repo-specific architecture or conventions and needed to stay aligned with the codebase.
+
+## Tooling Gaps We Still Want
+
+1. A first-class `devctl` command that polls hosted Maestro uploads by project/account without requiring manual `project-id` and `label:upload-id` assembly.
+2. One authoritative cloud-to-local artifact normalizer so hosted and local evidence are easier to compare automatically.
+3. A reliable wired-device or emulator-backed local Maestro path for authoritative local smoke when wireless Samsung transport is unstable.
+4. Better harness health reporting that clearly separates:
+   - app failure
+   - Maestro bootstrap failure
+   - device transport failure
+   - hosted queue/polling delay
+5. A pinned-install helper shared by all local wrappers so every tool installs to one device only.
+6. A small screenshot triage index that points directly to first-failure screenshots instead of making engineers browse raw artifact trees.
+
+## QA Best-Practice Gaps And What To Do Better
+
+1. We have not been strict enough about contract ownership.
+   - better: define one owner for each shared flow helper and require contract tests when it changes.
+2. We have mixed harness debugging with product verification too often.
+   - better: separate harness health from product quality in every report and every rerun decision.
+3. We relied too long on wireless-device local Maestro as if it were authoritative.
+   - better: treat local wireless Maestro as diagnostic until it proves stable twice in a row.
+4. We did not document operator details early enough.
+   - better: every new wrapper should ship with examples, argument expectations, and one failure-mode note on day one.
+5. We allowed broad reruns while the shared helpers were still stale.
+   - better: stop and fix the helper contract first, then rerun only the affected scenario set.
+6. We do not yet have a small immutable launch smoke suite with stable ownership.
+   - better: keep the launch smoke suite short, versioned, and intentionally hard to change.
+7. We still depend too much on manual interpretation of hosted/local status.
+   - better: invest in one machine-readable evidence ledger for pass ids, upload ids, first-failure class, and current authority.
+
 ## Lane Policy
 
 1. `scripts/dev/README.md` owns exact command syntax.

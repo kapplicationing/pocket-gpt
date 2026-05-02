@@ -14,7 +14,9 @@ This section is the cross-functional execution system.
 - Dev/test command contract: `scripts/dev/README.md`
 - Test strategy + release gates: `docs/testing/test-strategy.md`
 - Task runbooks: `docs/testing/runbooks.md`
+- QA operating doctrine: `docs/testing/qa-operating-principles.md`
 - Cloud-first QA operating model: `docs/testing/cloud-first-qa-operating-model.md`
+- Launch program learnings: `docs/operations/launch-program-learnings.md`
 
 ## Status Contract
 
@@ -25,8 +27,10 @@ This section is the cross-functional execution system.
 ## Documents
 
 - `execution-board.md`
+- `launch-program-learnings.md`
 - `play-store-launch-program.md`
 - `play-store-submission-readiness.md`
+- `qa-improvement-action-plan.md`
 - `release-unblock-workstreams.md`
 - `tickets/`
 - `role-playbooks/engineering-playbook.md`

@@ -152,8 +152,8 @@ baseline, so each individual fix appeared to "do nothing":
 - [x] `.agents/skills/pocketgpt-coding-best-practices/references/repo-conventions.md`
       — added Compose performance anti-patterns subsection.
 - [x] `.claude/skills/maestro-android-cli/SKILL.md` — added build-variant lesson.
-- [x] `.claude/skills/android-compose-ui-audit/SKILL.md` — extended audit
-      checklist with Compose stability section.
+- [x] Global `android-compose-ui-audit` skill — extended audit checklist
+      with Compose stability section.
 
 ## Long-term watchlist
 

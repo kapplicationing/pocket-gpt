@@ -398,7 +398,7 @@ jobs:
           echo "${HOME}/.maestro/bin" >> "${GITHUB_PATH}"
 
       - name: Assemble debug APK
-        run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=false :apps:mobile-android:assembleDebug
+        run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug
 
       - name: Run first-run lifecycle E2E with bounded retry (attempt 1)
         id: lifecycle_attempt_1

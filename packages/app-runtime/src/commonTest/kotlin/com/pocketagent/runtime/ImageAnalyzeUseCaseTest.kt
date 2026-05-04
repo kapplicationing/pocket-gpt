@@ -142,6 +142,23 @@ class ImageAnalyzeUseCaseTest {
         assertEquals(1, inference.loadCalls)
         assertEquals(1, inference.unloadCalls)
     }
+
+    @Test
+    fun `returns device insufficient when cpu floor is not met`() {
+        val useCase = buildUseCase(
+            inference = ImageRecordingInferenceModule(),
+            policy = ALL_EVENTS_POLICY,
+            imageInput = StaticImageInputModule(ImageInputResult.Success("ok")),
+            availableCpuCoresProvider = { 4 },
+        )
+
+        val result = useCase.execute("/tmp/img.jpg", "describe", DEVICE_STATE)
+
+        assertTrue(result is ImageAnalysisResult.Failure)
+        val failure = (result as ImageAnalysisResult.Failure).failure
+        assertTrue(failure is ImageFailure.Runtime)
+        assertEquals("device_insufficient", failure.code)
+    }
 }
 
 private val DEVICE_STATE = DeviceState(batteryPercent = 85, thermalLevel = 3, ramClassGb = 8)
@@ -160,6 +177,7 @@ private val ALL_EVENTS_POLICY = ImageEventPolicyModule(
     imageInput: ImageInputModule,
     observability: RecordingObservabilityModule = RecordingObservabilityModule(),
     residentModelIdProvider: () -> String? = { null },
+    availableCpuCoresProvider: () -> Int = { 8 },
 ): ImageAnalyzeUseCase {
     val runtimeConfig = imageRuntimeConfig()
     val modelLifecycleCoordinator = ModelLifecycleCoordinator(
@@ -176,6 +194,7 @@ private val ALL_EVENTS_POLICY = ImageEventPolicyModule(
         modelLifecycleCoordinator = modelLifecycleCoordinator,
         routingModeProvider = { RoutingMode.AUTO },
         residentModelIdProvider = residentModelIdProvider,
+        availableCpuCoresProvider = availableCpuCoresProvider,
     )
 }
 

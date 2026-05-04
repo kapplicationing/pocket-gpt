@@ -17,6 +17,7 @@ internal class ImageAnalyzeUseCase(
     private val modelLifecycleCoordinator: ModelLifecycleCoordinator,
     private val routingModeProvider: () -> RoutingMode,
     private val residentModelIdProvider: () -> String? = { null },
+    private val availableCpuCoresProvider: () -> Int = { Runtime.getRuntime().availableProcessors() },
 ) {
     fun execute(
         imagePath: String,
@@ -126,7 +127,7 @@ internal class ImageAnalyzeUseCase(
         val minRamGb = MIN_MULTIMODAL_RAM_GB
         val minCores = MIN_MULTIMODAL_CORES
         return deviceState.ramClassGb >= minRamGb &&
-            Runtime.getRuntime().availableProcessors() >= minCores
+            availableCpuCoresProvider() >= minCores
     }
 
     companion object {

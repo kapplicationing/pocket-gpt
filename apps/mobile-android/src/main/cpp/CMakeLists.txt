@@ -14,8 +14,11 @@ if(NOT ANDROID)
     message(FATAL_ERROR "pocket_llama native build is Android-only.")
 endif()
 
-if(NOT ANDROID_ABI STREQUAL "arm64-v8a")
-    message(FATAL_ERROR "ENG-13 closure build is pinned to arm64-v8a. Found ABI=${ANDROID_ABI}")
+set(POCKETGPT_ARM64_SPECIALIZED_VARIANTS OFF)
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(POCKETGPT_ARM64_SPECIALIZED_VARIANTS ON)
+else()
+    message(STATUS "Building pocket_llama without arm64-specialized variants for ABI=${ANDROID_ABI}")
 endif()
 
 option(POCKETGPT_ENABLE_HEXAGON "Enable experimental Hexagon backend" OFF)
@@ -69,18 +72,20 @@ set(GGML_METAL OFF CACHE BOOL "" FORCE)
 set(GGML_RPC OFF CACHE BOOL "" FORCE)
 set(GGML_SYCL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-if(POCKETGPT_FORCE_ARM_I8MM)
-    set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+i8mm" CACHE STRING "" FORCE)
-elseif(GGML_BACKEND_DL)
-    # Build Android CPU backend variants and let ggml dispatch the best one at runtime.
-    set(GGML_CPU_ARM_ARCH "" CACHE STRING "" FORCE)
-    set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
-else()
-    # GGML_CPU_ALL_VARIANTS requires dynamic backend loading. When backends are
-    # linked statically, keep a conservative baseline ARM target for compatibility.
-    set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
-    set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "" FORCE)
+if(POCKETGPT_ARM64_SPECIALIZED_VARIANTS)
+    if(POCKETGPT_FORCE_ARM_I8MM)
+        set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+        set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+i8mm" CACHE STRING "" FORCE)
+    elseif(GGML_BACKEND_DL)
+        # Build Android CPU backend variants and let ggml dispatch the best one at runtime.
+        set(GGML_CPU_ARM_ARCH "" CACHE STRING "" FORCE)
+        set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
+    else()
+        # GGML_CPU_ALL_VARIANTS requires dynamic backend loading. When backends are
+        # linked statically, keep a conservative baseline ARM target for compatibility.
+        set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+        set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "" FORCE)
+    endif()
 endif()
 
 if(GGML_OPENCL)
@@ -298,15 +303,17 @@ if(TARGET llama)
     target_link_options(llama PRIVATE ${POCKET_LLAMA_LINK_FLAGS})
 endif()
 
-create_cpu_specialized_stack("armv8_2_dotprod_i8mm" "-march=armv8.2-a+dotprod+i8mm")
-
 add_pocket_llama_variant(pocket_llama "" llama)
-add_pocket_llama_variant(pocket_llama_v8 "-march=armv8-a" llama)
-add_pocket_llama_variant(pocket_llama_v8_2 "-march=armv8.2-a" llama)
-add_pocket_llama_variant(pocket_llama_v8_2_dotprod "-march=armv8.2-a+dotprod" llama)
-add_pocket_llama_variant(pocket_llama_v8_2_i8mm "-march=armv8.2-a+i8mm" llama)
-add_pocket_llama_variant(
-    pocket_llama_v8_2_dotprod_i8mm
-    "-march=armv8.2-a+dotprod+i8mm"
-    llama-armv8_2_dotprod_i8mm
-)
+if(POCKETGPT_ARM64_SPECIALIZED_VARIANTS)
+    create_cpu_specialized_stack("armv8_2_dotprod_i8mm" "-march=armv8.2-a+dotprod+i8mm")
+
+    add_pocket_llama_variant(pocket_llama_v8 "-march=armv8-a" llama)
+    add_pocket_llama_variant(pocket_llama_v8_2 "-march=armv8.2-a" llama)
+    add_pocket_llama_variant(pocket_llama_v8_2_dotprod "-march=armv8.2-a+dotprod" llama)
+    add_pocket_llama_variant(pocket_llama_v8_2_i8mm "-march=armv8.2-a+i8mm" llama)
+    add_pocket_llama_variant(
+        pocket_llama_v8_2_dotprod_i8mm
+        "-march=armv8.2-a+dotprod+i8mm"
+        llama-armv8_2_dotprod_i8mm
+    )
+endif()

@@ -23,6 +23,14 @@ If `doctor` fails, fix issues first.
 
 Use `scripts/dev/README.md` for the current command ladder. Start with `doctor` and `bash scripts/dev/test.sh fast`, then expand to the relevant device lanes from there.
 
+The default Android evidence matrix is:
+
+1. emulator for the fast bootstrap/runtime leg
+2. one connected device for real hardware/OEM proof
+3. one cloud path for hosted confirmation
+
+Use the local emulator path in `scripts/dev/README.md` if you do not already have an emulator running.
+
 For UI-focused changes, also run:
 
 ```bash

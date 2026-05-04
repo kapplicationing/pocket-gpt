@@ -23,6 +23,7 @@ _PROCESS_EXIT_RE = re.compile(r"Process will exit with code (?P<code>\d+) \((?P<
 _STATUS_FETCH_FAILURE_RE = re.compile(
     r"Failed to fetch the status of an upload\s+(?P<upload_id>\S+)\.\s+Status code = (?P<status_code>\S+)"
 )
+_PROJECT_FETCH_FAILURE_RE = re.compile(r"Failed to fetch projects\.\s+Status code:\s*(?P<status_code>\S+)")
 
 
 def _read_text(path: Path) -> str:
@@ -48,6 +49,8 @@ def parse_cli_output(text: str) -> dict[str, Any]:
         "process_exit_code": None,
         "process_exit_label": None,
         "project_id": None,
+        "project_fetch_failed": False,
+        "project_fetch_status_code": None,
         "status_fetch_failed": False,
         "status_fetch_status_code": None,
         "upload_id": None,
@@ -92,6 +95,11 @@ def parse_cli_output(text: str) -> dict[str, Any]:
             payload["status_fetch_status_code"] = status_fetch_match.group("status_code")
             if not payload["upload_id"]:
                 payload["upload_id"] = status_fetch_match.group("upload_id")
+            continue
+        project_fetch_match = _PROJECT_FETCH_FAILURE_RE.search(stripped)
+        if project_fetch_match:
+            payload["project_fetch_failed"] = True
+            payload["project_fetch_status_code"] = project_fetch_match.group("status_code")
 
     failed_flows = [item for item in payload["flow_results"] if item["status"] == "failed"]
     passed_flows = [item for item in payload["flow_results"] if item["status"] == "passed"]
@@ -161,6 +169,17 @@ def build_api_run_status(
             "Maestro Cloud account activation is incomplete. Start the trial and provide the required "
             "company name in the Maestro Cloud account before rerunning."
         )
+    elif (
+        cli_summary["project_fetch_failed"]
+        and not cli_summary["failed_flows"]
+        and junit_summary["failures"] == 0
+    ):
+        status = "infra_status_fetch_failed"
+        blocker_key = "maestro_cloud_project_fetch_failed"
+        blocker_message = (
+            "Maestro Cloud project fetch failed before an upload was created. "
+            f"Status code: {cli_summary['project_fetch_status_code']}."
+        )
     elif cli_summary["failed_flows"] or junit_summary["failures"] > 0:
         status = "failed"
     elif (
@@ -217,6 +236,8 @@ def build_api_run_status(
         "passed_flows": cli_summary["passed_flows"],
         "process_exit_code": cli_summary["process_exit_code"],
         "project_id": cli_summary["project_id"],
+        "project_fetch_failed": cli_summary["project_fetch_failed"],
+        "project_fetch_status_code": cli_summary["project_fetch_status_code"],
         "status_fetch_failed": cli_summary["status_fetch_failed"],
         "status_fetch_status_code": cli_summary["status_fetch_status_code"],
         "status": status,

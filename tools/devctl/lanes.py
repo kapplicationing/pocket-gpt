@@ -164,6 +164,8 @@ _REMOTE_DIR_RETRY_ATTEMPTS = 3
 _REMOTE_DIR_RETRY_BACKOFF_SECONDS = 0.5
 _REMOTE_COPY_TIMEOUT_SECONDS = 30.0
 _ANDROID_INSTRUMENTED_SELECTOR_TIMEOUT_SECONDS = 300.0
+_MAESTRO_FLOW_TIMEOUT_SECONDS = 300.0
+_SEND_CAPTURE_KICKOFF_TIMEOUT_SECONDS = 120.0
 _SEND_CAPTURE_READY_GRACE_SECONDS = 5
 _SEND_CAPTURE_POST_TERMINAL_GRACE_SECONDS = 30
 _MODEL_SYNC_MANIFEST_FILE = "model-sync-v1.json"
@@ -174,13 +176,20 @@ _SCREENSHOT_INVENTORY_PATH = REPO_ROOT / "tests/ui-screenshots/inventory.yaml"
 _SCREENSHOT_REFERENCE_DIR = REPO_ROOT / "tests/ui-screenshots/reference/sm-a515f-android13"
 _SCREENSHOT_REPORT_SCHEMA = "ui-screenshot-inventory-report-v2"
 _QA13_UNKNOWN_VALUE = "unknown"
+_JOURNEY_INSTRUMENTATION_SEND_CAPTURE_FILE = "journey-send-capture.json"
 _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "Unable to launch app",
+    "was requested, but it is not connected.",
     "TimeoutException",
     "timed out while waiting for FUNCTIONFS_BIND",
     "TcpForwarder",
     "UNAVAILABLE: io exception",
+    "UNAVAILABLE: Network closed for unknown reason",
     "Connection refused",
+    "Connection reset",
+)
+_MAESTRO_SIGNATURE_NOISE_PREFIXES = (
+    "Picked up JAVA_TOOL_OPTIONS:",
 )
 _MAESTRO_IPV4_JAVA_OPTION = "-Djava.net.preferIPv4Stack=true"
 _MAESTRO_LAUNCH_APP_KEY = "launchApp"
@@ -429,6 +438,10 @@ def build_gradle_test_command(
     clean: bool,
 ) -> list[str]:
     command = [gradle_binary, *gradle_flags]
+    if any(task.startswith(":apps:mobile-android:") for task in gradle_tasks) and not any(
+        flag.startswith("-Ppocketgpt.enableNativeBuild=") for flag in gradle_flags
+    ):
+        command.append("-Ppocketgpt.enableNativeBuild=false")
     if clean:
         command.append("clean")
     command.extend(list(gradle_tasks))
@@ -596,27 +609,46 @@ def _run_device_health_preflight(
     )
 
     probe_local = Path(tempfile.gettempdir()) / f"devctl-probe-{os.getpid()}.txt"
-    probe_remote = f"{health_dir}/probe.txt"
     probe_local.write_text("preflight\n", encoding="utf-8")
     try:
-        push_result = context.run(
-            ["adb", "-s", serial, "push", str(probe_local), probe_remote],
-            check=False,
-            capture_output=True,
-            env=context.env,
-        )
-        if push_result.returncode != 0:
+        probe_dirs = [health_dir]
+        if health_dir == primary_health_dir:
+            probe_dirs.extend(path for path in _media_path_fallbacks(primary_health_dir) if path != health_dir)
+
+        push_failures: list[str] = []
+        for idx, candidate_dir in enumerate(probe_dirs):
+            if idx > 0:
+                candidate_dir = _ensure_remote_dir(
+                    context=context,
+                    serial=serial,
+                    path=candidate_dir,
+                    failure_label="Device external storage preflight failed while preparing fallback probe path.",
+                )
+                print_step(f"Retrying device health probe using fallback external-storage path: {candidate_dir}")
+
+            probe_remote = f"{candidate_dir}/probe.txt"
+            push_result = context.run(
+                ["adb", "-s", serial, "push", str(probe_local), probe_remote],
+                check=False,
+                capture_output=True,
+                env=context.env,
+            )
+            if push_result.returncode == 0:
+                context.run(
+                    ["adb", "-s", serial, "shell", "rm", "-f", probe_remote],
+                    check=False,
+                    env=context.env,
+                )
+                break
+
             detail = "\n".join(part for part in [(push_result.stdout or "").strip(), (push_result.stderr or "").strip()] if part)
+            push_failures.append(f"path={candidate_dir} detail={detail or '<no-output>'}")
+        else:
             raise DevctlError(
                 "DEVICE_ERROR",
                 "Device external storage preflight failed while writing probe file.\n"
-                f"{detail}",
+                + "\n".join(push_failures),
             )
-        context.run(
-            ["adb", "-s", serial, "shell", "rm", "-f", probe_remote],
-            check=False,
-            env=context.env,
-        )
     finally:
         probe_local.unlink(missing_ok=True)
 
@@ -706,16 +738,29 @@ def _run_instrumentation_class(
     args: Mapping[str, str],
     timeout_seconds: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    command = ["adb", "-s", serial, "shell", "am", "instrument", "-w", "-r", "-e", "class", test_class]
+    command_parts = [
+        "am",
+        "instrument",
+        "-w",
+        "-r",
+        "-e",
+        "class",
+        _shell_single_quote(test_class),
+    ]
     for key, value in args.items():
-        command.extend(["-e", key, value])
-    command.append(runner)
+        command_parts.extend(
+            [
+                "-e",
+                _shell_single_quote(key),
+                _shell_single_quote(value),
+            ]
+        )
+    command_parts.append(_shell_single_quote(runner))
 
-    result = context.run(
-        command,
-        check=False,
-        capture_output=True,
-        env=context.env,
+    result = _run_remote_shell_script(
+        context=context,
+        serial=serial,
+        script=" ".join(command_parts),
         timeout_seconds=timeout_seconds,
     )
     output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
@@ -871,6 +916,18 @@ def _run_maestro_transport_recovery(
     run_env = env or context.env
     context.run(
         ["adb", "-s", serial, "forward", "--remove-all"],
+        check=False,
+        capture_output=True,
+        env=run_env,
+    )
+    context.run(
+        ["adb", "-s", serial, "shell", "am", "force-stop", "dev.mobile.maestro"],
+        check=False,
+        capture_output=True,
+        env=run_env,
+    )
+    context.run(
+        ["adb", "-s", serial, "shell", "am", "force-stop", "dev.mobile.maestro.test"],
         check=False,
         capture_output=True,
         env=run_env,
@@ -1095,6 +1152,27 @@ def _remote_path_exists(context: RuntimeContext, serial: str, path: str) -> bool
     if result.returncode != 0:
         return False
     return (result.stdout or "").strip() == "1"
+
+
+def _wait_for_remote_path(
+    context: RuntimeContext,
+    serial: str,
+    path: str,
+    *,
+    timeout_seconds: float = 5.0,
+    poll_interval_seconds: float = 0.5,
+) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if _remote_path_exists(context, serial, path):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_interval_seconds)
+
+
+def _is_transient_journey_instrumentation_failure(message: str) -> bool:
+    return "Process crashed" in message or "exit=-15" in message
 
 
 def _compute_file_sha256(path: str | Path) -> str:
@@ -1624,36 +1702,6 @@ def prepare_real_runtime_env(
                         resolved_path = candidate_path
                         resolved_size = remote_size
                         resolved_reason = "model-sync manifest fingerprint matched"
-                        candidate_parent = str(Path(candidate_path).parent)
-                        if candidate_parent != resolved_model_dir:
-                            primary_device_path = f"{resolved_model_dir.rstrip('/')}/{model.device_file_name}"
-                            print_step(
-                                f"Restoring {model.model_id} from cached path {candidate_path} to primary path {primary_device_path}"
-                            )
-                            _ensure_remote_dir(
-                                context=context,
-                                serial=device_serial,
-                                path=resolved_model_dir,
-                                failure_label="Failed to ensure primary model directory for manifest cache restore.",
-                            )
-                            _copy_remote_file(
-                                context=context,
-                                serial=device_serial,
-                                source_path=candidate_path,
-                                destination_path=primary_device_path,
-                                failure_label=(
-                                    f"Failed to restore {model.model_id} from manifest cache path to primary model path."
-                                ),
-                            )
-                            restored_size = _remote_file_size_bytes(context, device_serial, primary_device_path)
-                            if restored_size == host_size:
-                                resolved_path = primary_device_path
-                                resolved_size = restored_size
-                                resolved_reason = "restored from manifest cache path to primary model path"
-                            else:
-                                print_step(
-                                    f"Manifest cache restore verification failed for {primary_device_path}; using cached path {candidate_path}."
-                                )
 
                         resolved_device_path = resolved_path
                         resolved_device_size = resolved_size
@@ -1704,38 +1752,6 @@ def prepare_real_runtime_env(
                         if remote_sha is not None
                         else "device artifact matched size (device hash unavailable)"
                     )
-
-                    if dir_index > 0 and preferred_model_dirs:
-                        primary_model_dir = preferred_model_dirs[0]
-                        if primary_model_dir != ensured_dir:
-                            primary_ensured_dir = _ensure_remote_dir(
-                                context=context,
-                                serial=device_serial,
-                                path=primary_model_dir,
-                                failure_label="Failed to ensure primary model directory for fallback restore.",
-                            )
-                            primary_device_path = f"{primary_ensured_dir.rstrip('/')}/{model.device_file_name}"
-                            print_step(
-                                f"Restoring {model.model_id} from fallback cache to primary path {primary_device_path}"
-                            )
-                            _copy_remote_file(
-                                context=context,
-                                serial=device_serial,
-                                source_path=device_path,
-                                destination_path=primary_device_path,
-                                failure_label=(
-                                    f"Failed to restore {model.model_id} from fallback cache to primary model path."
-                                ),
-                            )
-                            restored_size = _remote_file_size_bytes(context, device_serial, primary_device_path)
-                            if restored_size == host_size:
-                                chosen_device_path = primary_device_path
-                                chosen_device_size = restored_size
-                                chosen_reason = "restored from persistent cache to primary model path"
-                            else:
-                                print_step(
-                                    f"Fallback restore verification failed for {primary_device_path}; continuing with {device_path}."
-                                )
 
                     print_step(
                         f"Model {model.model_id} already present at {chosen_device_path} with matching size; skipping push."
@@ -1810,38 +1826,6 @@ def prepare_real_runtime_env(
                 f"Failed to push model artifact {host_path} after trying candidate device paths.\n{detail}",
             )
 
-        persistent_dirs = _media_path_fallbacks(real_runtime_cfg.device_model_dir)
-        if persistent_dirs:
-            persistent_dir = persistent_dirs[0]
-            persistent_path = f"{persistent_dir.rstrip('/')}/{model.device_file_name}"
-            if persistent_path != resolved_device_path:
-                try:
-                    _ensure_remote_dir(
-                        context=context,
-                        serial=device_serial,
-                        path=persistent_dir,
-                        failure_label="Failed to prepare persistent model cache directory.",
-                    )
-                    persistent_size = _remote_file_size_bytes(context, device_serial, persistent_path)
-                    if persistent_size != host_size:
-                        print_step(
-                            f"Mirroring {model.model_id} to persistent cache path {persistent_path}"
-                        )
-                        _copy_remote_file(
-                            context=context,
-                            serial=device_serial,
-                            source_path=resolved_device_path,
-                            destination_path=persistent_path,
-                            failure_label=f"Failed to mirror {model.model_id} to persistent cache path.",
-                        )
-                        verified_persistent_size = _remote_file_size_bytes(context, device_serial, persistent_path)
-                        if verified_persistent_size != host_size:
-                            print_step(
-                                f"Persistent cache mirror verification failed for {persistent_path}; keeping primary artifact."
-                            )
-                except DevctlError as exc:
-                    print_step(f"Persistent cache mirror skipped for {model.model_id}: {exc.message}")
-
         model_device_paths_by_id[model.model_id] = resolved_device_path
         required_artifacts = _resolve_real_runtime_required_artifacts(
             context=context,
@@ -1890,6 +1874,62 @@ def prepare_real_runtime_env(
                 "required_artifacts": synced_required_artifacts,
             }
         )
+
+    try:
+        probe_model_dir = _ensure_remote_dir(
+            context=context,
+            serial=device_serial,
+            path=real_runtime_cfg.device_model_dir,
+            failure_label="Failed to prepare primary app-media model directory for provisioning probe.",
+        )
+    except DevctlError as exc:
+        probe_model_dir = None
+        print_step(
+            "Primary app-media model directory is unavailable for the provisioning probe; "
+            f"keeping currently synced model paths. {exc.message}"
+        )
+
+    if probe_model_dir is not None:
+        selected_model_dir_for_cache = probe_model_dir
+        for model in real_runtime_cfg.models:
+            current_device_path = model_device_paths_by_id[model.model_id]
+            probe_device_path = f"{probe_model_dir.rstrip('/')}/{model.device_file_name}"
+            rehydrated_to_primary_dir = current_device_path != probe_device_path
+            if rehydrated_to_primary_dir:
+                print_step(
+                    f"Restoring {model.model_id} to app-media path {probe_device_path} for provisioning probe."
+                )
+                verified_size = _ensure_remote_real_runtime_artifact(
+                    context=context,
+                    serial=device_serial,
+                    host_path=model_host_paths_by_id[model.model_id],
+                    device_path=probe_device_path,
+                    label=f"app-media runtime model {model.model_id}",
+                )
+                model_device_paths_by_id[model.model_id] = probe_device_path
+                record = model_sync_records.get(model.model_id)
+                if record is not None:
+                    record["device_path"] = probe_device_path
+                    record["device_size"] = verified_size
+                    record["last_verified_at"] = datetime.now().isoformat(timespec="seconds")
+                for artifact in model_required_artifacts_by_id.get(model.model_id, []):
+                    probe_artifact_path = f"{probe_model_dir.rstrip('/')}/{artifact['file_name']}"
+                    artifact_size = _ensure_remote_real_runtime_artifact(
+                        context=context,
+                        serial=device_serial,
+                        host_path=str(artifact["host_path"]),
+                        device_path=probe_artifact_path,
+                        label=f"app-media companion artifact {artifact['file_name']}",
+                    )
+                    artifact["device_path"] = probe_artifact_path
+                    artifact["device_size"] = artifact_size
+            for decision in model_sync_decisions:
+                if decision.get("model_id") != model.model_id:
+                    continue
+                decision["probe_model_dir"] = probe_model_dir
+                decision["probe_device_path"] = model_device_paths_by_id[model.model_id]
+                decision["probe_rehydrated_to_primary_dir"] = rehydrated_to_primary_dir
+                break
 
     model_sync_manifest_path: str | None = None
     if model_sync_records:
@@ -1959,6 +1999,11 @@ def prepare_real_runtime_env(
                 )
 
     def _run_provisioning_probe() -> None:
+        _quiesce_maestro_driver_packages(
+            context=context,
+            serial=device_serial,
+            env=context.env,
+        )
         _run_instrumentation_class(
             context=context,
             serial=device_serial,
@@ -2033,6 +2078,24 @@ def _capture_logcat(context: RuntimeContext, serial: str, output_path: Path) -> 
     )
     text = (result.stdout or "") + (result.stderr or "")
     output_path.write_text(text, encoding="utf-8")
+
+
+def _quiesce_maestro_driver_packages(
+    *,
+    context: RuntimeContext,
+    serial: str,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    effective_env = dict(env or context.env)
+    # The installed Maestro driver can relaunch or stop the target app while
+    # real-runtime instrumentation is still seeding and validating startup.
+    for package_name in ("dev.mobile.maestro", "dev.mobile.maestro.test"):
+        context.run(
+            ["adb", "-s", serial, "shell", "am", "force-stop", package_name],
+            check=False,
+            capture_output=True,
+            env=effective_env,
+        )
 
 
 def _resolve_lane_artifact_dir(template: str, serial: str, label: str) -> Path:
@@ -2878,6 +2941,87 @@ def _build_qa13_defaults_from_snapshot(snapshot: SendCaptureSnapshot | None) -> 
     )
 
 
+def _load_instrumentation_send_capture_step(
+    *,
+    instrumentation_root: Path,
+    mode: str,
+) -> JourneyStepResult | None:
+    candidates = sorted(
+        instrumentation_root.rglob(_JOURNEY_INSTRUMENTATION_SEND_CAPTURE_FILE),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        return None
+
+    artifact_path = candidates[0]
+    try:
+        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return JourneyStepResult(
+            name="send-capture",
+            status="failed",
+            duration_seconds=0.0,
+            details=_report_path(artifact_path),
+            failure_signature=f"Invalid instrumentation send-capture artifact: {exc}",
+            phase="error",
+            elapsed_ms=0,
+            runtime_status=_QA13_UNKNOWN_VALUE,
+            backend=_QA13_UNKNOWN_VALUE,
+            active_model_id=_QA13_UNKNOWN_VALUE,
+            placeholder_visible=False,
+            mode=mode,
+        )
+
+    phase = str(payload.get("phase", "")).strip() or "error"
+    elapsed_ms_raw = payload.get("elapsed_ms", 0)
+    try:
+        elapsed_ms = max(0, int(elapsed_ms_raw))
+    except (TypeError, ValueError):
+        elapsed_ms = 0
+
+    placeholder_visible = bool(payload.get("placeholder_visible", False))
+    runtime_status = _normalize_qa13_text(payload.get("runtime_status"))
+    backend = _normalize_qa13_text(payload.get("backend"))
+    active_model_id = _normalize_qa13_text(payload.get("active_model_id"))
+    first_token_ms_raw = payload.get("first_token_ms")
+    try:
+        first_token_ms = int(first_token_ms_raw) if first_token_ms_raw is not None else None
+    except (TypeError, ValueError):
+        first_token_ms = None
+    failure_signature = str(payload.get("failure_signature", "")).strip() or None
+
+    screenshot_path_raw = str(payload.get("screenshot_path", "")).strip()
+    screenshots: list[str] = []
+    if screenshot_path_raw:
+        screenshot_path = Path(screenshot_path_raw)
+        if not screenshot_path.is_absolute():
+            screenshot_path = artifact_path.parent / screenshot_path
+        if screenshot_path.exists():
+            screenshots.append(_report_path(screenshot_path))
+
+    passed = phase == "completed" and not placeholder_visible
+    if failure_signature is None and not passed:
+        failure_signature = f"Instrumentation send-capture phase={phase}"
+
+    return JourneyStepResult(
+        name="send-capture",
+        status="passed" if passed else "failed",
+        duration_seconds=elapsed_ms / 1000.0,
+        details=_report_path(artifact_path),
+        screenshots=screenshots or None,
+        failure_signature=failure_signature,
+        phase=phase,
+        elapsed_ms=elapsed_ms,
+        runtime_status=runtime_status,
+        backend=backend,
+        active_model_id=active_model_id,
+        placeholder_visible=placeholder_visible,
+        first_token_ms=first_token_ms,
+        mode=mode,
+    )
+
+
 def _run_send_capture_stage(
     *,
     context: RuntimeContext,
@@ -2898,8 +3042,12 @@ def _run_send_capture_stage(
     debug_output_dir.mkdir(parents=True, exist_ok=True)
 
     kickoff_flow = capture_root / "send-kickoff.yaml"
-    bootstrap_runtime_ready = REPO_ROOT / "tests/maestro/shared/bootstrap-runtime-ready.yaml"
+    bootstrap_runtime_ready = REPO_ROOT / "tests/maestro/shared/bootstrap-runtime-ready-no-launch.yaml"
     bootstrap_runtime_ready_ref = os.path.relpath(bootstrap_runtime_ready, capture_root)
+    ensure_runtime_loaded = REPO_ROOT / "tests/maestro/shared/ensure-runtime-loaded.yaml"
+    ensure_runtime_loaded_ref = os.path.relpath(ensure_runtime_loaded, capture_root)
+    dismiss_system_overlays = REPO_ROOT / "tests/maestro/shared/dismiss-system-overlays.yaml"
+    dismiss_system_overlays_ref = os.path.relpath(dismiss_system_overlays, capture_root)
     strict_mode = mode == "strict"
     fast_smoke_mode = mode == "fast-smoke"
     runtime_clean_assert_lines = [
@@ -2911,21 +3059,19 @@ def _run_send_capture_stage(
                 f"appId: {app_package}",
                 "---",
                 f"- runFlow: {bootstrap_runtime_ready_ref}",
+                f"- runFlow: {ensure_runtime_loaded_ref}",
                 "- takeScreenshot: \"send-kickoff-01-launch\"",
                 *runtime_clean_assert_lines,
                 "- takeScreenshot: \"send-kickoff-02-ready\"",
+                "- tapOn:",
+                "    id: \"composer_input\"",
+                f"- runFlow: {dismiss_system_overlays_ref}",
                 "- tapOn:",
                 "    id: \"composer_input\"",
                 "- takeScreenshot: \"send-kickoff-03-message-tab\"",
                 "- eraseText",
                 f"- inputText: {json.dumps(prompt)}",
                 "- takeScreenshot: \"send-kickoff-04-typed\"",
-                "- runFlow:",
-                "    when:",
-                "      notVisible:",
-                "        id: \"send_button\"",
-                "    commands:",
-                "      - hideKeyboard",
                 "- takeScreenshot: \"send-kickoff-05-before-send\"",
                 "- tapOn:",
                 "    id: \"send_button\"",
@@ -2955,15 +3101,46 @@ def _run_send_capture_stage(
     for attempt in range(2):
         _clear_stale_maestro_processes(context=context, serial=serial, env=effective_env)
         context.run(["adb", "-s", serial, "forward", "--remove-all"], check=False, env=effective_env)
+        context.run(["adb", "-s", serial, "shell", "am", "force-stop", "dev.mobile.maestro"], check=False, env=effective_env)
+        context.run(["adb", "-s", serial, "shell", "am", "force-stop", "dev.mobile.maestro.test"], check=False, env=effective_env)
         context.run(["adb", "-s", serial, "shell", "am", "force-stop", app_package], check=False, env=effective_env)
-        maestro_args = ["--reinstall-driver"] if attempt > 0 else []
-        result = context.run(
-            [maestro_bin, "--device", serial, "test", *maestro_args, str(kickoff_flow), "--debug-output", str(debug_output_dir)],
+        launch_result = context.run(
+            ["adb", "-s", serial, "shell", "am", "start", "-W", "-n", f"{app_package}/.MainActivity"],
             check=False,
             capture_output=True,
             env=effective_env,
-            cwd=debug_output_dir,
         )
+        if launch_result.returncode != 0:
+            context.run(
+                ["adb", "-s", serial, "shell", "monkey", "-p", app_package, "-c", "android.intent.category.LAUNCHER", "1"],
+                check=False,
+                env=effective_env,
+            )
+        time.sleep(1.0)
+        maestro_args = ["--reinstall-driver"]
+        command = [
+            maestro_bin,
+            "--device",
+            serial,
+            "test",
+            *maestro_args,
+            str(kickoff_flow),
+            "--debug-output",
+            str(debug_output_dir),
+        ]
+        try:
+            result = context.run(
+                command,
+                check=False,
+                capture_output=True,
+                env=effective_env,
+                cwd=debug_output_dir,
+                timeout_seconds=_SEND_CAPTURE_KICKOFF_TIMEOUT_SECONDS,
+            )
+        except DevctlError as exc:
+            if exc.code != "ENVIRONMENT_ERROR" or "Command timed out after" not in exc.message:
+                raise
+            result = subprocess.CompletedProcess(command, 124, stdout="", stderr=exc.message)
         combined = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
         kickoff_outputs.append(f"=== attempt {attempt + 1} ===\n{combined}\n")
         kickoff_result = result
@@ -3534,6 +3711,17 @@ def _parse_maestro_tags(raw: str) -> list[str]:
     if not raw.strip():
         return []
     return [token.strip() for token in raw.split(",") if token.strip()]
+
+
+def _journey_instrumentation_timeout_seconds(
+    *,
+    startup_probe_timeout_seconds: float,
+    reply_timeout_seconds: int,
+    steps: Sequence[str],
+) -> float:
+    if "send-capture" not in steps:
+        return startup_probe_timeout_seconds
+    return startup_probe_timeout_seconds + float(reply_timeout_seconds)
 
 
 def _parse_maestro_lane_args(raw_args: Sequence[str]) -> MaestroLaneArgs:
@@ -4251,13 +4439,29 @@ def _run_maestro_flow(
                 env=run_env,
             )
         maestro_args = ["--reinstall-driver"] if attempt > 0 else []
-        run_result = context.run(
-            [maestro_bin, "--device", serial, "test", *maestro_args, str(flow_path), "--debug-output", str(debug_output_dir)],
-            check=False,
-            capture_output=True,
-            env=run_env,
-            cwd=debug_output_dir,
-        )
+        command = [
+            maestro_bin,
+            "--device",
+            serial,
+            "test",
+            *maestro_args,
+            str(flow_path),
+            "--debug-output",
+            str(debug_output_dir),
+        ]
+        try:
+            run_result = context.run(
+                command,
+                check=False,
+                capture_output=True,
+                env=run_env,
+                cwd=debug_output_dir,
+                timeout_seconds=_MAESTRO_FLOW_TIMEOUT_SECONDS,
+            )
+        except DevctlError as exc:
+            if exc.code != "ENVIRONMENT_ERROR" or "Command timed out after" not in exc.message:
+                raise
+            run_result = subprocess.CompletedProcess(command, 124, stdout="", stderr=exc.message)
         combined = ((run_result.stdout or "") + "\n" + (run_result.stderr or "")).strip()
         maestro_log = _latest_maestro_log_text(debug_output_dir)
         attempt_block = [f"=== attempt {attempt + 1} ===", combined]
@@ -4342,9 +4546,13 @@ def _extract_maestro_failure_signature(*, combined: str, maestro_log: str, retur
             continue
         if line.startswith("/") and len(line.split()) == 1:
             continue
+        if any(line.startswith(prefix) for prefix in _MAESTRO_SIGNATURE_NOISE_PREFIXES):
+            continue
         return line
     for line in reversed(log_lines):
         if line.startswith("at "):
+            continue
+        if any(line.startswith(prefix) for prefix in _MAESTRO_SIGNATURE_NOISE_PREFIXES):
             continue
         return line
     return f"exit={returncode}"
@@ -4902,29 +5110,61 @@ def _lane_journey_impl(raw_args: Sequence[str], context: RuntimeContext) -> None
             instrumentation_args["stage2_enable_journey_test"] = "true"
             instrumentation_args["journey_artifact_dir"] = device_journey_dir
             instrumentation_args["journey_reply_timeout_seconds"] = str(args.reply_timeout_seconds)
+            instrumentation_args["journey_enable_ui_send_capture"] = "true" if "send-capture" in args.steps else "false"
+            instrumentation_args["journey_prompt"] = args.prompt
+            instrumentation_timeout_seconds = _journey_instrumentation_timeout_seconds(
+                startup_probe_timeout_seconds=real_runtime_cfg.startup_probe_timeout_seconds,
+                reply_timeout_seconds=args.reply_timeout_seconds,
+                steps=args.steps,
+            )
 
             instrumentation_output_path = run_root / "instrumentation-output.txt"
             if "instrumentation" in args.steps:
                 started = time.monotonic()
-                try:
-                    result = _run_instrumentation_class(
-                        context=context,
-                        serial=serial,
-                        test_class=real_runtime_cfg.journey_test_class,
-                        runner=preflight.instrumentation_runner or real_runtime_cfg.instrumentation_runner,
-                        args=instrumentation_args,
-                        timeout_seconds=real_runtime_cfg.startup_probe_timeout_seconds,
-                    )
-                    instrumentation_output_path.write_text(
-                        (result.stdout or "") + (result.stderr or ""),
-                        encoding="utf-8",
-                    )
-                    instrumentation_status = "passed"
-                    instrumentation_failure = None
-                except DevctlError as exc:
-                    instrumentation_output_path.write_text(exc.message + "\n", encoding="utf-8")
-                    instrumentation_status = "failed"
-                    instrumentation_failure = exc.message
+                instrumentation_status = "failed"
+                instrumentation_failure: str | None = None
+                instrumentation_output = ""
+                for attempt in range(2):
+                    try:
+                        result = _run_instrumentation_class(
+                            context=context,
+                            serial=serial,
+                            test_class=real_runtime_cfg.journey_test_class,
+                            runner=preflight.instrumentation_runner or real_runtime_cfg.instrumentation_runner,
+                            args=instrumentation_args,
+                            timeout_seconds=instrumentation_timeout_seconds,
+                        )
+                        instrumentation_output = (result.stdout or "") + (result.stderr or "")
+                        if not _wait_for_remote_path(context, serial, device_journey_dir):
+                            instrumentation_status = "failed"
+                            instrumentation_failure = (
+                                "Instrumentation completed without publishing journey artifacts: "
+                                f"{device_journey_dir}"
+                            )
+                            instrumentation_output = (
+                                instrumentation_output.rstrip()
+                                + "\n"
+                                + instrumentation_failure
+                                + "\n"
+                            )
+                            if attempt == 0:
+                                print_step(f"{run_label}: journey instrumentation did not publish artifacts; retrying once.")
+                                time.sleep(1.5)
+                                continue
+                            break
+                        instrumentation_status = "passed"
+                        instrumentation_failure = None
+                        break
+                    except DevctlError as exc:
+                        instrumentation_output = exc.message + "\n"
+                        instrumentation_status = "failed"
+                        instrumentation_failure = exc.message
+                        if attempt == 0 and _is_transient_journey_instrumentation_failure(exc.message):
+                            print_step(f"{run_label}: journey instrumentation crashed; retrying once.")
+                            time.sleep(1.5)
+                            continue
+                        break
+                instrumentation_output_path.write_text(instrumentation_output, encoding="utf-8")
                 duration = time.monotonic() - started
             else:
                 instrumentation_output_path.write_text("Instrumentation skipped by --steps.\n", encoding="utf-8")
@@ -4965,18 +5205,25 @@ def _lane_journey_impl(raw_args: Sequence[str], context: RuntimeContext) -> None
                 continue
 
             if "send-capture" in args.steps:
-                send_step = _run_send_capture_stage(
-                    context=context,
-                    maestro_bin=maestro_bin,
-                    serial=serial,
-                    app_package=real_runtime_cfg.app_package,
-                    run_root=run_root,
-                    prompt=args.prompt,
-                    reply_timeout_seconds=args.reply_timeout_seconds,
-                    capture_intervals=args.capture_intervals,
+                send_step = _load_instrumentation_send_capture_step(
+                    instrumentation_root=local_instrumentation_shots,
                     mode=args.mode,
-                    env=device_env,
                 )
+                if send_step is None:
+                    send_step = _run_send_capture_stage(
+                        context=context,
+                        maestro_bin=maestro_bin,
+                        serial=serial,
+                        app_package=real_runtime_cfg.app_package,
+                        run_root=run_root,
+                        prompt=args.prompt,
+                        reply_timeout_seconds=args.reply_timeout_seconds,
+                        capture_intervals=args.capture_intervals,
+                        mode=args.mode,
+                        env=device_env,
+                    )
+                else:
+                    print_step(f"{run_label}: using instrumentation send-capture artifact: {send_step.details}")
                 send_step.name = f"{run_label}:send-capture"
                 send_step.mode = args.mode
                 steps.append(send_step)

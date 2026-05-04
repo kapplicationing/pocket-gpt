@@ -12,6 +12,7 @@ import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.PersistedToolCallStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.UiError
+import com.pocketagent.runtime.DEFAULT_CHAT_MAX_TOKENS
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -20,6 +21,17 @@ import org.junit.Test
 
 class AndroidChatConversationServiceTest {
     private val service = AndroidChatConversationService()
+
+    @Test
+    fun `create session seeds bounded default completion settings`() {
+        val update = service.createSession(
+            state = ChatUiState(),
+            sessionId = "session-1",
+            nowEpochMs = 1L,
+        )
+
+        assertEquals(DEFAULT_CHAT_MAX_TOKENS, update.state.activeSession()?.completionSettings?.maxTokens)
+    }
 
     @Test
     fun `add attached image keeps a single latest selection`() {

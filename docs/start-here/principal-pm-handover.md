@@ -61,16 +61,16 @@ The retained gate evidence shows that provisioning preflight was previously bloc
 
 The current launch story is more operational than architectural:
 
-1. `android-instrumented` has a preserved current-window pass on the S906N canary at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`,
+1. `android-instrumented` has a preserved current-window pass on the S906N canary at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`,
 2. hosted/default cloud evidence is now green on the required targeted surfaces: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`,
 3. older helper-fix reruns that remain `PENDING` without app launch are now only cloud-infra noise, not active blocker truth,
-4. the physical-device Samsung canary still lacks a publishable current-window `maestro` report and should remain harness-class only, but the S22 has a fresher non-Maestro physical canary at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, and strict `journey` already preserves current-window physical send authority at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/`,
+4. the physical-device Samsung canary still lacks a publishable current-window `maestro` report and should remain harness-class only, but the S22 has a fresher non-Maestro physical canary at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, and strict `journey` already preserves current-window physical send authority at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/`,
 5. and the disclosed `AI human-proxy` WP-13 packet now exists with measured values and a `promote` recommendation for the controlled MVP.
 
 Current evidence anchors the PM should use:
 
-1. Local authoritative proof already in hand: `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`
-2. Repo-side launch snapshot: `build/devctl/launch-readiness/launch-readiness-report.md`
+1. Local authoritative proof already in hand: `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`
+2. Repo-side launch snapshot: regenerate it locally with `bash scripts/dev/launch-readiness.sh`
 3. Current package-closeout gap list: support readiness, claim-safe asset capture, submission-package completion, a clean publication worktree, and the intentional push of local `main` to `origin/main`
 
 Story-level gate picture from the retained launch matrix:

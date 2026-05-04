@@ -8,8 +8,8 @@
     "summary", "recommendation"
   ],
   "properties": {
-    "tester_id":   { "type": "string", "pattern": "^(cloud-1|cloud-2|device-s22|device-a51)$" },
-    "tester_kind": { "type": "string", "enum": ["maestro-cloud", "physical-device"] },
+    "tester_id":   { "type": "string", "pattern": "^(cloud-1|cloud-2|device-s22|device-a51|proxy-[1-9][0-9]*)$" },
+    "tester_kind": { "type": "string", "enum": ["maestro-cloud", "physical-device", "ai-human-proxy-reviewer"] },
     "device": {
       "type": "object",
       "required": ["label", "android_api"],

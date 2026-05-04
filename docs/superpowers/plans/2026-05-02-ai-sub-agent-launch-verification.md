@@ -1563,14 +1563,13 @@ git commit -m "governance: re-anchor SEC-02/MKT-08/MKT-10/PROD-11/PROD-13 to AI-
 
 **Files:**
 
-- Read-only: produces `build/devctl/launch-readiness/launch-readiness-report.md`.
+- Read-only: produces the local launch-readiness summary via `bash scripts/dev/launch-readiness.sh`.
 - Modify: `docs/operations/play-store-launch-program.md` (final status banner).
 
 **- [ ] Step 1: Run launch-readiness**
 
 ```bash
 bash scripts/dev/launch-readiness.sh
-cat build/devctl/launch-readiness/launch-readiness-report.md
 ```
 
 **- [ ] Step 2: If green, audit `origin/main..main` and publish**
@@ -1603,11 +1602,11 @@ hold reason in one sentence.
 ```bash
 git add docs/operations/play-store-launch-program.md
 [[ -d build/devctl/launch-readiness ]] && \
-  git add build/devctl/launch-readiness/launch-readiness-report.md
+  git add build/devctl/launch-readiness/
 git commit -m "launch-decision: re-run launch-readiness from AI-moderated evidence
 
 Result: <promote|iterate|hold>
-Rationale: <one sentence pulled from launch-readiness-report.md>"
+Rationale: <one sentence pulled from the generated launch-readiness summary>"
 ```
 
 ---

@@ -211,22 +211,18 @@ internal class SendMessageUseCase(
         runtimeResidencyManager.onGenerationStarted()
         val tokenHandler: (String) -> Unit = { token ->
             if (!timeoutGuard.timedOut()) {
-                if (firstTokenLatencyMs < 0 && token.isNotEmpty()) {
-                    firstTokenLatencyMs = System.currentTimeMillis() - startedMs
-                    timeoutGuard.finish()
-                }
                 val filterResult = streamFilters.thinkingFilter?.filterToken(token)
                 val visibleText = filterResult?.visibleText ?: token
                 val currentThinkingState = filterResult?.isCurrentlyThinking ?: false
                 if (currentThinkingState != lastThinkingState) {
                     lastThinkingState = currentThinkingState
-                    if (currentThinkingState && firstTokenLatencyMs < 0) {
-                        firstTokenLatencyMs = System.currentTimeMillis() - startedMs
-                        timeoutGuard.finish()
-                    }
                     request.onThinkingStateChanged(currentThinkingState)
                 }
                 if (visibleText.isNotEmpty()) {
+                    if (firstTokenLatencyMs < 0) {
+                        firstTokenLatencyMs = System.currentTimeMillis() - startedMs
+                        timeoutGuard.finish()
+                    }
                     request.onToken(visibleText)
                 }
             }
@@ -271,8 +267,12 @@ internal class SendMessageUseCase(
                 text = cleanedText,
                 profile = interactionProfile,
             )
-            parsedToolCalls = toolCallResult.toolCalls
             responseText = toolCallResult.textWithoutToolCalls.trim()
+            parsedToolCalls = if (responseText.isBlank()) {
+                toolCallResult.toolCalls
+            } else {
+                emptyList()
+            }
             if (parsedToolCalls.isNotEmpty()) {
                 finishReason = "tool_calls"
             }

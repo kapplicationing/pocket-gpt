@@ -1,0 +1,77 @@
+appId: com.pocketagent.android
+---
+- launchApp:
+    clearState: false
+- runFlow:
+    when:
+      visible: "Preparing PocketAgent"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Preparing PocketAgent"
+          timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "provisioning_bootstrap_loading"
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- runFlow:
+    when:
+      visible: "Checking runtime and model availability..."
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Checking runtime and model availability..."
+          timeout: 60000
+- runFlow: dismiss-system-overlays.yaml
+- runFlow: bootstrap-clean-start.yaml
+- runFlow: dismiss-system-overlays.yaml
+- extendedWaitUntil:
+    notVisible:
+      id: "onboarding_next"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible:
+      id: "onboarding_get_started"
+    timeout: 15000
+- runFlow: ensure-runtime-loaded.yaml
+- runFlow: dismiss-system-overlays.yaml
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - runFlow:
+          when:
+            visible: "Close"
+          commands:
+            - tapOn: "Close"
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - back
+- runFlow:
+    when:
+      visible:
+        id: "permission_allow_button"
+    commands:
+      - tapOn:
+          id: "permission_allow_button"
+- runFlow:
+    when:
+      visible: "Allow PocketAgent to send you notifications?"
+    commands:
+      - tapOn: "Allow"
+- runFlow:
+    when:
+      visible: "Preparing PocketAgent"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Preparing PocketAgent"
+          timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 30000

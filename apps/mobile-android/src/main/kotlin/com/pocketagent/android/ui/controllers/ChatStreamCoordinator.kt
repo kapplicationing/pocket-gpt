@@ -5,11 +5,10 @@ import com.pocketagent.android.runtime.ChatRuntimeService
 import com.pocketagent.android.ui.state.StreamReducerState
 import com.pocketagent.android.ui.state.StreamStateReducer
 import com.pocketagent.android.ui.state.StreamTerminalState
+import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.runtime.ChatStreamEvent
 import com.pocketagent.runtime.PreparedChatStream
-import com.pocketagent.runtime.RuntimeGenerationTimeoutException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -34,13 +33,28 @@ class ChatStreamCoordinator(
     ) = coroutineScope {
         val request = preparedStream.runtimeRequest
         val requestTimeoutMs = preparedStream.plan.requestTimeoutMs
+        val terminalWatchdogPollMs = terminalWatchdogGraceMs
+            .coerceIn(TERMINAL_WATCHDOG_POLL_MIN_MS, TERMINAL_WATCHDOG_POLL_MAX_MS)
         val streamReducerLock = Any()
         var streamState = StreamReducerState.initial(requestId = request.requestId)
+        var lastEventElapsedMs = 0L
 
         fun reduce(block: (StreamReducerState) -> StreamReducerState): Pair<StreamTerminalState?, StreamReducerState> {
             synchronized(streamReducerLock) {
                 val previous = streamState.terminal
                 streamState = block(streamState)
+                return previous to streamState
+            }
+        }
+
+        fun reduceOnEvent(
+            elapsedMs: Long,
+            block: (StreamReducerState) -> StreamReducerState,
+        ): Pair<StreamTerminalState?, StreamReducerState> {
+            synchronized(streamReducerLock) {
+                val previous = streamState.terminal
+                streamState = block(streamState)
+                lastEventElapsedMs = elapsedMs
                 return previous to streamState
             }
         }
@@ -64,24 +78,95 @@ class ChatStreamCoordinator(
         }
 
         var streamCollector: Job? = null
-        var firstTokenLogged = false
-        val prefillTimeoutWatchdog = launch {
-            delay(requestTimeoutMs + terminalWatchdogGraceMs)
-            if (streamFirstTokenMs() != null || hasTerminal()) {
-                return@launch
+        suspend fun dispatchTerminal(
+            previousTerminal: StreamTerminalState?,
+            nextState: StreamReducerState,
+            cancelRequest: Boolean = false,
+            cancelCollector: Boolean = false,
+        ) {
+            if (previousTerminal != null) {
+                return
             }
-            val (previousTerminal, nextState) = reduce { state ->
-                streamReducer.onWatchdogTimeout(state)
-            }
-            if (previousTerminal != null || nextState.terminal == null || nextState.firstTokenMs != null) {
-                return@launch
-            }
+            val terminal = nextState.terminal ?: return
             elapsedTicker.cancel()
-            runtimeService.cancelGenerationByRequest(request.requestId)
-            val terminal = nextState.terminal ?: return@launch
+            if (cancelRequest) {
+                runtimeService.cancelGenerationByRequest(request.requestId)
+            }
             onBeforeTerminal()
             onTerminal(terminal)
-            streamCollector?.cancel()
+            if (cancelCollector) {
+                streamCollector?.cancel()
+            }
+        }
+        var firstTokenLogged = false
+        val terminalTimeoutWatchdog = launch {
+            var postTokenIdleObservationCount = 0
+            delay(requestTimeoutMs + terminalWatchdogGraceMs)
+            while (!hasTerminal()) {
+                val (previousTerminal, nextState) = reduce { state ->
+                    if (state.terminal != null) {
+                        state
+                    } else {
+                        val watchdogElapsedMs = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
+                        val activeGenerationCount = runCatching { runtimeService.activeGenerationCount() }.getOrDefault(0)
+                        val postTokenSilenceMs = (watchdogElapsedMs - lastEventElapsedMs).coerceAtLeast(0L)
+                        when {
+                            state.firstTokenMs == null -> {
+                                postTokenIdleObservationCount = 0
+                                streamReducer.onWatchdogTimeout(state)
+                            }
+
+                            state.accumulatedText.isNotBlank() &&
+                                (activeGenerationCount <= 0 || postTokenSilenceMs >= terminalWatchdogGraceMs) -> {
+                                postTokenIdleObservationCount += 1
+                                if (postTokenIdleObservationCount < POST_TOKEN_IDLE_OBSERVATIONS_REQUIRED) {
+                                    state
+                                } else {
+                                    runCatching {
+                                        Log.w(
+                                            "PocketGPTStream",
+                                            "Stream exceeded timeout without terminal; finalizing from accumulated text. " +
+                                                "request_id=${request.requestId}|active_generations=$activeGenerationCount|" +
+                                                "post_token_silence_ms=$postTokenSilenceMs",
+                                        )
+                                    }
+                                    state.copy(
+                                        isThinking = false,
+                                        terminal = StreamTerminalState(
+                                            requestId = request.requestId,
+                                            finishReason = "completed",
+                                            terminalEventSeen = false,
+                                            responseText = state.accumulatedText,
+                                            completionMs = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L),
+                                            firstTokenMs = state.firstTokenMs,
+                                        ),
+                                    )
+                                }
+                            }
+
+                            activeGenerationCount <= 0 -> {
+                                postTokenIdleObservationCount = 0
+                                streamReducer.onWatchdogTimeout(state)
+                            }
+
+                            else -> {
+                                postTokenIdleObservationCount = 0
+                                state
+                            }
+                        }
+                    }
+                }
+                if (previousTerminal == null && nextState.terminal != null) {
+                    dispatchTerminal(
+                        previousTerminal = previousTerminal,
+                        nextState = nextState,
+                        cancelRequest = true,
+                        cancelCollector = true,
+                    )
+                    return@launch
+                }
+                delay(terminalWatchdogPollMs)
+            }
         }
 
         streamCollector = launch {
@@ -92,7 +177,7 @@ class ChatStreamCoordinator(
                         return@collect
                     }
                     val elapsed = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
-                    val (previousTerminal, nextState) = reduce { state ->
+                    val (previousTerminal, nextState) = reduceOnEvent(elapsedMs = elapsed) { state ->
                         streamReducer.onEvent(state = state, event = event, elapsedMs = elapsed)
                     }
                     if (previousTerminal != null) return@collect
@@ -107,32 +192,88 @@ class ChatStreamCoordinator(
                                 )
                             }
                         }
-                        prefillTimeoutWatchdog.cancel()
                     }
                     onEvent(event, nextState)
-                    nextState.terminal?.let { terminal ->
-                        prefillTimeoutWatchdog.cancel()
-                        elapsedTicker.cancel()
-                        onBeforeTerminal()
-                        onTerminal(terminal)
+                    nextState.terminal?.let {
+                        terminalTimeoutWatchdog.cancel()
+                        dispatchTerminal(
+                            previousTerminal = previousTerminal,
+                            nextState = nextState,
+                        )
                         this.cancel()
                     }
                 }
+            }.onSuccess {
+                if (hasTerminal()) {
+                    return@onSuccess
+                }
+                val completionMs = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
+                val (previousTerminal, nextState) = reduce { state ->
+                    if (state.terminal != null) {
+                        state
+                    } else {
+                        val accumulatedText = state.accumulatedText
+                        val synthesizedTerminal = if (accumulatedText.isNotBlank()) {
+                            runCatching {
+                                Log.w(
+                                    "PocketGPTStream",
+                                    "Stream closed without terminal event; finalizing from accumulated text. request_id=${request.requestId}",
+                                )
+                            }
+                            StreamTerminalState(
+                                requestId = request.requestId,
+                                finishReason = "completed",
+                                terminalEventSeen = false,
+                                responseText = accumulatedText,
+                                completionMs = completionMs,
+                                firstTokenMs = state.firstTokenMs,
+                            )
+                        } else {
+                            runCatching {
+                                Log.w(
+                                    "PocketGPTStream",
+                                    "Stream closed without terminal event or visible text. request_id=${request.requestId}",
+                                )
+                            }
+                            StreamTerminalState(
+                                requestId = request.requestId,
+                                finishReason = "runtime_error",
+                                terminalEventSeen = false,
+                                uiError = UiErrorMapper.runtimeFailure("Stream closed before a terminal event."),
+                                completionMs = completionMs,
+                                firstTokenMs = state.firstTokenMs,
+                            )
+                        }
+                        state.copy(
+                            isThinking = false,
+                            terminal = synthesizedTerminal,
+                        )
+                    }
+                }
+                terminalTimeoutWatchdog.cancel()
+                dispatchTerminal(
+                    previousTerminal = previousTerminal,
+                    nextState = nextState,
+                )
             }.onFailure { error ->
                 val (previousTerminal, nextState) = reduce { state ->
                     streamReducer.onFailure(state = state, error = error)
                 }
                 if (previousTerminal != null || nextState.terminal == null) return@onFailure
-                prefillTimeoutWatchdog.cancel()
-                elapsedTicker.cancel()
-                runtimeService.cancelGenerationByRequest(request.requestId)
-                val terminal = nextState.terminal ?: return@onFailure
-                onBeforeTerminal()
-                onTerminal(terminal)
+                terminalTimeoutWatchdog.cancel()
+                dispatchTerminal(
+                    previousTerminal = previousTerminal,
+                    nextState = nextState,
+                    cancelRequest = true,
+                )
             }
         }
         streamCollector.join()
-        prefillTimeoutWatchdog.cancel()
+        terminalTimeoutWatchdog.cancel()
     }
 
 }
+
+private const val TERMINAL_WATCHDOG_POLL_MIN_MS = 100L
+private const val TERMINAL_WATCHDOG_POLL_MAX_MS = 1_000L
+private const val POST_TOKEN_IDLE_OBSERVATIONS_REQUIRED = 2

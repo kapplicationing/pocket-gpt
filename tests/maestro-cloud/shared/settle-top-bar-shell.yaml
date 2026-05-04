@@ -1,0 +1,14 @@
+appId: com.pocketagent.android
+---
+- runFlow: settle-ready-shell.yaml
+- tapOn:
+    id: "composer_input"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "session_drawer_button"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "open_model_library"
+    timeout: 30000

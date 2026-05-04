@@ -10,7 +10,7 @@ Source of truth for execution commands and cloud guidance:
 
 ## Flow Set
 
-1. `scenario-onboarding.yaml`: onboarding completion + runtime-ready baseline bootstrap
+1. `scenario-onboarding.yaml`: onboarding completion + post-onboarding chat-surface baseline bootstrap
 2. `scenario-a.yaml`: post-onboarding send-message chat loop smoke
 3. `scenario-b.yaml`: post-onboarding advanced controls/tools/diagnostics journey
 4. `scenario-c.yaml`: post-onboarding continuity + image-aware journey

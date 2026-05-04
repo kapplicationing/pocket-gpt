@@ -27,20 +27,6 @@ tags:
     timeout: 180000
 - tapOn:
     id: "send_button"
-- runFlow:
-    when:
-      visible: "Loading…"
-    commands:
-      - extendedWaitUntil:
-          notVisible: "Loading…"
-          timeout: 180000
-      - extendedWaitUntil:
-          visible:
-            id: "send_button"
-            enabled: true
-          timeout: 180000
-      - tapOn:
-          id: "send_button"
 - extendedWaitUntil:
     visible:
       id: "message_bubble_assistant_complete"

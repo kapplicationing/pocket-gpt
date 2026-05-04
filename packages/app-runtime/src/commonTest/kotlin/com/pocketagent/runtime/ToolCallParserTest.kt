@@ -100,13 +100,24 @@ not valid json
     }
 
     @Test
-    fun `parse handles unclosed tool call tag`() {
+    fun `parse treats trailing tool call payload without close tag as stop trimmed tool call`() {
         val text = "Before<tool_call>{\"name\":\"calc\",\"arguments\":{}}"
 
         val result = ToolCallParser.parse(text)
 
+        assertEquals(1, result.toolCalls.size)
+        assertEquals("calc", result.toolCalls[0].name)
+        assertEquals("Before", result.textWithoutToolCalls)
+    }
+
+    @Test
+    fun `parse keeps malformed trailing unclosed tool call text visible`() {
+        val text = "Before<tool_call>{\"name\":"
+
+        val result = ToolCallParser.parse(text)
+
         assertTrue(result.toolCalls.isEmpty())
-        assertTrue(result.textWithoutToolCalls.contains("Before"))
+        assertEquals(text, result.textWithoutToolCalls)
     }
 
     @Test

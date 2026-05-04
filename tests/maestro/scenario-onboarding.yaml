@@ -16,16 +16,10 @@ tags:
           notVisible:
             id: "provisioning_bootstrap_loading"
           timeout: 30000
-- extendedWaitUntil:
-    visible:
-      id: "onboarding_next"
-    timeout: 120000
-- runFlow: shared/bootstrap-to-ready.yaml
+- runFlow: shared/bootstrap-clean-start.yaml
+- runFlow: shared/assert-post-onboarding-chat-surface.yaml
 - assertNotVisible:
     text: "Next"
-- assertNotVisible: "UI-STARTUP-001"
 - assertNotVisible:
     id: "provisioning_bootstrap_loading"
-- assertVisible:
-    id: "session_drawer_button"
-- takeScreenshot: "scenario-onboarding-ready"
+- takeScreenshot: "scenario-onboarding-chat-surface"

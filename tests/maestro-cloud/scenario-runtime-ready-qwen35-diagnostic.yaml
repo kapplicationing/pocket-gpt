@@ -1,0 +1,92 @@
+appId: com.pocketagent.android
+tags:
+  - cloud-diagnostic
+  - runtime-ready
+---
+- runFlow: shared/bootstrap-cloud-startup.yaml
+- runFlow: shared/open-model-library.yaml
+- tapOn: "Search models"
+- eraseText
+- inputText: "qwen3.5-0.8b-q4"
+- hideKeyboard
+- runFlow:
+    when:
+      visible:
+        id: 'model_library_download_qwen3\.5-0\.8b-q4_q4_0'
+        enabled: true
+    commands:
+      - tapOn:
+          id: 'model_library_download_qwen3\.5-0\.8b-q4_q4_0'
+      - runFlow:
+          when:
+            visible: "Large download on metered network"
+          commands:
+            - tapOn: "Continue download"
+      - extendedWaitUntil:
+          notVisible:
+            id: 'model_library_download_qwen3\.5-0\.8b-q4_q4_0'
+            enabled: true
+          timeout: 300000
+- runFlow:
+    when:
+      visible: "Queuing…"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Queuing…"
+          timeout: 300000
+- runFlow:
+    when:
+      visible: "Pause"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Pause"
+          timeout: 300000
+- runFlow:
+    when:
+      visible: "Large download on metered network"
+    commands:
+      - tapOn: "Continue download"
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - scrollUntilVisible:
+          element:
+            text: "Downloaded models"
+          direction: UP
+          timeout: 20000
+- runFlow:
+    when:
+      visible: "Refresh"
+    commands:
+      - tapOn: "Refresh"
+- runFlow:
+    when:
+      visible:
+        id: 'model_library_set_active_qwen3\.5-0\.8b-q4_q4_0'
+        enabled: true
+    commands:
+      - tapOn:
+          id: 'model_library_set_active_qwen3\.5-0\.8b-q4_q4_0'
+- runFlow:
+    when:
+      visible:
+        id: 'model_library_load_qwen3\.5-0\.8b-q4_q4_0'
+        enabled: true
+    commands:
+      - tapOn:
+          id: 'model_library_load_qwen3\.5-0\.8b-q4_q4_0'
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - back
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible:
+      id: "chat_gate_inline_card"
+    timeout: 180000
+- takeScreenshot: "cloud-runtime-ready-qwen35-diagnostic"

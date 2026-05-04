@@ -1098,7 +1098,14 @@ class AndroidRuntimeTuningStore(
         kvMethodPresetHint: String? = null,
         backendIdentityHint: String? = null,
     ): RuntimeTuningEnvelopeIdentity {
-        val provisionedState = provisioningStore.snapshot().models.firstOrNull { state -> state.modelId == modelId }
+        // Send preparation can run directly from a UI click path. Preserve the
+        // performance contract by degrading to an unknown-artifact envelope
+        // instead of synchronously reading provisioning state on the main thread.
+        val provisionedState = if (MainThreadGuard.isMainThread()) {
+            null
+        } else {
+            provisioningStore.snapshot().models.firstOrNull { state -> state.modelId == modelId }
+        }
         val activeVersion = provisionedState?.activeVersion
         val activeDescriptor = provisionedState
             ?.installedVersions
@@ -1197,5 +1204,4 @@ private fun JSONObject.optDoubleOrMinusOne(key: String): String {
 private fun JSONObject.optStringOr(key: String, fallback: String): String {
     return if (has(key)) sanitizeDiagnosticValue(optString(key, fallback)) else fallback
 }
-
 

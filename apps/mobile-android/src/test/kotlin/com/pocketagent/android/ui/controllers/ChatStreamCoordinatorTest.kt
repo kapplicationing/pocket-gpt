@@ -23,7 +23,9 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -178,13 +180,102 @@ class ChatStreamCoordinatorTest {
     }
 
     @Test
-    fun `collect stream does not timeout while model is in thinking state`() = runTest {
+    fun `collect stream does not preempt completed terminal on first idle observation after deltas`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                    emit(
+                        ChatStreamEvent.Delta(
+                            requestId = request.requestId,
+                            delta = ChatStreamDelta.TextDelta("hello "),
+                            accumulatedText = "hello",
+                        ),
+                    )
+                    delay(80L)
+                    emit(
+                        ChatStreamEvent.Completed(
+                            requestId = request.requestId,
+                            response = ChatResponse(
+                                sessionId = request.sessionId,
+                                modelId = "auto",
+                                text = "hello world",
+                                firstTokenLatencyMs = 1L,
+                                totalLatencyMs = 90L,
+                            ),
+                            finishReason = "completed",
+                        ),
+                    )
+                }
+            },
+            activeGenerationCountProvider = { 0 },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        val reducer = StreamStateReducer(requestTimeoutMs = 30L)
+        var terminalState: StreamTerminalState? = null
+
+        coordinator.collectStream(
+            runtimeService = runtime,
+            preparedStream = preparedRequest("req-post-token-idle-race", 30L),
+            streamReducer = reducer,
+            sendStartedAtMs = System.currentTimeMillis(),
+            onEvent = { _, _ -> },
+            onElapsed = { _, _ -> },
+            onBeforeTerminal = { },
+            onTerminal = { terminal -> terminalState = terminal },
+        )
+
+        assertEquals(0, runtime.cancelByRequestCalls)
+        assertNotNull(terminalState)
+        assertEquals("completed", terminalState?.finishReason)
+        assertEquals(true, terminalState?.terminalEventSeen)
+    }
+
+    @Test
+    fun `collect stream times out when only thinking is emitted past visible token deadline`() = runTest {
         val runtime = FlowRuntimeGateway(
             flowFactory = { request ->
                 flow {
                     emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
                     emit(ChatStreamEvent.Thinking(requestId = request.requestId, active = true))
-                    delay(80L)
+                    awaitCancellation()
+                }
+            },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        val reducer = StreamStateReducer(requestTimeoutMs = 30L)
+        var terminalState: StreamTerminalState? = null
+
+        coordinator.collectStream(
+            runtimeService = runtime,
+            preparedStream = preparedRequest("req-thinking", 30L),
+            streamReducer = reducer,
+            sendStartedAtMs = System.currentTimeMillis(),
+            onEvent = { _, _ -> },
+            onElapsed = { _, _ -> },
+            onBeforeTerminal = { },
+            onTerminal = { terminal -> terminalState = terminal },
+        )
+
+        assertTrue(runtime.cancelByRequestCalls > 0)
+        assertNotNull(terminalState)
+        assertEquals("timeout", terminalState?.finishReason)
+    }
+
+    @Test
+    fun `collect stream accepts short thinking phase before completed response`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                    emit(ChatStreamEvent.Thinking(requestId = request.requestId, active = true))
+                    delay(20L)
                     emit(
                         ChatStreamEvent.Completed(
                             requestId = request.requestId,
@@ -193,7 +284,7 @@ class ChatStreamCoordinatorTest {
                                 modelId = "auto",
                                 text = "final answer",
                                 firstTokenLatencyMs = 1L,
-                                totalLatencyMs = 90L,
+                                totalLatencyMs = 25L,
                             ),
                             finishReason = "completed",
                         ),
@@ -210,7 +301,7 @@ class ChatStreamCoordinatorTest {
 
         coordinator.collectStream(
             runtimeService = runtime,
-            preparedStream = preparedRequest("req-thinking", 30L),
+            preparedStream = preparedRequest("req-thinking-short", 30L),
             streamReducer = reducer,
             sendStartedAtMs = System.currentTimeMillis(),
             onEvent = { _, _ -> },
@@ -277,6 +368,179 @@ class ChatStreamCoordinatorTest {
     }
 
     @Test
+    fun `collect stream synthesizes completed terminal when stream closes after deltas`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                    emit(
+                        ChatStreamEvent.Delta(
+                            requestId = request.requestId,
+                            delta = ChatStreamDelta.TextDelta("hello "),
+                            accumulatedText = "hello ",
+                        ),
+                    )
+                    emit(
+                        ChatStreamEvent.Delta(
+                            requestId = request.requestId,
+                            delta = ChatStreamDelta.TextDelta("world"),
+                            accumulatedText = "hello world",
+                        ),
+                    )
+                }
+            },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        val reducer = StreamStateReducer(requestTimeoutMs = 200L)
+        var terminalState: StreamTerminalState? = null
+
+        coordinator.collectStream(
+            runtimeService = runtime,
+            preparedStream = preparedRequest("req-synth-complete", 200L),
+            streamReducer = reducer,
+            sendStartedAtMs = System.currentTimeMillis(),
+            onEvent = { _, _ -> },
+            onElapsed = { _, _ -> },
+            onBeforeTerminal = { },
+            onTerminal = { terminal -> terminalState = terminal },
+        )
+
+        assertNotNull(terminalState)
+        assertEquals("completed", terminalState?.finishReason)
+        assertEquals(false, terminalState?.terminalEventSeen)
+        assertEquals("hello world", terminalState?.responseText)
+    }
+
+    @Test
+    fun `collect stream synthesizes completed terminal when runtime idles after deltas but stream never closes`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                    emit(
+                        ChatStreamEvent.Delta(
+                            requestId = request.requestId,
+                            delta = ChatStreamDelta.TextDelta("hello "),
+                            accumulatedText = "hello ",
+                        ),
+                    )
+                    emit(
+                        ChatStreamEvent.Delta(
+                            requestId = request.requestId,
+                            delta = ChatStreamDelta.TextDelta("world"),
+                            accumulatedText = "hello world",
+                        ),
+                    )
+                    awaitCancellation()
+                }
+            },
+            activeGenerationCountProvider = { 0 },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        val reducer = StreamStateReducer(requestTimeoutMs = 30L)
+        var terminalState: StreamTerminalState? = null
+
+        coordinator.collectStream(
+            runtimeService = runtime,
+            preparedStream = preparedRequest("req-hung-complete", 30L),
+            streamReducer = reducer,
+            sendStartedAtMs = System.currentTimeMillis(),
+            onEvent = { _, _ -> },
+            onElapsed = { _, _ -> },
+            onBeforeTerminal = { },
+            onTerminal = { terminal -> terminalState = terminal },
+        )
+
+        assertEquals(1, runtime.cancelByRequestCalls)
+        assertNotNull(terminalState)
+        assertEquals("completed", terminalState?.finishReason)
+        assertEquals(false, terminalState?.terminalEventSeen)
+        assertEquals("hello world", terminalState?.responseText)
+    }
+
+    @Test
+    fun `collect stream synthesizes completed terminal when runtime stays active after visible text but stream stalls`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                    emit(
+                        ChatStreamEvent.Delta(
+                            requestId = request.requestId,
+                            delta = ChatStreamDelta.TextDelta("hello world"),
+                            accumulatedText = "hello world",
+                        ),
+                    )
+                    awaitCancellation()
+                }
+            },
+            activeGenerationCountProvider = { 1 },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        val reducer = StreamStateReducer(requestTimeoutMs = 30L)
+        var terminalState: StreamTerminalState? = null
+
+        coordinator.collectStream(
+            runtimeService = runtime,
+            preparedStream = preparedRequest("req-stuck-active-after-token", 30L),
+            streamReducer = reducer,
+            sendStartedAtMs = System.currentTimeMillis(),
+            onEvent = { _, _ -> },
+            onElapsed = { _, _ -> },
+            onBeforeTerminal = { },
+            onTerminal = { terminal -> terminalState = terminal },
+        )
+
+        assertEquals(1, runtime.cancelByRequestCalls)
+        assertNotNull(terminalState)
+        assertEquals("completed", terminalState?.finishReason)
+        assertEquals(false, terminalState?.terminalEventSeen)
+        assertEquals("hello world", terminalState?.responseText)
+    }
+
+    @Test
+    fun `collect stream synthesizes runtime error when stream closes before any terminal or text`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                }
+            },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        val reducer = StreamStateReducer(requestTimeoutMs = 200L)
+        var terminalState: StreamTerminalState? = null
+
+        coordinator.collectStream(
+            runtimeService = runtime,
+            preparedStream = preparedRequest("req-synth-error", 200L),
+            streamReducer = reducer,
+            sendStartedAtMs = System.currentTimeMillis(),
+            onEvent = { _, _ -> },
+            onElapsed = { _, _ -> },
+            onBeforeTerminal = { },
+            onTerminal = { terminal -> terminalState = terminal },
+        )
+
+        assertNotNull(terminalState)
+        assertEquals("runtime_error", terminalState?.finishReason)
+        assertEquals(false, terminalState?.terminalEventSeen)
+        assertEquals("UI-RUNTIME-001", terminalState?.uiError?.code)
+    }
+
+    @Test
     fun `collect stream thrown failure cancels request by request id`() = runTest {
         val runtime = FlowRuntimeGateway(
             flowFactory = { request ->
@@ -340,13 +604,17 @@ private fun preparedRequest(requestId: String, timeoutMs: Long): PreparedChatStr
 
 private class FlowRuntimeGateway(
     private val flowFactory: (StreamChatRequestV2) -> Flow<ChatStreamEvent>,
+    private val activeGenerationCountProvider: (() -> Int)? = null,
 ) : ChatRuntimeService {
     var cancelByRequestCalls: Int = 0
+    private val activeFlowCount = AtomicInteger(0)
 
     override fun createSession(): SessionId = SessionId("session-1")
 
     override fun streamPreparedChat(prepared: PreparedChatStream): Flow<ChatStreamEvent> {
+        activeFlowCount.incrementAndGet()
         return flowFactory(prepared.runtimeRequest)
+            .onCompletion { activeFlowCount.decrementAndGet() }
     }
 
     override fun cancelGeneration(sessionId: SessionId): Boolean = true
@@ -379,4 +647,6 @@ private class FlowRuntimeGateway(
     override fun runtimeBackend(): String? = null
 
     override fun supportsGpuOffload(): Boolean = false
+
+    override fun activeGenerationCount(): Int = activeGenerationCountProvider?.invoke() ?: activeFlowCount.get()
 }

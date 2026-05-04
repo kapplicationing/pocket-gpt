@@ -3,4 +3,8 @@ appId: com.pocketagent.android
 - launchApp:
     clearState: false
 - runFlow: bootstrap-to-ready.yaml
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 30000
 - assertNotVisible: "UI-STARTUP-001"

@@ -1,4 +1,12 @@
 appId: com.pocketagent.android
 ---
-- runFlow: bootstrap-cloud-startup.yaml
+- runFlow: settle-ready-shell.yaml
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 30000
 - assertNotVisible: "UI-STARTUP-001"
+- extendedWaitUntil:
+    notVisible:
+      id: "chat_gate_inline_card"
+    timeout: 180000

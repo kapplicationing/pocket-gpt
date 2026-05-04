@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 
@@ -31,7 +32,8 @@ THRESHOLDS = {
 def load_reports() -> list[dict]:
     if not IN.is_dir():
         raise SystemExit(f"no _inputs dir: {IN}")
-    paths = sorted(IN.glob("*.json"))
+    proxy_paths = sorted(IN.glob("proxy-*.json"))
+    paths = proxy_paths if proxy_paths else sorted(IN.glob("*.json"))
     if not paths:
         raise SystemExit(f"no json reports in {IN}")
     return [json.loads(p.read_text(encoding="utf-8")) for p in paths]
@@ -59,11 +61,12 @@ def verdict(actual: float, threshold: float, op: str) -> str:
 
 
 def _header(packet_kind: str) -> list[str]:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if packet_kind == "ai-human-proxy":
         return [
             "# WP-13 Packet (AI Human-Proxy)",
             "",
-            "Last updated: 2026-05-03",
+            f"Last updated: {today}",
             "Owner: QA + Product",
             "Tester kind: AI human-proxy (subagent reviewers over deterministic run artifacts)",
             "",
@@ -79,7 +82,7 @@ def _header(packet_kind: str) -> list[str]:
     return [
         "# WP-13 Packet (Run-02, AI-Moderated)",
         "",
-        "Last updated: 2026-05-02",
+        f"Last updated: {today}",
         "Owner: QA + Product",
         "Tester kind: AI-agent (4 sub-agents)",
         "",

@@ -76,6 +76,7 @@ internal fun OfflineAndStatusHeader(
     var showTechnicalDetails by remember(runtime.lastErrorTechnicalDetail) {
         mutableStateOf(false)
     }
+    val sendInProgress = runtime.sendElapsedMs != null
     val loadedLifecycleNotice = (modelLoadingState as? ModelLoadingState.Loaded)
         ?.detail
         ?.takeIf { detail -> detail.isNotBlank() }
@@ -84,8 +85,6 @@ internal fun OfflineAndStatusHeader(
         && runtime.modelRuntimeStatus == ModelRuntimeStatus.READY
         && runtime.lastErrorUserMessage == null
         && loadedLifecycleNotice == null
-    val lifecycleAnimationKey = modelLoadingState.visualStateKey()
-
     AnimatedContent(
         targetState = isReadyAndClean,
         transitionSpec = {
@@ -127,14 +126,13 @@ internal fun OfflineAndStatusHeader(
                             OfflineStatusChip()
                         }
                         AnimatedContent(
-                            targetState = lifecycleAnimationKey,
+                            targetState = modelLoadingState,
                             transitionSpec = {
                                 (scaleIn(initialScale = 0.9f) + fadeIn())
                                     .togetherWith(scaleOut(targetScale = 0.9f) + fadeOut())
                             },
                             label = "LifecycleChipAnimation",
-                        ) {
-                            val targetLoadingState = modelLoadingState
+                        ) { targetLoadingState ->
                             val targetColors = targetLoadingState.assistChipColors()
                             val targetIcon = targetLoadingState.leadingIcon()
                             val targetLabel = targetLoadingState.readableRuntimeStateLabel()
@@ -250,7 +248,11 @@ internal fun OfflineAndStatusHeader(
                         }
                     }
 
-                    if (modelLoadingState !is ModelLoadingState.Loading && modelLoadingState !is ModelLoadingState.Offloading) {
+                    if (
+                        modelLoadingState !is ModelLoadingState.Loading &&
+                        modelLoadingState !is ModelLoadingState.Offloading &&
+                        !sendInProgress
+                    ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing)) {
                             TextButton(
                                 onClick = onRefresh,
@@ -396,16 +398,6 @@ private fun OfflineStatusChip() {
             )
             StatusChipLabel(stringResource(id = R.string.ui_offline_indicator))
         }
-    }
-}
-
-private fun ModelLoadingState.visualStateKey(): String {
-    return when (this) {
-        is ModelLoadingState.Idle -> "idle"
-        is ModelLoadingState.Loading -> "loading"
-        is ModelLoadingState.Loaded -> "loaded:${model.modelId}:${model.modelVersion.orEmpty()}"
-        is ModelLoadingState.Offloading -> "offloading"
-        is ModelLoadingState.Error -> "error"
     }
 }
 

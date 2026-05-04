@@ -4,10 +4,8 @@ tags:
   - sessions
 ---
 - runFlow: shared/bootstrap-cloud-startup.yaml
-- extendedWaitUntil:
-    visible:
-      id: "session_drawer_button"
-    timeout: 30000
+- assertVisible:
+    id: "session_drawer_button"
 - tapOn:
     id: "session_drawer_button"
 - assertVisible:

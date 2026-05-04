@@ -14,16 +14,17 @@ Canonical ownership by concern:
 10. Runtime tuning debug workflow and diagnostics interpretation: `docs/testing/runtime-tuning-debugging.md`
 11. Pocket-GPT vs PocketPal parity benchmark runbook: `docs/testing/pocketpal-parity-benchmark.md`
 12. Maestro report helpers: `python3 tools/devctl/main.py report journey` / `python3 tools/devctl/main.py report screenshot-pack`
-13. Maestro Android companion CLI: `maestro-android init|doctor|lane|scoped|lint|audit-selectors|clean|report|trace|cloud ...`
-14. Companion CLI setup and Pocket-GPT integration: `docs/testing/maestro-android-companion-cli.md`
-15. Repo-local skill for agent/test context: `.claude/skills/maestro-android-cli/SKILL.md`
-16. Repo-local testing ladder: `.claude/skills/maestro-android-cli/references/testing-map.md`
-17. Runtime performance E2E playbook and time-saver commands: `docs/testing/runtime-performance-e2e-playbook.md`
-18. Cloud-first QA operating model and human-vs-machine gate split: `docs/testing/cloud-first-qa-operating-model.md`
-19. QA operating doctrine for the team: `docs/testing/qa-operating-principles.md`
-20. Launch readiness snapshot runbook: `bash scripts/dev/launch-readiness.sh` and `docs/testing/runbooks.md`
-21. Generated contract index: `docs/testing/generated/README.md`
-22. Generated QA selector/copy truth: `docs/testing/generated/launch-flow-truth.md`
+13. Standalone Maestro Android CLI (installed from the separate `maestro-android` repo): `maestro-android init|doctor|devices|start-device|lane|scoped|lint|audit-selectors|device|report|trace|cloud ...`
+14. Standalone-vs-wrapper distinction and PocketGPT integration: `docs/testing/maestro-android-companion-cli.md`
+15. Repo-local compatibility wrapper reference: `tools/maestro_android/README.md`
+16. Repo-local skill for agent/test context: `.claude/skills/maestro-android-cli/SKILL.md`
+17. Repo-local testing ladder: `.claude/skills/maestro-android-cli/references/testing-map.md`
+18. Runtime performance E2E playbook and time-saver commands: `docs/testing/runtime-performance-e2e-playbook.md`
+19. Cloud-first QA operating model and human-vs-machine gate split: `docs/testing/cloud-first-qa-operating-model.md`
+20. QA operating doctrine for the team: `docs/testing/qa-operating-principles.md`
+21. Launch readiness snapshot runbook: `bash scripts/dev/launch-readiness.sh` and `docs/testing/runbooks.md`
+22. Generated contract index: `docs/testing/generated/README.md`
+23. Generated QA selector/copy truth: `docs/testing/generated/launch-flow-truth.md`
 
 Consolidation rule:
 

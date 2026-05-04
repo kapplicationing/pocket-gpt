@@ -1,0 +1,72 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible: "Try out your stylus"
+    commands:
+      - tapOn: "Cancel"
+- runFlow:
+    when:
+      visible: "Try out your stylus"
+      notVisible: "Cancel"
+    commands:
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - runFlow:
+          when:
+            visible: "No thanks"
+          commands:
+            - tapOn: "No thanks"
+      - runFlow:
+          when:
+            visible: "Skip"
+          commands:
+            - tapOn: "Skip"
+      - runFlow:
+          when:
+            visible: "Close"
+          commands:
+            - tapOn: "Close"
+      - runFlow:
+          when:
+            visible: "Try out your stylus"
+          commands:
+            - back
+- runFlow:
+    when:
+      visible: "Write here"
+    commands:
+      - tapOn: "Cancel"
+- runFlow:
+    when:
+      visible: "Write here"
+      notVisible: "Cancel"
+    commands:
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - runFlow:
+          when:
+            visible: "No thanks"
+          commands:
+            - tapOn: "No thanks"
+      - runFlow:
+          when:
+            visible: "Skip"
+          commands:
+            - tapOn: "Skip"
+      - runFlow:
+          when:
+            visible: "Close"
+          commands:
+            - tapOn: "Close"
+      - runFlow:
+          when:
+            visible: "Write here"
+          commands:
+            - back

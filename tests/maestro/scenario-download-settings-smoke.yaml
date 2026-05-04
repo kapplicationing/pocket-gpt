@@ -8,25 +8,16 @@ tags:
     clearState: true
 - runFlow:
     when:
-      visible: "Welcome"
+      visible:
+        id: "provisioning_bootstrap_loading"
     commands:
-      - hideKeyboard
-      - tapOn: "Skip"
-- runFlow:
-    when:
-      visible: "Privacy first"
-    commands:
-      - tapOn: "Skip"
-- runFlow:
-    when:
-      visible: "Get started"
-    commands:
-      - hideKeyboard
-      - tapOn: "Get started"
-- extendedWaitUntil:
-    visible:
-      id: "composer_input"
-    timeout: 120000
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- runFlow: shared/bootstrap-to-ready.yaml
+- assertVisible:
+    id: "composer_input"
 - runFlow: shared/open-model-library.yaml
 - assertVisible: "Model library"
 - assertVisible: "Search models"

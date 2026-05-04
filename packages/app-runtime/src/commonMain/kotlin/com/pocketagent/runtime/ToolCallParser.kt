@@ -60,7 +60,13 @@ internal object ToolCallParser {
             val contentStart = openIdx + openTag.length
             val closeIdx = text.indexOf(closeTag, contentStart)
             if (closeIdx < 0) {
-                // Unclosed tag — treat remaining as text
+                val trailingJsonBlock = text.substring(contentStart).trim()
+                val parsedTrailing = parseToolCallJson(trailingJsonBlock)
+                if (parsedTrailing != null) {
+                    toolCalls += parsedTrailing
+                    break
+                }
+                // Unclosed tag with non-parseable payload — treat remaining as text.
                 remaining.append(text, openIdx, text.length)
                 break
             }

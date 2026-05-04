@@ -98,10 +98,20 @@ class RealRuntimeProvisioningInstrumentationTest {
             failurePrefix = "Startup checks failed after provisioning",
         )
         assertEquals("NATIVE_JNI", facade.runtimeBackend())
+
+        val warmLoadResult = AppRuntimeDependencies.loadInstalledModel(
+            context = appContext,
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            version = seeded0.version,
+        )
+        assertTrue(
+            "Failed to warm-load seeded 0.8B version ${seeded0.version}.",
+            warmLoadResult.success,
+        )
     }
 
     private fun requireFile(value: String): String {
-        val resolved = resolveModelPath(value)
+        val resolved = resolveStage2ModelPath(value) ?: resolveModelPath(value)
         require(resolved != null) { "Model path does not exist: $value" }
         return resolved
     }
@@ -111,11 +121,23 @@ class RealRuntimeProvisioningInstrumentationTest {
         if (normalized.isEmpty()) {
             return null
         }
-        val candidates = listOf(
-            normalized,
-            normalized.replace("/sdcard/", "/storage/emulated/0/"),
-            normalized.replace("/storage/emulated/0/", "/sdcard/"),
-        )
+        val fileName = File(normalized).name
+        val candidates = buildList {
+            add(normalized)
+            add(normalized.replace("/sdcard/", "/storage/emulated/0/"))
+            add(normalized.replace("/storage/emulated/0/", "/sdcard/"))
+            if (fileName.isNotEmpty()) {
+                val modelRoots = listOf(
+                    "/sdcard/Android/media/com.pocketagent.android/models",
+                    "/storage/emulated/0/Android/media/com.pocketagent.android/models",
+                    "/sdcard/Download/com.pocketagent.android/models",
+                    "/storage/emulated/0/Download/com.pocketagent.android/models",
+                )
+                modelRoots.forEach { root ->
+                    add("$root/$fileName")
+                }
+            }
+        }.distinct()
         return candidates
             .asSequence()
             .map { candidate -> File(candidate) }

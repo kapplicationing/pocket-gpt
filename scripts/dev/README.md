@@ -212,22 +212,37 @@ Use these when you want the nearest Playwright-style "show report" path for Maes
 pipx install -e /path/to/maestro-android
 maestro-android init
 maestro-android doctor
+maestro-android devices --json
+maestro-android start-device
 maestro-android lane smoke
 maestro-android lane journey
 maestro-android lane screenshot-pack
 maestro-android lane lifecycle
 maestro-android scoped --flow tmp/maestro-repro.yaml
+maestro-android device probe --device your-device-id
 maestro-android lint
 maestro-android audit-selectors
 maestro-android clean --stale-flows --confirm
 maestro-android report latest
 maestro-android trace latest
+maestro-android cloud probe --flow tests/maestro-cloud/scenario-runtime-ready-smoke.yaml
 maestro-android cloud smoke
 maestro-android cloud benchmark
 maestro-android cloud status label:upload-id
 ```
 
 This wraps the repo's existing Maestro/devctl/scoped-repro patterns behind a single Android-focused external CLI. Use `lint` and `audit-selectors` for flow-health maintenance, and `clean --stale-flows` to prune old tmp flows. See `docs/testing/maestro-android-companion-cli.md`.
+
+Local emulator path:
+
+```bash
+maestro-android start-device
+maestro-android devices --json
+ANDROID_SERIAL=emulator-5554 ADB_SERIAL=emulator-5554 python3 tools/devctl/main.py lane android-instrumented
+maestro-android lane smoke --device emulator-5554
+```
+
+Use this for the emulator leg of the default evidence matrix. Then run one connected-device lane and one hosted cloud path.
 
 ## Gate Wrappers (Policy)
 
@@ -245,7 +260,7 @@ Gate contract summary:
 
 Device-lock behavior:
 
-1. These lanes now acquire an exclusive per-device lock under `scripts/benchmarks/device-env/locks/` to avoid concurrent uninstall/reinstall collisions.
+1. These lanes now acquire an exclusive per-device lock under the generated lock directory in `scripts/benchmarks/device-env/` to avoid concurrent uninstall/reinstall collisions.
 2. Override only for emergency/manual troubleshooting: `POCKETGPT_SKIP_DEVICE_LOCK=1`.
 3. Before lane execution, `devctl` runs device-health preflight (wake/unlock, `/data` utilization check, runtime-media storage probe, package-owner metadata check).
 4. Runtime-media probe includes retry/backoff and fallback to `/sdcard/Download/<package>/...` when `/sdcard/Android/media/...` returns busy/resource errors.
@@ -266,15 +281,15 @@ bash scripts/dev/journey.sh [--repeats N]
 Use this for targeted single-path crash/hang debugging on a connected device.
 
 ```bash
-bash scripts/dev/scoped-repro.sh --flow tmp/maestro-repro.yaml
+maestro-android scoped --flow tmp/maestro-repro.yaml
 ```
 
 Common options:
 
 1. `--no-build --no-install` for faster iterative loops.
-2. `--serial your-device-id` when multiple devices are attached.
-3. `--pattern "<regex>"` to tune crash/runtime signature detection.
-4. `-- --format junit` to pass extra flags through to `maestro test`.
+2. `--device your-device-id` when multiple devices are attached.
+3. Keep the flow in `tmp/` with title/description comments on the first two lines.
+4. Use `bash scripts/dev/scoped-repro.sh` only when you explicitly need the legacy compatibility wrapper.
 
 GPU probe reason check (log-based, reason-disambiguated):
 

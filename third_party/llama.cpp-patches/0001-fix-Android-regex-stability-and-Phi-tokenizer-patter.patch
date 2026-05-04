@@ -1,0 +1,38 @@
+From 52e6547293aab424744a8afca88e725f98a254c2 Mon Sep 17 00:00:00 2001
+From: mkamar <mohamad.kamar@agoda.com>
+Date: Sun, 15 Mar 2026 15:48:34 +0700
+Subject: [PATCH 1/5] fix: Android regex stability and Phi tokenizer pattern
+ support
+
+---
+ src/unicode.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/unicode.cpp b/src/unicode.cpp
+index 122c8ca04..0b774e589 100644
+--- a/src/unicode.cpp
++++ b/src/unicode.cpp
+@@ -476,6 +476,9 @@ static std::vector<size_t> unicode_regex_split_stl(const std::basic_string<CharT
+ #ifdef _MSC_VER
+     // Bypass bug in MSVC: https://github.com/ggml-org/llama.cpp/issues/17830
+     constexpr auto regex_flags = std::regex_constants::ECMAScript;
++#elif defined(__ANDROID__)
++    // Android libc++ std::regex may crash with optimize on older arm64 devices.
++    constexpr auto regex_flags = std::regex_constants::ECMAScript | std::regex_constants::nosubs;
+ #else
+     constexpr auto regex_flags = std::regex_constants::optimize | std::regex_constants::nosubs;
+ #endif
+@@ -760,7 +763,9 @@ static std::vector<size_t> unicode_regex_split_custom(const std::string & text,
+         bpe_offsets = unicode_regex_split_custom_gpt2(text, offsets);
+     } else if (
+             regex_expr == "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+" ||
+-            regex_expr == "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+") {
++            regex_expr == "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+" ||
++            regex_expr == "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+" ||
++            regex_expr == "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?[\\p{L}\\p{M}]+|\\p{N}| ?[^\\s\\p{L}\\p{M}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+") {
+ 
+         bpe_offsets = unicode_regex_split_custom_llama3(text, offsets);
+     } else if (regex_expr == "\\p{Han}+") {
+-- 
+2.50.1 (Apple Git-155)
+

@@ -93,7 +93,7 @@ a narrow UI flow instead of a direct getter.
 - [ ] Does a hot-path change include at least one guard: unit flow test, source-audit
       test, StrictMode/main-thread guard, or `perf-baseline.sh --build` evidence on
       the benchmark variant?
-- [ ] Did you re-generate `apps/mobile-android/build/compose-reports/` after the change
+- [ ] Did you re-generate the Android module Compose compiler reports after the change
       and verify no new `unstable` parameters?
 
 ## Current Thresholds

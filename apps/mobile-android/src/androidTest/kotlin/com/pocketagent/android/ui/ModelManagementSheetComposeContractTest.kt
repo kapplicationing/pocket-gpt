@@ -297,6 +297,89 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
+    fun installedVersionActionTagsDispatchLoadAndSetActiveEvents() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val inactiveSnapshot = sampleSnapshot(installed = true, activeVersion = false)
+        val idleLoadingState = ModelLoadingState.Idle(
+            loadedModel = null,
+            lastUsedModel = RuntimeLoadedModel(
+                modelId = "qwen3.5-0.8b-q4",
+                modelVersion = "q4_0",
+            ),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = sampleLibraryState(snapshot = inactiveSnapshot),
+                    runtimeState = sampleRuntimeState(
+                        snapshot = inactiveSnapshot,
+                        lifecycle = RuntimeModelLifecycleSnapshot.initial(),
+                    ),
+                    modelLoadingState = idleLoadingState,
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        val loadTag = modelLibraryLoadButtonTag("qwen3.5-0.8b-q4", "q4_0")
+        val setActiveTag = modelLibrarySetActiveButtonTag("qwen3.5-0.8b-q4", "q4_0")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(loadTag))
+        composeRule.onNodeWithTag(loadTag).assertIsDisplayed()
+        composeRule.onNodeWithTag(setActiveTag).assertIsDisplayed()
+        composeRule.onNodeWithTag(setActiveTag).performClick()
+        composeRule.onNodeWithTag(loadTag).performClick()
+        composeRule.runOnIdle {
+            assertTrue(
+                events.contains(ModelSheetEvent.SetDefaultVersion("qwen3.5-0.8b-q4", "q4_0")),
+            )
+            assertTrue(
+                events.contains(ModelSheetEvent.LoadVersion("qwen3.5-0.8b-q4", "q4_0")),
+            )
+        }
+    }
+
+    @Test
+    fun availableVersionDownloadActionTagDispatchesDownloadEvent() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val libraryState = sampleLibraryState(
+            manifest = sampleManifestWithDownloadableVersion(),
+            downloads = emptyList(),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        val downloadTag = modelLibraryDownloadButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(downloadTag))
+        composeRule.onNodeWithTag(downloadTag).assertIsDisplayed()
+        composeRule.onNodeWithTag(downloadTag).performClick()
+        composeRule.runOnIdle {
+            assertTrue(
+                events.contains(
+                    ModelSheetEvent.DownloadVersion(
+                        sampleManifestWithDownloadableVersion().models.last().versions.single(),
+                    ),
+                ),
+            )
+        }
+    }
+
+    @Test
     fun hiddenVersionKeysFilterOutModelsFromList() {
         val hiddenKeys = setOf("qwen3.5-0.8b-q4::q4_0")
 
@@ -402,16 +485,20 @@ private fun TestRuntimeModelSheet(
     }
 }
 
-private fun sampleLibraryState(): ModelLibraryUiState {
+private fun sampleLibraryState(
+    snapshot: RuntimeProvisioningSnapshot = sampleSnapshot(installed = true),
+    manifest: ModelDistributionManifest = sampleManifest(),
+    downloads: List<DownloadTaskState> = listOf(sampleDownload()),
+): ModelLibraryUiState {
     return ModelLibraryUiState(
-        snapshot = sampleSnapshot(installed = true),
-        manifest = sampleManifest(),
-        downloads = listOf(sampleDownload()),
+        snapshot = snapshot,
+        manifest = manifest,
+        downloads = downloads,
         isImporting = false,
         isManifestLoaded = true,
         statusMessage = "Ready for provisioning actions",
         defaultGetReadyModelId = "qwen3.5-0.8b-q4",
-        defaultModelVersion = sampleManifest().models.first().versions.first(),
+        defaultModelVersion = manifest.models.first().versions.first(),
     )
 }
 
@@ -450,7 +537,7 @@ private fun sampleRuntimeLoadingState(): ModelLoadingState {
     )
 }
 
-private fun sampleSnapshot(installed: Boolean): RuntimeProvisioningSnapshot {
+private fun sampleSnapshot(installed: Boolean, activeVersion: Boolean = true): RuntimeProvisioningSnapshot {
     val versions = if (installed) {
         listOf(
             ModelVersionDescriptor(
@@ -464,7 +551,7 @@ private fun sampleSnapshot(installed: Boolean): RuntimeProvisioningSnapshot {
                 runtimeCompatibility = "android-arm64-v8a",
                 fileSizeBytes = 1024L,
                 importedAtEpochMs = 1L,
-                isActive = true,
+                isActive = activeVersion,
             ),
         )
     } else {
@@ -479,7 +566,7 @@ private fun sampleSnapshot(installed: Boolean): RuntimeProvisioningSnapshot {
                 absolutePath = if (installed) "/tmp/qwen.gguf" else null,
                 sha256 = if (installed) "a".repeat(64) else null,
                 importedAtEpochMs = if (installed) 1L else null,
-                activeVersion = if (installed) "q4_0" else null,
+                activeVersion = if (installed && activeVersion) "q4_0" else null,
                 installedVersions = versions,
                 pathOrigin = ModelPathOrigin.MANAGED,
             ),
@@ -517,6 +604,30 @@ private fun sampleManifest(): ModelDistributionManifest {
         ),
         source = ManifestSource.BUNDLED,
         syncedAtEpochMs = 1L,
+    )
+}
+
+private fun sampleManifestWithDownloadableVersion(): ModelDistributionManifest {
+    return sampleManifest().copy(
+        models = sampleManifest().models + listOf(
+            ModelDistributionModel(
+                modelId = "qwen3-0.6b-q4_k_m",
+                displayName = "Qwen 3 0.6B (Q4_K_M)",
+                versions = listOf(
+                    ModelDistributionVersion(
+                        modelId = "qwen3-0.6b-q4_k_m",
+                        version = "q4_k_m",
+                        downloadUrl = "https://example.test/qwen3-0.6b-q4_k_m.gguf",
+                        expectedSha256 = "b".repeat(64),
+                        provenanceIssuer = "",
+                        provenanceSignature = "",
+                        runtimeCompatibility = "android-arm64-v8a",
+                        fileSizeBytes = 1024L,
+                        verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
+                    ),
+                ),
+            ),
+        ),
     )
 }
 

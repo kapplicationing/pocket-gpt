@@ -4,30 +4,22 @@ tags:
   - model-management
 ---
 - runFlow: shared/bootstrap-cloud-startup.yaml
-- extendedWaitUntil:
-    visible:
-      id: "open_model_library"
-    timeout: 30000
-- tapOn:
+- runFlow: shared/bootstrap-launch-default-model.yaml
+- assertVisible:
     id: "open_model_library"
-- runFlow:
-    when:
-      notVisible: "Model library"
-    commands:
-      - extendedWaitUntil:
-          visible: "More models…"
-          timeout: 10000
-      - tapOn: "More models…"
+- takeScreenshot: "cloud-model-management-shell-ready"
+- runFlow: shared/open-model-library.yaml
+- takeScreenshot: "cloud-model-management-library-opened"
 - assertVisible: "Model library"
 - assertVisible: "Search models"
 - assertVisible: "Downloaded models"
+- assertVisible: "Refresh"
 - scrollUntilVisible:
     element:
       text: "Available models"
     direction: DOWN
     timeout: 20000
 - assertVisible: "Available models"
-- assertVisible: "Refresh"
 - scrollUntilVisible:
     element:
       text: "Close"

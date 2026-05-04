@@ -1,10 +1,12 @@
 appId: com.pocketagent.android
 tags:
-  - cloud-smoke
   - cloud-send
   - send
 ---
-- runFlow: shared/bootstrap-runtime-ready.yaml
+- runFlow: shared/bootstrap-cloud-startup.yaml
+- runFlow: shared/bootstrap-launch-default-model.yaml
+- assertVisible:
+    id: "composer_input"
 - tapOn:
     id: "composer_input"
 - eraseText
@@ -46,9 +48,7 @@ tags:
       id: "message_bubble_assistant_complete"
     timeout: 180000
 - extendedWaitUntil:
-    visible:
-      id: "send_button"
-      enabled: true
+    visible: "Send"
     timeout: 180000
 - assertNotVisible: "UI-RUNTIME-001"
 - takeScreenshot: "cloud-send-after-ready"

@@ -52,7 +52,7 @@ bash scripts/dev/launch-readiness.sh
 ```
 
 Use this before weekly launch review, PM planning, or publication review.
-It compiles the current execution board, `PROD-10`, and key launch-ticket statuses into two launch-readiness artifacts under `build/devctl/launch-readiness/`:
+It compiles the current execution board, `PROD-10`, and key launch-ticket statuses into two local launch-readiness artifacts in the build tree:
 
 1. `launch-readiness-report.json`
 2. `launch-readiness-report.md`
@@ -212,7 +212,7 @@ shell files:
 - [ ] High-frequency `OutlinedTextField`s (composer, search) use the `TextFieldValue`
       overload with local `mutableStateOf`, not the `String` overload.
 - [ ] Hot-path caches document their lifetime and invalidation rule.
-- [ ] After Compose changes, regenerated `apps/mobile-android/build/compose-reports/`
+- [ ] After Compose changes, regenerated the Android module Compose compiler reports
       and verified no new hot-path `unstable` parameters with
       `bash scripts/dev/compose-report-hotpath.sh --build`.
 - [ ] Device evidence from

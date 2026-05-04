@@ -91,7 +91,7 @@ None.
 
 ### Critical Path
 
-1. Preserve the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`.
+1. Preserve the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`.
 2. Preserve the current hosted/default pass roots and the S22 physical canary/journey artifacts as the publication evidence set.
 3. Use the narrow Samsung canary only for OEM/runtime confirmation; do not reopen local wireless Maestro as launch authority.
 4. Carry the disclosed `AI human-proxy` packet as the closed moderation-backed leg for the controlled MVP.
@@ -134,4 +134,4 @@ Full owner/dependency split: `docs/operations/play-store-launch-program.md`
 1. Active package evidence belongs in `docs/operations/evidence/wp-09/` and `docs/operations/evidence/wp-13/`.
 2. Production-claim-critical WP-12 evidence remains in `docs/operations/evidence/wp-12/`.
 3. Historical package detail is summarized in `docs/operations/evidence/index.md`.
-4. Current local authoritative lane evidence is anchored at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`, and the current repo-side launch snapshot is `build/devctl/launch-readiness/launch-readiness-report.md`.
+4. Current local authoritative lane evidence is anchored at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, and the launch-readiness snapshot should be regenerated locally with `bash scripts/dev/launch-readiness.sh` before publication.

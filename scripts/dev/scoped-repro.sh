@@ -17,6 +17,7 @@ Options:
   --apk <path>                  Explicit APK path (default: latest debug APK)
   --no-build                    Skip Gradle assemble step
   --no-install                  Skip adb install step
+  --allow-parallel              Disable the default host-local Maestro execution lock
   --native-build <true|false>   Value for -Ppocketgpt.enableNativeBuild (default: true)
   --log-dir <path>              Output directory for logs (default: tmp)
   --pattern <regex>             Crash/runtime signature regex scan for logcat
@@ -40,15 +41,19 @@ DEVICE_SERIAL="${ADB_SERIAL:-${ANDROID_SERIAL:-}}"
 APK_PATH=""
 BUILD_APK=1
 INSTALL_APK=1
+ALLOW_PARALLEL=0
 NATIVE_BUILD="true"
 LOG_DIR="tmp"
 ADB_TIMEOUT_SEC=120
 MAESTRO_TIMEOUT_SEC=1200
 TIMEOUT_KILL_AFTER_SEC=30
-CRASH_SIGNATURE_REGEX="FATAL EXCEPTION|Fatal signal|SIGSEGV|Abort message|Runtime: Error|nativeLoadModel|pocket_llama|UI-RUNTIME-001"
-APP_CONTEXT_REGEX="com\\.pocketagent\\.android|PocketLlamaJNI|libpocket_llama|Cmdline: com\\.pocketagent\\.android|Process: com\\.pocketagent\\.android|UI-RUNTIME-001"
+CRASH_SIGNATURE_REGEX="FATAL EXCEPTION|Fatal signal|SIGSEGV|Abort message|ANR in|OutOfMemoryError|UnsatisfiedLinkError|UI-RUNTIME-001"
+APP_CONTEXT_REGEX="com\\.pocketagent\\.android|Cmdline: com\\.pocketagent\\.android|Process: com\\.pocketagent\\.android|UI-RUNTIME-001"
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 MAESTRO_EXTRA_ARGS=()
+LOCK_ROOT="${TMPDIR:-/tmp}/pocketgpt-maestro-scoped-repro.lock"
+LOCK_ACQUIRED=0
+PREPARED_FLOW_PATHS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,6 +75,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-install)
       INSTALL_APK=0
+      shift
+      ;;
+    --allow-parallel)
+      ALLOW_PARALLEL=1
       shift
       ;;
     --native-build)
@@ -149,6 +158,56 @@ with_timeout() {
   "$@"
 }
 
+release_lock() {
+  if [[ ${LOCK_ACQUIRED} -eq 1 ]]; then
+    rmdir "${LOCK_ROOT}" >/dev/null 2>&1 || true
+    LOCK_ACQUIRED=0
+  fi
+}
+
+cleanup_prepared_flows() {
+  if [[ ${#PREPARED_FLOW_PATHS[@]} -eq 0 ]]; then
+    return
+  fi
+  rm -f -- "${PREPARED_FLOW_PATHS[@]}" >/dev/null 2>&1 || true
+}
+
+trap 'cleanup_prepared_flows; release_lock' EXIT
+
+abort_if_device_lock_held_by_other() {
+  local serial="${1:-}"
+  local current_pid="$$"
+  local parent_pid="${PPID:-0}"
+  local lock_path
+  lock_path="$(maestro_android_device_lock_path "${REPO_ROOT}" "${serial}")" || return 1
+  local lock_pid
+  lock_pid="$(maestro_android_active_device_lock_pid "${REPO_ROOT}" "${serial}" || true)"
+  if [[ -z "${lock_pid}" || "${lock_pid}" == "${current_pid}" || "${lock_pid}" == "${parent_pid}" ]]; then
+    return 0
+  fi
+  local owner
+  owner="$(awk -F= '/^owner=/{print $2; exit}' "${lock_path}")"
+  echo "[scoped-repro] device ${serial} is already owned by active lane pid ${lock_pid}${owner:+ (${owner})}; refusing to kill or overlap it." >&2
+  exit 73
+}
+
+acquire_lock() {
+  local waited_sec=0
+  if [[ ${ALLOW_PARALLEL} -eq 1 ]]; then
+    return
+  fi
+  until mkdir "${LOCK_ROOT}" >/dev/null 2>&1; do
+    if [[ ${waited_sec} -eq 0 ]]; then
+      echo "[scoped-repro] waiting for host-local Maestro lock at ${LOCK_ROOT}" >&2
+    fi
+    sleep 2
+    waited_sec=$((waited_sec + 2))
+  done
+  LOCK_ACQUIRED=1
+}
+
+acquire_lock
+
 if [[ ${BUILD_APK} -eq 1 ]]; then
   ./gradlew --no-daemon "-Ppocketgpt.enableNativeBuild=${NATIVE_BUILD}" :apps:mobile-android:assembleDebug
 fi
@@ -171,6 +230,8 @@ if [[ -z "${DEVICE_SERIAL}" ]]; then
   exit 1
 fi
 
+abort_if_device_lock_held_by_other "${DEVICE_SERIAL}"
+
 if [[ ${INSTALL_APK} -eq 1 ]]; then
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" install -r "${APK_PATH}" >/dev/null
 fi
@@ -184,6 +245,30 @@ LOG_PATH="${LOG_DIR}/${FLOW_BASENAME}-${STAMP}-${SERIAL_TOKEN}-logcat.txt"
 MAESTRO_LOG_PATH="${LOG_DIR}/${FLOW_BASENAME}-${STAMP}-${SERIAL_TOKEN}-maestro.log"
 MATCH_PATH="${LOG_DIR}/${FLOW_BASENAME}-${STAMP}-${SERIAL_TOKEN}-logcat-matches.txt"
 CANDIDATE_PATH="${MATCH_PATH}.candidate"
+FLOW_RUN_PATH="${FLOW_PATH}"
+FLOW_RUN_NOTE=""
+USE_ADB_CLEAR_STATE=0
+USE_ADB_LAUNCH_APP=0
+PREPARED_FLOW_DIR="$(dirname "${FLOW_PATH}")"
+
+if maestro_android_flow_uses_clear_state "${FLOW_PATH}"; then
+  FLOW_RUN_PATH="$(maestro_android_prepared_flow_path "${FLOW_PATH}" "${PREPARED_FLOW_DIR}" "${STAMP}" "${DEVICE_SERIAL}" "prepared-flow")"
+  maestro_android_prepare_flow_without_clear_state "${FLOW_PATH}" "${FLOW_RUN_PATH}"
+  PREPARED_FLOW_PATHS+=("${FLOW_RUN_PATH}")
+  FLOW_RUN_NOTE="adb-pm-clear + rewritten flow (${FLOW_RUN_PATH})"
+  USE_ADB_CLEAR_STATE=1
+fi
+
+if maestro_android_flow_starts_with_launch_app "${FLOW_RUN_PATH}"; then
+  local_flow_source="${FLOW_RUN_PATH}"
+  FLOW_RUN_PATH="$(maestro_android_prepared_flow_path "${FLOW_PATH}" "${PREPARED_FLOW_DIR}" "${STAMP}" "${DEVICE_SERIAL}" "prepared-no-launch")"
+  maestro_android_prepare_flow_without_initial_launch_app "${local_flow_source}" "${FLOW_RUN_PATH}"
+  PREPARED_FLOW_PATHS+=("${FLOW_RUN_PATH}")
+  FLOW_RUN_NOTE="${FLOW_RUN_NOTE:+${FLOW_RUN_NOTE}; }adb-monkey-launch + launchApp-stripped flow (${FLOW_RUN_PATH})"
+  USE_ADB_LAUNCH_APP=1
+fi
+
+maestro_android_kill_conflicting_local_processes "${DEVICE_SERIAL}"
 
 recover_transport() {
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" forward --remove-all >/dev/null 2>&1 || true
@@ -201,11 +286,18 @@ run_maestro_attempt() {
   local attempt="$1"
   local attempt_log="${MAESTRO_LOG_PATH}.attempt${attempt}"
   local exit_code=0
+  maestro_android_kill_conflicting_local_processes "${DEVICE_SERIAL}"
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" forward --remove-all >/dev/null 2>&1 || true
+  if [[ ${USE_ADB_CLEAR_STATE} -eq 1 ]]; then
+    with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell pm clear com.pocketagent.android >/dev/null 2>&1 || true
+  fi
+  if [[ ${USE_ADB_LAUNCH_APP} -eq 1 ]]; then
+    with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell monkey -p com.pocketagent.android -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+  fi
   if [[ ${#MAESTRO_EXTRA_ARGS[@]} -gt 0 ]]; then
-    with_timeout "${MAESTRO_TIMEOUT_SEC}" maestro --device "${DEVICE_SERIAL}" test "${FLOW_PATH}" "${MAESTRO_EXTRA_ARGS[@]}" >"${attempt_log}" 2>&1 || exit_code=$?
+    with_timeout "${MAESTRO_TIMEOUT_SEC}" maestro --device "${DEVICE_SERIAL}" test "${FLOW_RUN_PATH}" "${MAESTRO_EXTRA_ARGS[@]}" >"${attempt_log}" 2>&1 || exit_code=$?
   else
-    with_timeout "${MAESTRO_TIMEOUT_SEC}" maestro --device "${DEVICE_SERIAL}" test "${FLOW_PATH}" >"${attempt_log}" 2>&1 || exit_code=$?
+    with_timeout "${MAESTRO_TIMEOUT_SEC}" maestro --device "${DEVICE_SERIAL}" test "${FLOW_RUN_PATH}" >"${attempt_log}" 2>&1 || exit_code=$?
   fi
   {
     echo "=== attempt ${attempt} ==="
@@ -258,6 +350,9 @@ fi
 
 echo "Scoped repro summary:"
 echo "  Flow: ${FLOW_PATH}"
+if [[ -n "${FLOW_RUN_NOTE}" ]]; then
+  echo "  Flow execution mode: ${FLOW_RUN_NOTE}"
+fi
 echo "  Device: ${DEVICE_SERIAL}"
 echo "  APK: ${APK_PATH}"
 echo "  Maestro log: ${MAESTRO_LOG_PATH}"

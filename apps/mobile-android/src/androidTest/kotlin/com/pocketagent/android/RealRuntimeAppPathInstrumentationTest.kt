@@ -297,7 +297,7 @@ class RealRuntimeAppPathInstrumentationTest {
     )
 
     private fun requireFile(value: String): String {
-        val resolved = resolveModelPath(value)
+        val resolved = resolveStage2ModelPath(value) ?: resolveModelPath(value)
         require(resolved != null) { "Model path does not exist: $value" }
         return resolved
     }

@@ -1,0 +1,8 @@
+appId: com.pocketagent.android
+---
+- runFlow: settle-current-ready-shell.yaml
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 30000
+- assertNotVisible: "UI-STARTUP-001"

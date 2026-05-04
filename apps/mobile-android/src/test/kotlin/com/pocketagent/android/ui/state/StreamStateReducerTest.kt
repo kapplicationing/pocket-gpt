@@ -97,7 +97,7 @@ class StreamStateReducerTest {
     }
 
     @Test
-    fun `thinking event records first token progress for hidden reasoning streams`() {
+    fun `thinking event does not mark first token before visible output`() {
         val initial = StreamReducerState.initial(requestId = "req-1")
         val afterThinking = reducer.onEvent(
             state = initial,
@@ -109,7 +109,7 @@ class StreamStateReducerTest {
         )
 
         assertEquals(true, afterThinking.isThinking)
-        assertEquals(150L, afterThinking.firstTokenMs)
+        assertNull(afterThinking.firstTokenMs)
         assertEquals(null, afterThinking.terminal)
     }
 }

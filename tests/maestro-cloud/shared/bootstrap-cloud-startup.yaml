@@ -11,80 +11,13 @@ appId: com.pocketagent.android
           notVisible:
             id: "provisioning_bootstrap_loading"
           timeout: 30000
+- runFlow: bootstrap-clean-start.yaml
+- runFlow: dismiss-system-overlays.yaml
 - extendedWaitUntil:
-    visible:
+    notVisible:
       id: "onboarding_next"
-    timeout: 120000
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_skip"
-    commands:
-      - hideKeyboard
-      - tapOn:
-          id: "onboarding_skip"
-- runFlow:
-    when:
-      visible:
-        text: "Skip"
-    commands:
-      - hideKeyboard
-      - tapOn:
-          text: "Skip"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_next"
-    commands:
-      - hideKeyboard
-      - tapOn:
-          id: "onboarding_next"
-- runFlow:
-    when:
-      visible: "Next"
-    commands:
-      - hideKeyboard
-      - tapOn: "Next"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_next"
-    commands:
-      - hideKeyboard
-      - tapOn:
-          id: "onboarding_next"
-- runFlow:
-    when:
-      visible: "Next"
-    commands:
-      - hideKeyboard
-      - tapOn: "Next"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_get_started"
-    commands:
-      - hideKeyboard
-      - tapOn:
-          id: "onboarding_get_started"
-- runFlow:
-    when:
-      visible:
-        text: "Get started"
-    commands:
-      - hideKeyboard
-      - tapOn:
-          text: "Get started"
-- runFlow:
-    when:
-      visible: "Get ready"
-    commands:
-      - tapOn: "Get ready"
-      - extendedWaitUntil:
-          visible: "Model library"
-          timeout: 20000
-- runFlow: ensure-runtime-loaded.yaml
+    timeout: 15000
 - extendedWaitUntil:
-    visible:
-      id: "session_drawer_button"
-    timeout: 30000
+    notVisible:
+      id: "onboarding_get_started"
+    timeout: 15000

@@ -1,52 +1,56 @@
 # WP-13 AI Human-Proxy Rerun Status
 
-Last updated: 2026-05-03  
+Last updated: 2026-05-04
 Owner: QA + Product
 
 ## Scope
 
-Refresh the disclosed AI human-proxy packet against the current flow/bundle setup without manufacturing passes.
+Refresh the disclosed AI human-proxy packet against the current flow/bundle setup and replace the older hold-state rerun note with current-window closure truth.
 
 ## Outcome
 
-Current result: `hold`
+Current result: `promote`
 
-This rerun produced fresh provenance and current-path classification, but it did not produce a new full four-tester proxy matrix.
+This rerun now has a current four-reviewer proxy matrix and a promote-level packet for the controlled Play Store MVP.
 
 ## What Changed
 
-1. `tools/qa-agents/run_ai_tester.py` now resolves the live physical-device serial from `adb devices -l` by model before install/Maestro, instead of depending on stale `_adb-tls-connect._tcp` aliases.
-2. The corrected S22 path reached live install and `7001` reverse-port setup on `192.168.1.38:36483`.
-3. The device path still stalled in `scripts/dev/maestro-local-bootstrap.sh` before any flow output or proxy skeleton was written.
-4. The cloud path preserved fresh upload provenance for the current APK, but the runner still did not return a hosted verdict on the current packet path.
+1. Hosted send proof is now current and green on account 1 at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`.
+2. Hosted model-management/setup proof is now current and green on account 2 at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`.
+3. The preserved S22 strict-journey authority remains current enough for the controlled-MVP decision at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` with send-capture `phase=completed` and `placeholder_visible=false`.
+4. Proxy reviewers re-ran the packet against the current evidence set and converged on a promote recommendation once the current timeout/recovery contract tests and manifest-fallback contract tests were included in the review set.
 
-## Preserved Current Artifacts
+## Current Evidence Anchors
 
-1. `tmp/qa-agents/device-s22/20260503T152401Z/`
-2. `tmp/qa-agents/cloud-1/20260503T152529Z/onboarding.log`
-3. `tmp/qa-agents/cloud-1/20260503T153000Z-async/onboarding.log`
-4. `tmp/qa-agents/cloud-2/20260503T153000Z-async/onboarding.log`
+1. `docs/operations/evidence/wp-13/2026-05-03-wp13-packet-ai-human-proxy.md`
+2. `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`
+3. `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`
+4. `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json`
+5. `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/summary.txt`
+6. `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/controllers/ChatStreamCoordinatorTest.kt`
+7. `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/ChatViewModelTest.kt`
+8. `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/state/StreamStateReducerTest.kt`
+9. `apps/mobile-android/src/test/kotlin/com/pocketagent/android/runtime/modelmanager/ModelDistributionManifestProviderTest.kt`
 
 ## Findings
 
-### Device Path
+### Machine-Verifiable Proof
 
-1. `adb devices -l` currently shows the S22 and A51 as connected on live TCP serials (`192.168.1.38:36483`, `192.168.1.44:37643`), so the old runner alias was stale.
-2. After live-serial resolution, the S22 runner succeeded at APK install and reverse-port setup.
-3. The rerun then stalled inside local Maestro bootstrap before writing `onboarding.log`, `trip-report.skeleton.json`, or a bundle manifest under `tmp/qa-agents/device-s22/20260503T152401Z/`.
-4. After two failures on the same device execution path, the rerun pivoted from repetition to classification.
+1. The remaining hosted send blocker is closed on the current build: account 1 `send-after-ready` passes with `status=passed`, `junit_failures=0`, and no failed flows.
+2. The setup/model-library surface is also green on the current build: account 2 `scenario-model-management-split-smoke` passes with `status=passed`, `junit_failures=0`, and no failed flows.
+3. The preserved S22 strict-journey run still provides current-window physical send authority even though its first token lands at the 180s boundary; treat that as perf caution, not as a missing-authority blocker.
+4. Local wireless Samsung Maestro remains harness-class supporting evidence only; the promote decision does not depend on converting that path into publishable gate authority.
 
-### Cloud Path
+### Recovery-State Proof
 
-1. The current cloud rerun preserved fresh hosted provenance for the current APK in `tmp/qa-agents/cloud-1/20260503T152529Z/onboarding.log`.
-2. That log records current app binary id `e573dd0d2a5c26f1f70f355d8f46a178c7e458c5` and upload id `mupload_01kqq747x9ea0ays8hv7cy2nzv`.
-3. The command did not return a hosted verdict before manual pivot, so the current packet path cannot yet claim a fresh cloud pass or fail from this rerun.
-4. Async follow-up probes showed that the current CLI forbids `--format` with `--async`, which is useful classification truth for the packet path but not a replacement for verdict-bearing evidence.
+1. `stuck_send` is now accepted for the controlled MVP because the current timeout/recovery contract is covered by `ChatStreamCoordinatorTest`, `ChatViewModelTest`, and `StreamStateReducerTest`, and the current hosted send pass plus preserved S22 journey prove the healthy destination state on the current build.
+2. `manifest_outage` is now accepted for the controlled MVP because `ModelDistributionManifestProviderTest` proves deterministic bundled-manifest fallback under remote refresh failure and stable machine-code surfacing, while the current hosted model-management smoke proves the user-facing model-library recovery surface is operational on the current build.
+3. These two rows remain supported mainly by deterministic contract coverage plus adjacent current-window runtime/setup passes, not by a fresh induced-failure live-device replay. That is acceptable for the disclosed `AI human-proxy` fallback path, but it should stay documented as a caution rather than over-claimed as stronger evidence than it is.
 
 ## Decision Use
 
 Use this note together with `docs/operations/evidence/wp-13/2026-05-03-wp13-packet-ai-human-proxy.md`.
 
-1. The packet still truthfully remains `hold`.
-2. The retained last-complete proxy matrix remains the only measured four-tester baseline in the repo.
-3. The current rerun adds fresher tool-path truth: current build provenance is fresh, device transport aliases are fixed, but the device bootstrap and cloud verdict-return legs are still blocking a fresh proxy matrix.
+1. The packet now truthfully lands on `promote` for the controlled MVP.
+2. The current four-reviewer proxy matrix is now the active measured baseline for the controlled-MVP decision.
+3. The remaining cautions are evidence-strength notes for timeout and manifest recovery plus local wireless Maestro instability; they are no longer launch blockers.

@@ -18,8 +18,10 @@ import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
 import com.pocketagent.android.runtime.ProvisioningRecoverySignal
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.ui.controllers.ChatSendFlow
+import com.pocketagent.android.ui.controllers.ChatStartupFlow
 import com.pocketagent.android.ui.controllers.DeviceStateProvider
 import com.pocketagent.android.ui.controllers.StartupProbeController
+import com.pocketagent.android.ui.controllers.StartupReadinessCoordinator
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.android.ui.state.ChatSessionUiModel
@@ -99,11 +101,55 @@ class ChatViewModelTest {
         Dispatchers.resetMain()
     }
 
+    private fun buildChatViewModel(
+        runtimeFacade: ChatRuntimeService,
+        sessionPersistence: SessionPersistence,
+        presetBackingStore: FakePresetBackingStore,
+        ioDispatcher: CoroutineDispatcher = dispatcher,
+        runtimeGenerationTimeoutMs: Long = 0L,
+        runtimeStartupProbeTimeoutMs: Long = DEFAULT_RUNTIME_STARTUP_PROBE_TIMEOUT_MS,
+        startupProbeController: StartupProbeController = StartupProbeController(),
+        sendFlow: ChatSendFlow? = null,
+    ): ChatViewModel {
+        val startupFlow = ChatStartupFlow(
+            runtimeGateway = runtimeFacade,
+            startupProbeController = startupProbeController,
+            startupReadinessCoordinator = StartupReadinessCoordinator(),
+            ioDispatcher = ioDispatcher,
+            runtimeStartupProbeTimeoutMs = runtimeStartupProbeTimeoutMs,
+            nativeRuntimeLibraryPackaged = true,
+        )
+        return if (sendFlow == null) {
+            ChatViewModel(
+                runtimeFacade = runtimeFacade,
+                sessionPersistence = sessionPersistence,
+                presetBackingStore = presetBackingStore,
+                ioDispatcher = ioDispatcher,
+                runtimeGenerationTimeoutMs = runtimeGenerationTimeoutMs,
+                runtimeStartupProbeTimeoutMs = runtimeStartupProbeTimeoutMs,
+                startupProbeController = startupProbeController,
+                startupFlow = startupFlow,
+            )
+        } else {
+            ChatViewModel(
+                runtimeFacade = runtimeFacade,
+                sessionPersistence = sessionPersistence,
+                presetBackingStore = presetBackingStore,
+                ioDispatcher = ioDispatcher,
+                runtimeGenerationTimeoutMs = runtimeGenerationTimeoutMs,
+                runtimeStartupProbeTimeoutMs = runtimeStartupProbeTimeoutMs,
+                startupProbeController = startupProbeController,
+                startupFlow = startupFlow,
+                sendFlow = sendFlow,
+            )
+        }
+    }
+
     @Test
     fun `send message streams tokens and persists assistant output`() = runTest(dispatcher) {
         val persistence = RecordingPersistence()
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -126,10 +172,41 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `send message finalizes assistant when stream closes without terminal event`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade(
+            streamTokens = listOf("hosted ", "reply"),
+            streamTerminal = StreamTerminal.NO_TERMINAL,
+        )
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("hello hosted")
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        val activeSession = state.activeSession()!!
+        val assistant = activeSession.messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+
+        assertTrue(assistant != null)
+        assertEquals("hosted reply", assistant?.content)
+        assertFalse(assistant?.isStreaming ?: true)
+        assertFalse(assistant?.terminalEventSeen ?: true)
+        assertFalse(activeSession.messages.any(::shouldRenderInThreadLoadingPlaceholder))
+        assertFalse(state.composer.isSending)
+        assertEquals(null, state.runtime.lastErrorCode)
+    }
+
+    @Test
     fun `explicit tool command executes local tool path`() = runTest(dispatcher) {
         val persistence = RecordingPersistence()
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -153,7 +230,7 @@ class ChatViewModelTest {
     fun `onboarding state defaults visible and persists when completed`() = runTest(dispatcher) {
         val persistence = RecordingPersistence()
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -174,7 +251,7 @@ class ChatViewModelTest {
 
     @Test
     fun `advanced controls remain openable on first launch before unlock`() = runTest(dispatcher) {
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -195,7 +272,7 @@ class ChatViewModelTest {
 
     @Test
     fun `prefill composer clears active surface`() = runTest(dispatcher) {
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -212,7 +289,7 @@ class ChatViewModelTest {
 
     @Test
     fun `session drawer and model library surfaces can be opened`() = runTest(dispatcher) {
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -238,7 +315,7 @@ class ChatViewModelTest {
                 autoBackendCpuFallback = true,
             ),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -259,7 +336,7 @@ class ChatViewModelTest {
         val provisioning = QuickLoadProvisioningGatewayForTest()
         val runtime = RecordingRuntimeFacade()
         val provisioningViewModel = ModelProvisioningViewModel(provisioning, ioDispatcher = dispatcher)
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(
                 initialState = StoredChatState(
@@ -361,7 +438,7 @@ class ChatViewModelTest {
             sessionMessages = mapOf("session-2" to unloadedMessages.map(MessageUiModel::toStoredMessage)),
         )
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -383,7 +460,7 @@ class ChatViewModelTest {
     @Test
     fun `simple-first progress unlocks advanced controls after the follow up`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -416,7 +493,7 @@ class ChatViewModelTest {
     @Test
     fun `get ready action moves stage to get ready and records telemetry`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -439,7 +516,7 @@ class ChatViewModelTest {
         val runtime = RecordingRuntimeFacade(
             streamTokens = List(40) { "tok$it " },
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -467,7 +544,7 @@ class ChatViewModelTest {
             runtimeGenerationTimeoutMs = 0L,
             deviceStateProvider = DeviceStateProvider { expectedDeviceState },
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -524,7 +601,7 @@ class ChatViewModelTest {
         )
         val runtime = RecordingRuntimeFacade()
 
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -542,7 +619,7 @@ class ChatViewModelTest {
 
     @Test
     fun `recoverable persisted state corruption is surfaced with deterministic ui code`() = runTest(dispatcher) {
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = RecordingRuntimeFacade(),
             sessionPersistence = CorruptLoadPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -566,7 +643,7 @@ class ChatViewModelTest {
     fun `session switch preserves per-session timeline state`() = runTest(dispatcher) {
         val persistence = RecordingPersistence()
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -598,7 +675,7 @@ class ChatViewModelTest {
     @Test
     fun `deleting only session creates replacement session`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -621,7 +698,7 @@ class ChatViewModelTest {
     @Test
     fun `attach image success appends image user message and assistant response`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -640,7 +717,7 @@ class ChatViewModelTest {
     @Test
     fun `attach image failure shows system error message`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(failImage = true)
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -659,7 +736,7 @@ class ChatViewModelTest {
     @Test
     fun `image validation error maps to deterministic ui code`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(returnImageValidationError = true)
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -678,7 +755,7 @@ class ChatViewModelTest {
     @Test
     fun `tool request success and failures are rendered in timeline`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -709,7 +786,7 @@ class ChatViewModelTest {
         val runtime = RecordingRuntimeFacade(
             startupChecks = listOf("Missing runtime model(s): qwen"),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -726,7 +803,7 @@ class ChatViewModelTest {
         val runtime = RecordingRuntimeFacade(
             startupChecks = listOf("Missing runtime model(s): qwen"),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -854,7 +931,7 @@ class ChatViewModelTest {
         val runtime = RecordingRuntimeFacade(
             startupChecks = listOf("Missing runtime model(s): qwen"),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -883,7 +960,7 @@ class ChatViewModelTest {
             streamTokens = emptyList(),
             streamTerminal = StreamTerminal.CANCELLED_MANUAL,
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -909,11 +986,12 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `send message timeout maps to deterministic runtime error`() = runTest(dispatcher) {
+    fun `send message timeout with no partial text finalizes assistant error bubble`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(
+            streamTokens = emptyList(),
             streamTerminal = StreamTerminal.CANCELLED_TIMEOUT,
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -927,8 +1005,13 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         val active = viewModel.uiState.value.activeSession()!!
-        assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("UI-RUNTIME-001") })
-        assertTrue(active.messages.any { it.role == MessageRole.SYSTEM && it.content.contains("timed out") })
+        val assistant = active.messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+        assertTrue(assistant != null)
+        assertFalse(assistant?.isStreaming ?: true)
+        assertEquals("timeout", assistant?.finishReason)
+        assertTrue(assistant?.content?.contains("UI-RUNTIME-001") == true)
+        assertTrue(assistant?.content?.contains("timed out") == true)
+        assertFalse(active.messages.any(::shouldRenderInThreadLoadingPlaceholder))
         assertEquals("UI-RUNTIME-001", viewModel.uiState.value.runtime.lastErrorCode)
         assertFalse(viewModel.uiState.value.composer.isSending)
     }
@@ -939,7 +1022,7 @@ class ChatViewModelTest {
             streamTokens = listOf("partial "),
             streamTerminal = StreamTerminal.CANCELLED_MANUAL,
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -969,7 +1052,7 @@ class ChatViewModelTest {
             streamTokens = listOf("chunk "),
             streamTerminal = StreamTerminal.FAILED,
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -997,7 +1080,7 @@ class ChatViewModelTest {
     fun `startup probe timeout maps to blocked timeout startup state`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
         val startupProbeController = TimeoutStartupProbeController()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1024,7 +1107,7 @@ class ChatViewModelTest {
             streamTerminal = StreamTerminal.COMPLETED,
         )
         val startupProbeController = TimeoutStartupProbeController()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1050,7 +1133,7 @@ class ChatViewModelTest {
             streamTerminal = StreamTerminal.COMPLETED,
             streamDelayMs = 100L,
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1075,7 +1158,7 @@ class ChatViewModelTest {
         val runtime = RecordingRuntimeFacade(
             startupChecks = listOf("Optional runtime model unavailable: qwen3-1.7b-q4_k_m."),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1096,7 +1179,7 @@ class ChatViewModelTest {
         val runtime = RecordingRuntimeFacade(
             startupChecks = listOf("Optional runtime model unavailable: qwen3-1.7b-q4_k_m."),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1116,7 +1199,7 @@ class ChatViewModelTest {
     @Test
     fun `battery profile uses extended adaptive timeout`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1138,7 +1221,7 @@ class ChatViewModelTest {
             streamDelayMs = 500L,
             streamTokens = listOf("a "),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1163,7 +1246,7 @@ class ChatViewModelTest {
     @Test
     fun `routing mode and diagnostics export update runtime and timeline`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1182,7 +1265,7 @@ class ChatViewModelTest {
     @Test
     fun `refresh runtime readiness updates backend and startup state`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1203,7 +1286,7 @@ class ChatViewModelTest {
             startupChecks = listOf("Missing runtime model(s): qwen"),
             runtimeBackend = "NATIVE_JNI",
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1222,7 +1305,7 @@ class ChatViewModelTest {
     @Test
     fun `refresh runtime readiness applies override text only when startup checks pass`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1241,7 +1324,7 @@ class ChatViewModelTest {
     @Test
     fun `startup probe unexpected exception maps to blocked runtime state without crash`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1261,7 +1344,7 @@ class ChatViewModelTest {
     @Test
     fun `startup probe latest refresh wins when earlier probe ignores cancellation`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1284,7 +1367,7 @@ class ChatViewModelTest {
     fun `duplicate readiness refresh requests with same detail are coalesced`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
         val startupProbeController = CountingStartupProbeController()
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1315,7 +1398,7 @@ class ChatViewModelTest {
         val startupProbeController = CountingStartupProbeController()
         val provisioningGateway = LoadingProvisioningGateway()
         val provisioningViewModel = ModelProvisioningViewModel(provisioningGateway, ioDispatcher = dispatcher)
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1341,7 +1424,7 @@ class ChatViewModelTest {
     fun `duplicate settings updates do not persist or re-dispatch runtime calls`() = runTest(dispatcher) {
         val persistence = RecordingPersistence()
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -1392,7 +1475,7 @@ class ChatViewModelTest {
                 firstSessionStage = FirstSessionStage.READY_TO_CHAT.name,
             ),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -1427,7 +1510,7 @@ class ChatViewModelTest {
                 loadingProgress = 1.0f,
             ),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1457,7 +1540,7 @@ class ChatViewModelTest {
                 ),
             ),
         )
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = RecordingPersistence(),
             presetBackingStore = FakePresetBackingStore(),
@@ -1476,7 +1559,7 @@ class ChatViewModelTest {
     fun `persistence queue tracks median duration and payload size`() = runTest(dispatcher) {
         val persistence = RecordingPersistence()
         val runtime = RecordingRuntimeFacade(runtimeBackend = "NATIVE_JNI")
-        val viewModel = ChatViewModel(
+        val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
             sessionPersistence = persistence,
             presetBackingStore = FakePresetBackingStore(),
@@ -1741,6 +1824,8 @@ private class RecordingRuntimeFacade(
                     completionMs = 75,
                 ),
             )
+
+            StreamTerminal.NO_TERMINAL -> Unit
 
             StreamTerminal.CANCELLED_TIMEOUT -> emit(
                 ChatStreamEvent.Cancelled(
@@ -2120,6 +2205,7 @@ private class QuickLoadProvisioningGatewayForTest(
 
 private enum class StreamTerminal {
     COMPLETED,
+    NO_TERMINAL,
     CANCELLED_TIMEOUT,
     CANCELLED_MANUAL,
     FAILED,

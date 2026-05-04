@@ -1,0 +1,84 @@
+From 37fea2efc4755d4c2a5ffcb4f9165baf3cd597c2 Mon Sep 17 00:00:00 2001
+From: mkamar <mohamad.kamar@agoda.com>
+Date: Mon, 30 Mar 2026 16:13:16 +0700
+Subject: [PATCH 2/5] feat: add optional rotation hook to KV cache write path
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ src/llama-kv-cache.cpp | 13 +++++++++++++
+ src/llama-kv-cache.h   | 14 ++++++++++++++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 82fe58fac..7172d6dc5 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -1072,6 +1072,11 @@ ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_k
+             ggml_row_size(v->type, kv_size*n_embd_v_gqa)*sinfo.s0);
+ }
+ 
++void llama_kv_cache::set_kv_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata) {
++    rotation_hook = fn;
++    rotation_hook_userdata = per_layer_userdata;
++}
++
+ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il, const slot_info & sinfo) const {
+     GGML_UNUSED(sinfo);
+ 
+@@ -1104,6 +1109,10 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
+     }
+ 
+     // store the current K values into the cache
++    if (rotation_hook && rotation_hook_userdata) {
++        k_cur = ggml_map_custom1(ctx, k_cur, rotation_hook, GGML_N_TASKS_MAX, rotation_hook_userdata[il]);
++    }
++
+     return ggml_set_rows(ctx, k, k_cur, k_idxs);
+ }
+ 
+@@ -1139,6 +1148,10 @@ ggml_tensor * llama_kv_cache::cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggm
+             v = ggml_reshape_2d(ctx, v, n_embd_gqa, kv_size*n_stream);
+         }
+ 
++        if (rotation_hook && rotation_hook_userdata) {
++            v_cur = ggml_map_custom1(ctx, v_cur, rotation_hook, GGML_N_TASKS_MAX, rotation_hook_userdata[il]);
++        }
++
+         return ggml_set_rows(ctx, v, v_cur, v_idxs);
+     }
+ 
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index 33c78c5f2..91de09662 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -166,6 +166,17 @@ public:
+     ggml_tensor * cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il, const slot_info & sinfo) const;
+     ggml_tensor * cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggml_tensor * v_idxs, int32_t il, const slot_info & sinfo) const;
+ 
++    // TurboQuant rotation hook: if set, applied to K/V tensors before cache write.
++    // The callback follows the ggml_map_custom1 signature.
++    // per_layer_userdata[layer_index] is passed as the void* userdata for that layer.
++    using kv_rotation_fn = void (*)(
++        struct ggml_tensor * dst,
++        const struct ggml_tensor * a,
++        int ith, int nth,
++        void * userdata);
++
++    void set_kv_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata);
++
+     //
+     // preparation API
+     //
+@@ -252,6 +263,9 @@ private:
+     // model layer id -> KV cache layer id
+     std::unordered_map<int32_t, int32_t> map_layer_ids;
+ 
++    kv_rotation_fn rotation_hook = nullptr;
++    void ** rotation_hook_userdata = nullptr; // array indexed by layer
++
+     size_t total_size() const;
+ 
+     size_t size_k_bytes() const;
+-- 
+2.50.1 (Apple Git-155)
+

@@ -47,6 +47,7 @@ _MAESTRO_TRANSIENT_FAILURE_MARKERS = (
     "TcpForwarder",
     "UNAVAILABLE: io exception",
     "Connection refused",
+    "Connection reset",
 )
 
 _MAESTRO_IPV4_JAVA_OPTION = "-Djava.net.preferIPv4Stack=true"
@@ -237,6 +238,8 @@ def _is_tcpip_serial(serial: str) -> bool:
 
 def _run_maestro_transport_recovery(serial: str, *, env: dict[str, str]) -> None:
     run_subprocess(["adb", "-s", serial, "forward", "--remove-all"], check=False, capture_output=True, env=env)
+    run_subprocess(["adb", "-s", serial, "shell", "am", "force-stop", "dev.mobile.maestro"], check=False, capture_output=True, env=env)
+    run_subprocess(["adb", "-s", serial, "shell", "am", "force-stop", "dev.mobile.maestro.test"], check=False, capture_output=True, env=env)
     if _is_tcpip_serial(serial):
         run_subprocess(["adb", "disconnect", serial], check=False, capture_output=True, env=env)
         run_subprocess(["adb", "connect", serial], check=False, capture_output=True, env=env)

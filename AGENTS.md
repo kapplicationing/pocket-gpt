@@ -14,7 +14,7 @@ This repo follows engineering excellence:
 2. Default Android evidence is a three-surface matrix: emulator for fast bootstrap/runtime checks, at least one connected device for transport and real hardware state, and Maestro Cloud for hosted supplemental evidence. Do not treat any single surface as sufficient when the change affects startup, provisioning, runtime readiness, selectors, or release confidence.
 3. Use scoped on-demand device flows only for targeted debugging (single crash/hang/regression path), not as a replacement for merge/release gates.
 4. If the same Maestro command, recovery path, or cloud rerun gets stuck twice, stop repeating it. Step back, classify the problem as harness/bootstrap/product/transport/cloud, then pivot to the smallest higher-signal command or surface in the matrix.
-5. For Android testing context, read `.claude/skills/maestro-android-cli/SKILL.md`, `.claude/skills/maestro-android-cli/references/testing-map.md`, and `docs/testing/maestro-android-companion-cli.md` before making changes to test workflows.
+5. For Android testing context, read `.claude/skills/maestro-android-cli/SKILL.md`, `.claude/skills/maestro-android-cli/references/testing-map.md`, and `docs/testing/maestro-android-companion-cli.md` before making changes to test workflows. Use the standalone installed `maestro-android` CLI for the full command surface; `python3 tools/maestro_android/main.py` is only the repo-local subset.
 6. For build/compile failures, use the global `code-health` skill and the Kotlin quality gate before treating the issue as a Maestro/testing problem.
 7. After UI selector changes, run `maestro-android lint` or `maestro-android audit-selectors` before widening to full lanes.
 8. For Compose UI refactors, read `.claude/skills/android-compose-ui-audit/SKILL.md` before changing shell/leaf ownership, undo flows, resource migrations, or accessibility semantics.
@@ -33,8 +33,10 @@ Use this approach when all are true:
 Search in the existing minimal flows in first 2 lines of the files to see if your case is covered or mostly covered.
 - If yes, modify it to fit your exact case.
 - If not, create a minimal Maestro flow in `tmp/` that performs only the failing path (ensure to include title and description the first 2 lines).
-Use `bash scripts/dev/scoped-repro.sh --flow tmp/<scoped-flow>.yaml` for this loop.
-The script builds/installs, runs the flow, captures Maestro output + logcat under `tmp/`, and scans for crash/runtime signatures with app-context filtering. 
-Use `--no-build --no-install` for fast reruns and `--serial your-device-id` for multi-device setups.
+Use `maestro-android scoped --flow tmp/<scoped-flow>.yaml` for this loop.
+The standalone CLI builds/installs, runs the flow, captures Maestro output + logcat under `.maestro-android/runs/`, and leaves `flow-state.json` plus failure-context artifacts for triage.
+Use `--no-build --no-install` for fast reruns and `--device your-device-id` for multi-device setups.
+
+`bash scripts/dev/scoped-repro.sh` remains compatibility-only. Prefer the CLI path for new guidance.
 
 Do not use scoped repro alone as release evidence. Promote recurring risks into stable tests under `tests/maestro/` and run canonical lanes afterward.

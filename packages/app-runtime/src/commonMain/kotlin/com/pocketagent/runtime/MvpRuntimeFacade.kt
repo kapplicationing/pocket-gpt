@@ -29,7 +29,7 @@ data class StreamChatRequestV2(
     val messages: List<InteractionMessage>,
     val taskType: String,
     val deviceState: DeviceState,
-    val maxTokens: Int = 128,
+    val maxTokens: Int = DEFAULT_CHAT_MAX_TOKENS,
     val requestTimeoutMs: Long = DEFAULT_REQUEST_TIMEOUT_MS,
     val requestId: String = defaultRequestId(),
     val previousResponseId: String? = null,

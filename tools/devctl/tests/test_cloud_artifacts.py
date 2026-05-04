@@ -151,6 +151,34 @@ class CloudArtifactsTest(unittest.TestCase):
             self.assertEqual("scenario-session-drawer-smoke", payload["last_reported_flow"]["name"])
             self.assertIn("partial hosted results", payload["blocker_message"])
 
+    def test_build_api_run_status_marks_project_fetch_failure_as_infra_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_path = root / "cli-output.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "Evaluating flow(s)...",
+                        "Failed to fetch projects. Status code: null",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            payload = cloud_artifacts.build_api_run_status(
+                android_api_level="34",
+                cli_exit_code=1,
+                cli_output_path=log_path,
+                completed_at_utc="2026-05-03T00:00:00Z",
+                junit_path=root / "junit.xml",
+            )
+
+            self.assertEqual("infra_status_fetch_failed", payload["status"])
+            self.assertEqual("maestro_cloud_project_fetch_failed", payload["blocker_key"])
+            self.assertTrue(payload["project_fetch_failed"])
+            self.assertEqual("null", payload["project_fetch_status_code"])
+            self.assertIn("project fetch failed", payload["blocker_message"])
+
     def test_aggregate_api_run_statuses_prefers_failed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

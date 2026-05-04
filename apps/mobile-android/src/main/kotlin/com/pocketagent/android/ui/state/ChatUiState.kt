@@ -3,6 +3,7 @@ package com.pocketagent.android.ui.state
 import androidx.compose.runtime.Immutable
 import com.pocketagent.android.runtime.GpuProbeStatus
 import com.pocketagent.core.RoutingMode
+import com.pocketagent.runtime.DEFAULT_CHAT_MAX_TOKENS
 import com.pocketagent.runtime.RuntimePerformanceProfile
 
 enum class MessageRole {
@@ -76,7 +77,7 @@ data class CompletionSettings(
     val temperature: Float = 0.6f,
     val topP: Float = 0.95f,
     val topK: Int = 40,
-    val maxTokens: Int = 512,
+    val maxTokens: Int = DEFAULT_CHAT_MAX_TOKENS,
     val repeatPenalty: Float = 1.1f,
     val frequencyPenalty: Float = 0.0f,
     val presencePenalty: Float = 0.0f,

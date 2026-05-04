@@ -2,9 +2,11 @@ package com.pocketagent.runtime
 
 import com.pocketagent.inference.DeviceState
 
+const val DEFAULT_CHAT_MAX_TOKENS: Int = 64
+
 data class RuntimeRequestContext(
     val deviceState: DeviceState,
-    val maxTokens: Int = 128,
+    val maxTokens: Int = DEFAULT_CHAT_MAX_TOKENS,
     val keepModelLoaded: Boolean = false,
     val requestTimeoutMs: Long = DEFAULT_REQUEST_TIMEOUT_MS,
     val requestId: String = defaultRequestId(),

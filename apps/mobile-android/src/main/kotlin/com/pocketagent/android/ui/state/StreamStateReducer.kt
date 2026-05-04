@@ -53,14 +53,8 @@ class StreamStateReducer(
             is ChatStreamEvent.Started -> state
             is ChatStreamEvent.Phase -> state.copy(lastPhase = event.phase.name.lowercase())
             is ChatStreamEvent.Thinking -> {
-                val firstToken = if (event.active && state.firstTokenMs == null) {
-                    elapsedMs.coerceAtLeast(0L)
-                } else {
-                    state.firstTokenMs
-                }
                 state.copy(
                     isThinking = event.active,
-                    firstTokenMs = firstToken,
                 )
             }
             is ChatStreamEvent.Delta -> {

@@ -1,0 +1,159 @@
+From 0670b510a1d3a5ff96b66901e5f5bbe14f15f01b Mon Sep 17 00:00:00 2001
+From: mkamar <mohamad.kamar@agoda.com>
+Date: Mon, 30 Mar 2026 18:57:15 +0700
+Subject: [PATCH 3/5] fix(turboquant): add Q rotation and output inverse
+ rotation for correct attention
+
+Forward WHT rotation was applied to K/V before cache write, but neither
+inverse rotation on read nor matching rotation on Q was implemented.
+This caused attention to compute in mixed coordinate spaces.
+
+Fix: rotate Q with same WHT (so <Rq,Rk>=<q,k>), then inverse-rotate
+attention output before W_o projection (so R^{-1}(R*wV)=wV).
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ src/llama-graph.cpp    |  9 ++++++---
+ src/llama-kv-cache.cpp | 32 ++++++++++++++++++++++++++++++++
+ src/llama-kv-cache.h   | 15 +++++++++++++++
+ 3 files changed, 53 insertions(+), 3 deletions(-)
+
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index 5f875136a..52341ff2c 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -2003,11 +2003,12 @@ ggml_tensor * llm_graph_context::build_attn(
+ 
+     const auto & kq_mask = inp->get_kq_mask();
+ 
+-    ggml_tensor * q = q_cur;
++    ggml_tensor * q = mctx_cur->apply_q_rotation(ctx0, q_cur, il);
+     ggml_tensor * k = mctx_cur->get_k(ctx0, il);
+     ggml_tensor * v = mctx_cur->get_v(ctx0, il);
+ 
+     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, kq_scale, il);
++    cur = mctx_cur->apply_inverse_rotation(ctx0, cur, il);
+     cb(cur, "kqv_out", il);
+ 
+     if (wo) {
+@@ -2086,11 +2087,12 @@ ggml_tensor * llm_graph_context::build_attn(
+ 
+     const auto & kq_mask = inp->get_kq_mask();
+ 
+-    ggml_tensor * q = q_cur;
++    ggml_tensor * q = mctx_cur->apply_q_rotation(ctx0, q_cur, il);
+     ggml_tensor * k = mctx_cur->get_k(ctx0, il);
+     ggml_tensor * v = ggml_view_4d(ctx0, k, v_cur->ne[0], k->ne[1], k->ne[2], k->ne[3], k->nb[1], k->nb[2], k->nb[3], 0);
+ 
+     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, kq_scale, il);
++    cur = mctx_cur->apply_inverse_rotation(ctx0, cur, il);
+     cb(cur, "kqv_out", il);
+ 
+     if (wo) {
+@@ -2153,11 +2155,12 @@ ggml_tensor * llm_graph_context::build_attn(
+ 
+     const auto & kq_mask = is_swa ? inp->get_kq_mask_swa() : inp->get_kq_mask();
+ 
+-    ggml_tensor * q = q_cur;
++    ggml_tensor * q = mctx_cur->apply_q_rotation(ctx0, q_cur, il);
+     ggml_tensor * k = mctx_cur->get_k(ctx0, il);
+     ggml_tensor * v = mctx_cur->get_v(ctx0, il);
+ 
+     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, kq_scale, il);
++    cur = mctx_cur->apply_inverse_rotation(ctx0, cur, il);
+     cb(cur, "kqv_out", il);
+ 
+     if (wo) {
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 7172d6dc5..d326c1a8a 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -1077,6 +1077,30 @@ void llama_kv_cache::set_kv_rotation_hook(kv_rotation_fn fn, void ** per_layer_u
+     rotation_hook_userdata = per_layer_userdata;
+ }
+ 
++void llama_kv_cache::set_q_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata) {
++    q_rotation_hook = fn;
++    q_rotation_hook_userdata = per_layer_userdata;
++}
++
++void llama_kv_cache::set_inverse_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata) {
++    inverse_rotation_hook = fn;
++    inverse_rotation_hook_userdata = per_layer_userdata;
++}
++
++ggml_tensor * llama_kv_cache::apply_q_rotation(ggml_context * ctx, ggml_tensor * q, int32_t il) const {
++    if (q_rotation_hook && q_rotation_hook_userdata) {
++        return ggml_map_custom1(ctx, q, q_rotation_hook, GGML_N_TASKS_MAX, q_rotation_hook_userdata[il]);
++    }
++    return q;
++}
++
++ggml_tensor * llama_kv_cache::apply_inverse_rotation(ggml_context * ctx, ggml_tensor * cur, int32_t il) const {
++    if (inverse_rotation_hook && inverse_rotation_hook_userdata) {
++        return ggml_map_custom1(ctx, cur, inverse_rotation_hook, GGML_N_TASKS_MAX, inverse_rotation_hook_userdata[il]);
++    }
++    return cur;
++}
++
+ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il, const slot_info & sinfo) const {
+     GGML_UNUSED(sinfo);
+ 
+@@ -2263,6 +2287,14 @@ ggml_tensor * llama_kv_cache_context::cpy_v(ggml_context * ctx, ggml_tensor * v_
+     return kv->cpy_v(ctx, v_cur, v_idxs, il, sinfos[i_cur]);
+ }
+ 
++ggml_tensor * llama_kv_cache_context::apply_q_rotation(ggml_context * ctx, ggml_tensor * q, int32_t il) const {
++    return kv->apply_q_rotation(ctx, q, il);
++}
++
++ggml_tensor * llama_kv_cache_context::apply_inverse_rotation(ggml_context * ctx, ggml_tensor * cur, int32_t il) const {
++    return kv->apply_inverse_rotation(ctx, cur, il);
++}
++
+ ggml_tensor * llama_kv_cache_context::build_input_k_idxs(ggml_context * ctx, const llama_ubatch & ubatch) const {
+     return kv->build_input_k_idxs(ctx, ubatch);
+ }
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index 91de09662..73ff75f86 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -176,6 +176,12 @@ public:
+         void * userdata);
+ 
+     void set_kv_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata);
++    void set_q_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata);
++    void set_inverse_rotation_hook(kv_rotation_fn fn, void ** per_layer_userdata);
++
++    // Apply Q rotation / inverse rotation hooks (used by llama_kv_cache_context)
++    ggml_tensor * apply_q_rotation(ggml_context * ctx, ggml_tensor * q, int32_t il) const;
++    ggml_tensor * apply_inverse_rotation(ggml_context * ctx, ggml_tensor * cur, int32_t il) const;
+ 
+     //
+     // preparation API
+@@ -266,6 +272,11 @@ private:
+     kv_rotation_fn rotation_hook = nullptr;
+     void ** rotation_hook_userdata = nullptr; // array indexed by layer
+ 
++    kv_rotation_fn q_rotation_hook = nullptr;
++    void ** q_rotation_hook_userdata = nullptr;
++    kv_rotation_fn inverse_rotation_hook = nullptr;
++    void ** inverse_rotation_hook_userdata = nullptr;
++
+     size_t total_size() const;
+ 
+     size_t size_k_bytes() const;
+@@ -355,6 +366,10 @@ public:
+     ggml_tensor * cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il) const;
+     ggml_tensor * cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggml_tensor * v_idxs, int32_t il) const;
+ 
++    // Apply Q rotation hook if set (for TurboQuant read-path correction)
++    ggml_tensor * apply_q_rotation(ggml_context * ctx, ggml_tensor * q, int32_t il) const;
++    ggml_tensor * apply_inverse_rotation(ggml_context * ctx, ggml_tensor * cur, int32_t il) const;
++
+     // create destination indices for each head of the current batch for where it would be written in the KV cache
+     // the indices address the global KV cache (not per stream) - this is not relevant for the user of this API, but
+     //   helps understand the implementation logic of cpy_k and cpy_v
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,5 +1,6 @@
 package com.pocketagent.android.voice
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.AlarmManager
 import android.app.Notification
@@ -218,6 +219,7 @@ internal class SherpaOnnxOffasVoiceEngine(
     private val recognizer by lazy { VoiceModelCatalog.recognizer(appContext) }
     private val keywordSpotter by lazy { VoiceModelCatalog.keywordSpotter(appContext) }
 
+    @SuppressLint("MissingPermission")
     override suspend fun awaitWakeAndCommand(
         wakePhrase: String,
         silenceTimeoutSeconds: Int,
@@ -225,6 +227,7 @@ internal class SherpaOnnxOffasVoiceEngine(
         onWakeWord: () -> Unit,
         onStateChanged: (VoiceServiceState) -> Unit,
     ): String? = withContext(Dispatchers.Default) {
+        // VoiceService checks RECORD_AUDIO before it creates or invokes the engine.
         val minBufferBytes = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,

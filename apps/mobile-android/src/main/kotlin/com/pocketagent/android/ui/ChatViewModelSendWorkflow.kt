@@ -193,7 +193,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                     sessionId = activeSession.id,
                     messageId = messageId,
                     finalText = formatUserFacingError(uiError),
-                    role = MessageRole.SYSTEM,
+                    role = MessageRole.ASSISTANT,
                     requestId = terminalRequestId,
                     finishReason = terminalReason,
                     terminalEventSeen = terminalEventSeen,

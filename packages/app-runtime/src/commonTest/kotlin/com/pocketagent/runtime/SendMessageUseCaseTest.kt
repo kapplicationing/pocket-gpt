@@ -217,7 +217,7 @@ class SendMessageUseCaseTest {
     }
 
     @Test
-    fun `generation does not timeout when first token is hidden think tag`() {
+    fun `generation only finishes timeout guard after first visible token`() {
         val fixture = createFixture(
             runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
             policyModule = permissivePolicy(),
@@ -227,9 +227,33 @@ class SendMessageUseCaseTest {
             ),
         )
 
+        val error = assertFailsWith<RuntimeGenerationTimeoutException> {
+            fixture.useCase.execute(
+                fixture.request(
+                    requestTimeoutMs = 5L,
+                ),
+            )
+        }
+
+        assertEquals(5L, error.timeoutMs)
+        assertEquals(1, fixture.cancelByRequestCalls)
+        assertEquals(0, fixture.cancelBySessionCalls)
+    }
+
+    @Test
+    fun `generation survives short hidden think block when visible answer arrives within deadline`() {
+        val fixture = createFixture(
+            runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
+            policyModule = permissivePolicy(),
+            inferenceModule = SendRecordingInferenceModule(
+                generatedTokens = listOf("<think>", "reasoning...", "</think>", "final answer"),
+                busyWaitMsAfterFirstToken = 1L,
+            ),
+        )
+
         val response = fixture.useCase.execute(
             fixture.request(
-                requestTimeoutMs = 5L,
+                requestTimeoutMs = 50L,
             ),
         )
 
@@ -380,6 +404,41 @@ class SendMessageUseCaseTest {
         assertEquals(2, response.toolCalls.size)
         assertEquals("date_time", response.toolCalls[0].name)
         assertEquals("notes_lookup", response.toolCalls[1].name)
+    }
+
+    @Test
+    fun `chatml profile ignores stray tool payload when visible answer is present`() {
+        val streamedTokens = mutableListOf<String>()
+        val fixture = createFixture(
+            runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
+            policyModule = permissivePolicy(),
+            inferenceModule = SendRecordingInferenceModule(
+                generatedTokens = listOf(
+                    "<think>private reasoning</think>",
+                    "Visible response ",
+                    "<tool_call>{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"}}",
+                ),
+            ),
+            routingModule = SendStaticRoutingModule(modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M),
+        )
+
+        val response = fixture.useCase.execute(
+            fixture.request().copy(
+                onToken = { token -> streamedTokens += token },
+            ),
+        )
+
+        assertEquals("Visible response", response.text)
+        assertEquals("completed", response.finishReason)
+        assertTrue(response.toolCalls.isEmpty())
+        assertEquals(null, response.reasoningContent)
+        assertEquals(
+            listOf(
+                "Visible response ",
+                "<tool_call>{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"}}",
+            ),
+            streamedTokens,
+        )
     }
 
     @Test

@@ -39,6 +39,7 @@ import com.pocketagent.android.ui.components.SectionHeader
 import com.pocketagent.android.ui.state.CompletionSettings
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
+import com.pocketagent.runtime.DEFAULT_CHAT_MAX_TOKENS
 import kotlin.math.roundToInt
 
 @Composable
@@ -143,7 +144,7 @@ internal fun CompletionSettingsSheet(
             label = stringResource(id = R.string.ui_completion_max_tokens_label),
             description = stringResource(id = R.string.ui_completion_max_tokens_desc),
             value = maxTokens.toFloat(),
-            valueRange = 128f..8192f,
+            valueRange = DEFAULT_CHAT_MAX_TOKENS.toFloat()..8192f,
             valueLabel = maxTokens.toString(),
             onValueChange = { maxTokens = it.roundToInt() },
             onValueChangeFinished = { emitUpdate() },

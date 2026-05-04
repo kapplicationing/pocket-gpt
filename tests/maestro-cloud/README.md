@@ -11,10 +11,10 @@ Purpose:
 
 Current flow set:
 
-1. `scenario-model-management-split-smoke.yaml` (`cloud-smoke`, `model-management`): clean-install contract for blocked/library entry, advanced entry points, library-only controls, runtime-only controls, and runtime empty state.
+1. `scenario-model-management-split-smoke.yaml` (`cloud-smoke`, `model-management`): launch-default ready-shell contract for opening the unified model library and asserting library-only controls after deterministic startup/bootstrap has already cleared the chat gate.
 2. `scenario-session-drawer-smoke.yaml` (`cloud-smoke`, `sessions`): clean-install session-shell contract using the `session_drawer_button` resource-id selector.
-3. `scenario-runtime-ready-smoke.yaml` (`cloud-smoke`, `runtime-readiness`): clean-install readiness contract that ends once the runtime is ready.
-4. `scenario-send-after-ready-smoke.yaml` (`cloud-send`, `send`): hosted send contract kept outside the default smoke tag so cloud smoke stays a short startup/runtime proof path instead of replacing strict journey authority.
+3. `scenario-runtime-ready-smoke.yaml` (`cloud-smoke`, `runtime-readiness`): clean-install readiness contract that ends once the runtime is ready and the inline chat gate has cleared.
+4. `scenario-send-after-ready-smoke.yaml` (`cloud-send`, `send`): hosted send contract kept outside the default smoke tag so cloud smoke stays a short startup/runtime proof path instead of replacing strict journey authority. This flow now uses `shared/bootstrap-cloud-startup.yaml` plus `shared/bootstrap-launch-default-model.yaml` so hosted send proof stays pinned to the launch-default `qwen3-0.6b-q4_k_m` path instead of heuristic `Load last used` recovery. Post-send success is assistant completion plus the shell returning to the idle `Send` label; it does not require an enabled send button after the composer has been cleared.
 5. `scenario-gpu-cpu-benchmark.yaml` (`cloud-benchmark`, `benchmark`, `long-running`): clean install, first-run provisioning, GPU-on send benchmark, new-session GPU-off send benchmark, and assertion that GPU completes faster than CPU on the same cloud device.
 
 Recommended command:

@@ -593,17 +593,27 @@ private fun DownloadedModelCard(
                 Button(
                     onClick = { haptic(); onLoadVersion(model.modelId, version.version) },
                     enabled = !busy && !isLoaded && eligibility.loadAllowed,
-                    modifier = if (loadDisabledReason != null) {
-                        Modifier.semantics { stateDescription = loadDisabledReason }
-                    } else {
-                        Modifier
-                    },
+                    modifier = modelLibraryLoadButtonModifier(
+                        modelId = model.modelId,
+                        version = version.version,
+                    )
+                        .then(
+                            if (loadDisabledReason != null) {
+                                Modifier.semantics { stateDescription = loadDisabledReason }
+                            } else {
+                                Modifier
+                            },
+                        ),
                 ) {
                     Text(stringResource(id = if (isLoaded) R.string.ui_loaded else R.string.ui_load))
                 }
                 OutlinedButton(
                     onClick = { haptic(); onSetDefaultVersion(model.modelId, version.version) },
                     enabled = !version.isActive,
+                    modifier = modelLibrarySetActiveButtonModifier(
+                        modelId = model.modelId,
+                        version = version.version,
+                    ),
                 ) {
                     Text(stringResource(id = if (version.isActive) R.string.ui_active else R.string.ui_set_active))
                 }
@@ -797,11 +807,17 @@ private fun AvailableModelCard(
                                 Button(
                                     onClick = { haptic(); onDownloadVersion(version) },
                                     enabled = eligibility.downloadAllowed,
-                                    modifier = if (downloadDisabledReason != null) {
-                                        Modifier.semantics { stateDescription = downloadDisabledReason }
-                                    } else {
-                                        Modifier
-                                    },
+                                    modifier = modelLibraryDownloadButtonModifier(
+                                        modelId = version.modelId,
+                                        version = version.version,
+                                    )
+                                        .then(
+                                            if (downloadDisabledReason != null) {
+                                                Modifier.semantics { stateDescription = downloadDisabledReason }
+                                            } else {
+                                                Modifier
+                                            },
+                                        ),
                                 ) {
                                     Text(stringResource(id = R.string.ui_download))
                                 }
@@ -926,6 +942,43 @@ private fun matchesModelSearch(
 }
 
 private fun versionIdentityKey(modelId: String, version: String): String = "$modelId::$version"
+
+internal fun modelLibraryLoadButtonTag(modelId: String, version: String): String =
+    "model_library_load_${modelId}_${version}"
+
+internal fun modelLibrarySetActiveButtonTag(modelId: String, version: String): String =
+    "model_library_set_active_${modelId}_${version}"
+
+internal fun modelLibraryDownloadButtonTag(modelId: String, version: String): String =
+    "model_library_download_${modelId}_${version}"
+
+private fun modelLibraryLoadButtonModifier(modelId: String, version: String): Modifier {
+    return if (isLaunchDefaultModelVersion(modelId, version)) {
+        Modifier.testTag("model_library_load_qwen3-0.6b-q4_k_m_q4_k_m")
+    } else {
+        Modifier.testTag(modelLibraryLoadButtonTag(modelId, version))
+    }
+}
+
+private fun modelLibrarySetActiveButtonModifier(modelId: String, version: String): Modifier {
+    return if (isLaunchDefaultModelVersion(modelId, version)) {
+        Modifier.testTag("model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m")
+    } else {
+        Modifier.testTag(modelLibrarySetActiveButtonTag(modelId, version))
+    }
+}
+
+private fun modelLibraryDownloadButtonModifier(modelId: String, version: String): Modifier {
+    return if (isLaunchDefaultModelVersion(modelId, version)) {
+        Modifier.testTag("model_library_download_qwen3-0.6b-q4_k_m_q4_k_m")
+    } else {
+        Modifier.testTag(modelLibraryDownloadButtonTag(modelId, version))
+    }
+}
+
+private fun isLaunchDefaultModelVersion(modelId: String, version: String): Boolean {
+    return modelId == "qwen3-0.6b-q4_k_m" && version == "q4_k_m"
+}
 
 private data class AvailableCatalogVersion(
     val displayName: String,

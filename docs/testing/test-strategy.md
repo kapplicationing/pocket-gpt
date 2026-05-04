@@ -28,6 +28,10 @@ For Android UI/runtime changes, default evidence is:
 
 Do not silently substitute one surface for another when startup, provisioning, runtime readiness, selectors, or release confidence changed.
 
+Operator shortcut:
+
+- `scripts/dev/README.md` carries the canonical local emulator path: start the emulator, confirm the serial, run `android-instrumented`, then one emulator smoke before widening to the connected-device and cloud legs.
+
 ## Core Flow Coverage Contract
 
 | Core Flow | Minimum Automated Coverage | Lane/Evidence Expectation | Owner |

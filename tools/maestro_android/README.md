@@ -25,4 +25,20 @@ Primary commands:
 - `clean`: removes companion CLI scratch artifacts
 - `cloud`: passes through to `maestro cloud`
 
+## Default Evidence Matrix
+
+Use these surfaces together by default:
+
+- **Emulator**: fast bootstrap and narrow repro proof.
+- **Connected device**: real hardware proof for storage, permissions, transport, and OEM behaviour.
+- **Cloud**: hosted supplemental proof for account-specific smoke and hosted environment checks.
+
+Do not assume one surface replaces the others. If the same command or recovery path gets stuck twice, stop repeating it, classify the failure, and pivot to the smallest higher-signal command or another surface in the matrix.
+
+Typical shape:
+
+1. Emulator or narrow scoped loop to prove the local theory quickly.
+2. One connected-device lane to confirm real-device behaviour.
+3. Hosted `cloud smoke` or the smallest authoritative hosted subset when hosted evidence matters.
+
 Configuration lives in `.maestro-android.yaml`.

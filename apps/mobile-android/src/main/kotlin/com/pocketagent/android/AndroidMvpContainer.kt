@@ -24,6 +24,7 @@ import com.pocketagent.nativebridge.LlamaCppInferenceModule
 import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
 import com.pocketagent.nativebridge.RuntimeBackend
 import com.pocketagent.runtime.PolicyAwareNetworkClient
+import com.pocketagent.runtime.DEFAULT_CHAT_MAX_TOKENS
 import com.pocketagent.runtime.ModelResidencyPolicy
 import com.pocketagent.runtime.PerformanceRuntimeConfig
 import com.pocketagent.runtime.SamplingOverrides
@@ -123,7 +124,7 @@ class AndroidMvpContainer(
         userText: String,
         taskType: String,
         deviceState: DeviceState,
-        maxTokens: Int = 128,
+        maxTokens: Int = DEFAULT_CHAT_MAX_TOKENS,
         keepModelLoaded: Boolean = false,
         requestTimeoutMs: Long = DEFAULT_REQUEST_TIMEOUT_MS,
         requestId: String = "legacy",
@@ -148,7 +149,7 @@ class AndroidMvpContainer(
         userText: String,
         taskType: String,
         deviceState: DeviceState,
-        maxTokens: Int = 128,
+        maxTokens: Int = DEFAULT_CHAT_MAX_TOKENS,
         keepModelLoaded: Boolean = false,
         requestTimeoutMs: Long = DEFAULT_REQUEST_TIMEOUT_MS,
         requestId: String = "legacy",

@@ -432,6 +432,8 @@ private fun ComposerInputRow(
                     isEditing -> stringResource(id = R.string.ui_update_button)
                     chatGateState.status == ChatGateStatus.BLOCKED_MODEL_MISSING ->
                         stringResource(id = R.string.ui_setup_button)
+                    chatGateState.status == ChatGateStatus.BLOCKED_RUNTIME_CHECK ->
+                        stringResource(id = R.string.ui_refresh_runtime_checks)
                     chatGateState.status == ChatGateStatus.LOADING_MODEL ->
                         stringResource(id = R.string.ui_loading_button)
                     chatGateState.status == ChatGateStatus.ERROR_RECOVERABLE ->

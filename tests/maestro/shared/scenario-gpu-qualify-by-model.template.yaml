@@ -2,22 +2,8 @@ appId: com.pocketagent.android
 ---
 - launchApp:
     clearState: true
-- runFlow:
-    when:
-      visible: "Skip"
-    commands:
-      - hideKeyboard
-      - tapOn: "Skip"
-- runFlow:
-    when:
-      visible: "Get started"
-    commands:
-      - hideKeyboard
-      - tapOn: "Get started"
-- extendedWaitUntil:
-    visible:
-      id: "composer_input"
-    timeout: 120000
+- runFlow: bootstrap-clean-start.yaml
+- runFlow: assert-post-onboarding-chat-surface.yaml
 - runFlow: open-advanced-controls.yaml
 - runFlow: open-model-library.yaml
 - scrollUntilVisible:

@@ -1,0 +1,89 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible:
+        id: "refresh_button"
+    commands:
+      - tapOn:
+          id: "refresh_button"
+- runFlow:
+    when:
+      visible: "Refresh"
+    commands:
+      - tapOn: "Refresh"
+- runFlow:
+    when:
+      visible: "Load last used"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Retry"
+    commands:
+      - tapOn: "Retry"
+- runFlow:
+    when:
+      visible: "Load"
+    commands:
+      - tapOn: "Load"
+- runFlow:
+    when:
+      visible: "Get ready"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Setup"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Unloaded"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Retry"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Load"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible:
+        id: "composer_input"
+    commands:
+      - runFlow: recover-runtime-from-model-library.yaml
+- runFlow:
+    when:
+      visible: "Model library"
+    commands:
+      - back
+- runFlow:
+    when:
+      visible:
+        id: "permission_allow_button"
+    commands:
+      - tapOn:
+          id: "permission_allow_button"
+- runFlow:
+    when:
+      visible: "Allow PocketAgent to send you notifications?"
+    commands:
+      - tapOn: "Allow"
+- runFlow:
+    when:
+      visible: "Loading…"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Loading…"
+          timeout: 180000

@@ -453,7 +453,7 @@ Relevant files:
 
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/OffasVoiceStack.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceActivation.kt`
-- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AndroidLocalToolRuntime.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/AndroidLocalToolRuntime.kt`
 
 What we learned:
 

@@ -76,7 +76,7 @@ def test_aggregator_promotes_on_all_pass(tmp_path, monkeypatch) -> None:
     out = tmp_path / "wp13.md"
     monkeypatch.setattr(mod, "IN", inputs)
     monkeypatch.setattr(mod, "OUT", out)
-    assert mod.main() == 0
+    assert mod.main([]) == 0
     assert "promote" in out.read_text()
 
 
@@ -89,5 +89,20 @@ def test_aggregator_holds_on_failures(tmp_path, monkeypatch) -> None:
     out = tmp_path / "wp13.md"
     monkeypatch.setattr(mod, "IN", inputs)
     monkeypatch.setattr(mod, "OUT", out)
-    assert mod.main() == 1
+    assert mod.main([]) == 1
     assert "hold" in out.read_text()
+
+
+def test_aggregator_can_emit_ai_human_proxy_packet(tmp_path, monkeypatch) -> None:
+    mod = _load_agg()
+    inputs = tmp_path / "_inputs"
+    inputs.mkdir()
+    for i in range(4):
+        (inputs / f"r{i}.json").write_text(json.dumps(_full_report(False)))
+    out = tmp_path / "wp13-human-proxy.md"
+    monkeypatch.setattr(mod, "IN", inputs)
+    monkeypatch.setattr(mod, "OUT_HUMAN_PROXY", out)
+    assert mod.main(["--packet-kind", "ai-human-proxy"]) == 1
+    text = out.read_text()
+    assert "WP-13 Packet (AI Human-Proxy)" in text
+    assert "AI human-proxy recommendation" in text

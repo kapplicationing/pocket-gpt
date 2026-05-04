@@ -88,4 +88,4 @@ Execution rule:
    - `docs/operations/evidence/wp-13/2026-03-10-qa-gate-policy-validation-and-a51-rerun.md`
 2. Moderated `QA-WP13-RUN02` packet remains blocked because required lanes still fail provisioning/runtime preflight.
 3. Blocking ticket:
-   - `docs/operations/tickets/eng-22-provisioning-startup-check-lane-blocker.md`
+   - `docs/operations/tickets/archive/eng-22-provisioning-startup-check-lane-blocker.md`

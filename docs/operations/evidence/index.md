@@ -16,7 +16,7 @@ This index is the canonical retained evidence inventory after prune.
 ### WP-09 (`docs/operations/evidence/wp-09/`)
 
 - Retained notes support active QA rollout and UX evidence references.
-- Template-only triage/summary notes were pruned in this sync pass; canonical templates now live in `docs/operations/wp-09-*.md`.
+- Template-only triage/summary notes were pruned in this sync pass; canonical templates now live in `docs/operations/templates/wp-09/` and policy canon lives in `docs/operations/policies/wp-09/`.
 
 ### WP-12 (`docs/operations/evidence/wp-12/`)
 

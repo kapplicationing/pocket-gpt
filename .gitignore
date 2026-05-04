@@ -30,6 +30,9 @@ local.properties
 .venv/
 __pycache__/
 
+# Generated reviewer/operator inputs
+tools/qa-agents/_inputs/*.json
+
 # Benchmark and device logs
 scripts/benchmarks/logcat-*.txt
 scripts/benchmarks/runs/

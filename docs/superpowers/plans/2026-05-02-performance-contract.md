@@ -1,5 +1,11 @@
 # PocketGPT Performance Contract & Hot-Path Discipline — Implementation Plan
 
+Status note:
+
+1. This is a secondary implementation plan.
+2. The current canonical contract lives in `docs/architecture/android-performance-contract.md`.
+3. Use `docs/operations/historical/post-mortems/post-mortem-2026-05-02-typing-jank.md` for the corrected RCA and current thresholds.
+
 ## What this plan is and is not
 
 This is **not** a "wrap all I/O in a layer" framework. It is a *hot-path contract* enforced at three points: the type system (suspend/dispatcher), the build (`assemble`/`check` source audits), and on-device evidence (`perf-baseline.sh`).
@@ -83,7 +89,7 @@ Cost is roughly two engineer-days and ~400 lines of code, not a month-long migra
 **Files:**
 
 - New: `docs/architecture/android-performance-contract.md`
-- Modify: `docs/architecture/README.md` (add link)
+- Modify: `docs/README.md` or another active docs index (add link)
 - Modify: `AGENTS.md` (link from the testing rules section so agents pick it up)
 
 **- [ ] Step 1: Write the contract doc with these sections**
@@ -94,7 +100,7 @@ Cost is roughly two engineer-days and ~400 lines of code, not a month-long migra
 4. *Hot-path checklist for new code* — the three things every reviewer asks: "what dispatcher", "what slice does this observe", "what's the cache key/lifetime".
 5. *Escalation*: when to widen perf-baseline thresholds vs. when to push back.
 
-**Verify:** `rg -n "performance-contract" docs/` shows references from `architecture/README.md` and `AGENTS.md`.
+**Verify:** `rg -n "performance-contract" docs/` shows references from the active docs index and `AGENTS.md`.
 
 ---
 
@@ -327,12 +333,12 @@ We also have no on-device evidence that *streaming-time* jank is bounded — onl
 **Files:**
 
 - Modify: `scripts/dev/perf-baseline.sh` — add a streaming sub-scenario, tighten thresholds
-- Modify: `tests/maestro/scenario-typing-jank-smoke.yaml` — add a follow-up flow `scenario-streaming-jank-smoke.yaml`
+- Modify: `tests/maestro/scenario-typing-jank-smoke.yaml` — optionally add a follow-up streaming-jank flow under `tests/maestro/` if the repo still lacks one
 - Modify: `docs/testing/runbooks.md` — document the ratcheting policy
 
 **- [ ] Step 1: Add streaming scenario**
 
-`tests/maestro/scenario-streaming-jank-smoke.yaml`: load a tiny model, send a fixed prompt that yields a known-long response, trigger `dumpsys gfxinfo reset` immediately before "send" and capture immediately after generation completes.
+A streaming-jank smoke flow under `tests/maestro/` should load a tiny model, send a fixed prompt that yields a known-long response, trigger `dumpsys gfxinfo reset` immediately before "send", and capture immediately after generation completes.
 
 **- [ ] Step 2: Tighten thresholds**
 
@@ -489,4 +495,3 @@ This is one PR per task, in order. Tasks 1, 4, and 7 are the user-visible improv
 - "Use the current improved metrics as baseline (jank ≤ 25%, p50 ≤ 18 ms)" — that's accepting mediocrity. We ratchet down after each pass.
 - "Don't centralize every file read behind a single abstraction" — agreed.
 - The junior's omission: no streaming-jank measurement, no penaltyDeath, no narrow-flow regression for the leftover `activeSessionFlow` over-observation.
-

@@ -1,12 +1,14 @@
 # Docs Governance
 
-Last updated: 2026-03-10
+Last updated: 2026-05-04
 
 Docs governance has three layers:
 
 1. `docs-drift`: checks canonical-vs-noncanonical command/process duplication policy.
 2. `docs-health`: checks link integrity (markdown links + backtick path refs), status-field policy, required indexes, and evidence-retention policy from config.
 3. `docs-accuracy`: checks feature-doc-code parity using `docs/governance/docs-accuracy-manifest.json` and emits a machine-readable drift report under the build output directory.
+
+Contributor CRUD and naming/lifecycle rules live in `docs/governance/documentation-lifecycle.md`.
 
 ## Contracts
 

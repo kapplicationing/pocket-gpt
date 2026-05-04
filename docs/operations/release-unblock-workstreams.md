@@ -184,31 +184,31 @@ Parallelization:
 1. Can be piloted immediately on any current failing lane artifact.
 2. Works best once cloud-first artifact parity is stable.
 
-## Workstream 7: Human-Required Usability Closure
+## Workstream 7: Moderation-Backed Usability Closure
 
 Owner: Product + QA  
 Support: Design, Engineering
 
 Goal:
 
-Complete the minimum human-moderated evidence that automation cannot replace.
+Complete the minimum moderation-backed evidence that automation cannot replace.
 
 Scope:
 
-1. Run moderated WP-13 packet only after scripted flows are stable enough to measure.
+1. Run the `human-moderated` WP-13 packet when moderators are available, or the disclosed `AI human-proxy` fallback packet when they are not, only after scripted flows are stable enough to measure.
 2. Capture onboarding, recovery, privacy-comprehension, and confusion metrics.
 3. Keep the sample focused on questions that remain subjective.
 
 Acceptance:
 
 1. WP-13 packet has measured values instead of placeholders.
-2. Human-required evidence is limited to moderated usability and ambiguity resolution.
+2. Moderation-backed evidence is limited to usability, privacy/trust, and ambiguity-resolution work that machine-verifiable lanes cannot close.
 3. No contradictory story -> flow -> test -> evidence mapping remains.
 
 Parallelization:
 
 1. Preparation can run in parallel with Workstreams 1-6.
-2. Final moderated sessions should wait until deterministic technical regressions are no longer dominating the result.
+2. Final moderated or proxy sessions should wait until deterministic technical regressions are no longer dominating the result.
 
 ## Workstream 8: Launch Decision + Release-Date Readiness
 

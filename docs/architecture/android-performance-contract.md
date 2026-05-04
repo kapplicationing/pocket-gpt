@@ -8,7 +8,7 @@ contract makes those rules explicit.
 For the operation-by-operation execution plan that applies this contract across
 startup, provisioning, model load/switch, streaming, model library, drawer search,
 onboarding, voice, and tooling gates, see
-`docs/operations/android-operational-performance-plan.md`.
+`docs/architecture/performance/android-operational-performance-plan.md`.
 
 ## Invariants
 

@@ -1,5 +1,11 @@
 # PocketGPT UI-Thread Performance Recovery — Implementation Plan
 
+Status note:
+
+1. This is a historical implementation plan, not current launch canon.
+2. Use `docs/operations/historical/post-mortems/post-mortem-2026-05-02-typing-jank.md` for the corrected RCA.
+3. Use `docs/architecture/android-performance-contract.md` and `docs/testing/runbooks.md` for the current performance policy.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make typing in the composer and switching/loading models feel instant by removing main-thread disk I/O, fixing Compose recomposition pathology, and splitting the god-object UI state so unrelated events stop fighting for the same recomposition.
@@ -114,8 +120,8 @@ Each task is independently committable. Tasks 1–3 are the highest user-visible
 
 - Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/MainActivity.kt`
 - Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppForegroundRuntimeServices.kt`
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppRuntimeLifecycleCoordinator.kt:233-287`
-- Test: `apps/mobile-android/src/test/kotlin/com/pocketagent/android/MainActivityStartupContractTest.kt` (new)
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/AppRuntimeLifecycleCoordinator.kt`
+- Test: a dedicated startup contract test under `apps/mobile-android/src/test/kotlin/com/pocketagent/android/` (planned)
 
 **- [ ] Step 1: Add a `bootstrapAsync()` helper to the runtime services**
 
@@ -285,7 +291,7 @@ Note: `viewModels { … }` factory still runs on main when first read, but its b
 
 **- [ ] Step 4: Write the regression test**
 
-Create `apps/mobile-android/src/test/kotlin/com/pocketagent/android/MainActivityStartupContractTest.kt`:
+Create a dedicated startup contract test under `apps/mobile-android/src/test/kotlin/com/pocketagent/android/`:
 
 ```kotlin
 @RunWith(AndroidJUnit4::class)
@@ -368,9 +374,9 @@ EOF
 
 **Files:**
 
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AndroidRuntimeProvisioningStore.kt:1178-1200`
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuOffloadQualification.kt:165-200`
-- Test: `apps/mobile-android/src/test/kotlin/com/pocketagent/android/runtime/StorageRootCacheTest.kt` (new)
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AndroidRuntimeProvisioningStore.kt`
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuOffloadQualification.kt`
+- Test: a dedicated storage-root cache test under `apps/mobile-android/src/test/kotlin/com/pocketagent/android/runtime/` (planned)
 
 **- [ ] Step 1: Write the failing test**
 
@@ -473,8 +479,8 @@ last-loaded model per manifest generation."
 
 **Files:**
 
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ModelProvisioningViewModel.kt:130-150`, `:357-382`
-- Test: `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/ModelProvisioningViewModelDispatcherTest.kt` (new)
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ModelProvisioningViewModel.kt`
+- Test: a dedicated provisioning-dispatcher contract test under `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/` (planned)
 
 **- [ ] Step 1: Write the failing test**
 
@@ -924,7 +930,7 @@ header / chat-gate / capability evaluation on every keystroke."
 - Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatViewModel.kt`
 - Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/state/ChatUiState.kt`
 - Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatViewModelSendWorkflow.kt`
-- Test: `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/StreamingMessageMutationTest.kt` (new)
+- Test: a dedicated streaming-mutation regression test under `apps/mobile-android/src/test/kotlin/com/pocketagent/android/ui/` (planned)
 
 **- [ ] Step 1: Add a streaming-only state slice**
 
@@ -1039,11 +1045,11 @@ avoiding O(messages × sessions) allocations per frame."
 
 ### Task 7: Defer `AndroidGpuOffloadQualifier` SharedPreferences read
 
-**Why:** `AndroidGpuOffloadQualifier.<init>` (`GpuOffloadQualification.kt:225`) calls `appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)` synchronously, which loads/parses the XML on first read. Captured at 52 ms on the main thread.
+**Why:** `AndroidGpuOffloadQualifier.<init>` (in `GpuOffloadQualification.kt`) calls `appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)` synchronously, which loads/parses the XML on first read. Captured at 52 ms on the main thread.
 
 **Files:**
 
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuOffloadQualification.kt:197-228`
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuOffloadQualification.kt`
 
 **- [ ] Step 1: Wrap the prefs read in a lazy on Dispatchers.IO**
 
@@ -1102,8 +1108,8 @@ git commit -m "perf(gpu): defer SharedPreferences read in GpuOffloadQualifier to
 
 **Files:**
 
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/StoredModelSidecarMetadata.kt:33-37`
-- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/OffasVoiceStack.kt:62-66`
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/StoredModelSidecarMetadata.kt`
+- Modify: `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/OffasVoiceStack.kt`
 
 **- [ ] Step 1: Add an in-process cache to the sidecar store**
 

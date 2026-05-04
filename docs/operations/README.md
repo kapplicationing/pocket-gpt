@@ -17,7 +17,7 @@ This section is the cross-functional execution system.
 - QA operating doctrine: `docs/testing/qa-operating-principles.md`
 - Cloud-first QA operating model: `docs/testing/cloud-first-qa-operating-model.md`
 - Launch program learnings: `docs/operations/launch-program-learnings.md`
-- Android operational performance plan: `docs/operations/android-operational-performance-plan.md`
+- Android operational performance plan: `docs/architecture/performance/android-operational-performance-plan.md`
 
 ## Status Contract
 
@@ -25,19 +25,22 @@ This section is the cross-functional execution system.
 2. `Status:` fields are allowed only in `execution-board.md` and `tickets/*.md`.
 3. Role playbooks and roadmap docs are context/responsibility docs, not live status boards.
 
-## Documents
+## Layout
 
-- `execution-board.md`
-- `android-operational-performance-plan.md`
-- `launch-program-learnings.md`
-- `play-store-launch-program.md`
-- `play-store-submission-readiness.md`
-- `qa-improvement-action-plan.md`
-- `release-unblock-workstreams.md`
-- `tickets/`
-- `role-playbooks/engineering-playbook.md`
-- `role-playbooks/product-playbook.md`
-- `role-playbooks/marketing-playbook.md`
-- `role-playbooks/qa-playbook.md`
-- `evidence/index.md`
-- `assets/README.md`
+- Active boards and plans stay at the top level:
+  - `execution-board.md`
+  - `launch-program-learnings.md`
+  - `play-store-launch-program.md`
+  - `play-store-submission-readiness.md`
+  - `qa-improvement-action-plan.md`
+  - `release-unblock-workstreams.md`
+- Generated QA truth lives under `docs/testing/generated/`.
+- Active tickets stay under `tickets/`.
+- Completed ticket specs move to `tickets/archive/`.
+- Role-specific working guides stay under `role-playbooks/`.
+- Retained evidence stays under `evidence/`.
+- Reusable templates live under `templates/`.
+- Step-by-step task guides live under `runbooks/`.
+- Stable operating policy docs live under `policies/`.
+- Historical writeups live under `historical/`.
+- Raw/derived launch assets stay under `assets/`.

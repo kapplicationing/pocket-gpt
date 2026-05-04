@@ -1,4 +1,4 @@
-"""Generate docs/operations/launch-flow-truth.md from the app source code.
+"""Generate docs/testing/generated/launch-flow-truth.md from the app source code.
 
 Authority list emitted per surface:
   - testTag values used in Compose
@@ -21,7 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "apps/mobile-android/src/main/kotlin/com/pocketagent/android"
 RES = REPO / "apps/mobile-android/src/main/res/values"
-OUT = REPO / "docs/operations/launch-flow-truth.md"
+OUT = REPO / "docs/testing/generated/launch-flow-truth.md"
 
 TEST_TAG = re.compile(r"(?:Modifier\.)?testTag\(\s*\"([^\"]+)\"\s*\)")
 LITERAL = re.compile(r"text\s*=\s*\"([^\"]{2,80})\"")

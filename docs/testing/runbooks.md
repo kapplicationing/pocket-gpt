@@ -1,6 +1,6 @@
 # Testing Runbooks
 
-Last updated: 2026-04-26
+Last updated: 2026-05-03
 
 These runbooks are short task guides. Strategy and gates stay in `docs/testing/test-strategy.md`.
 
@@ -62,7 +62,7 @@ Launch review ordering stays strict:
 1. Close code/contract blockers first.
 2. Run cloud-first machine-verifiable reruns second.
 3. Use one narrow physical-device canary third.
-4. Run moderated/human-required review last.
+4. Run moderation-backed review last.
 
 ## Runbook: Android UI/Runtime Smoke
 
@@ -72,6 +72,83 @@ python3 tools/devctl/main.py lane maestro
 python3 tools/devctl/main.py lane maestro --include-tags smoke
 python3 tools/devctl/main.py lane maestro --include-tags model-management
 ```
+
+If selector/copy/runtime-state labels changed, regenerate the automated-QA truth manifest before widening reruns:
+
+```bash
+python3 tools/qa-agents/code_truth_manifest.py
+maestro-android lint
+maestro-android audit-selectors
+```
+
+## Runbook: WP-13 AI human-proxy fallback bundle
+
+Use this when human moderators are unavailable and the deterministic technical path is already stable enough that a proxy session is more likely to expose comprehension/recovery issues than raw runtime breakage.
+
+Primary entrypoint:
+
+```bash
+python3 tools/qa-agents/prepare_human_proxy_bundle.py --tester cloud-1 --run
+```
+
+That command:
+
+1. Reuses `tools/qa-agents/run_ai_tester.py` for deterministic capture.
+2. Creates `tmp/qa-agents/<tester>/<stamp>/human-proxy-bundle/`.
+3. Drops a minimal discovery pack:
+   - `START_HERE.md`
+   - `SUBAGENT_PROMPT.md`
+   - `workflow-checklist.md`
+   - `bundle-manifest.json`
+   - `trip_report.schema.json`
+   - `trip_report.template.md`
+   - `trip-report.skeleton.json`
+4. Points the reviewer at the exact seed and aggregate commands for proxy closure.
+
+Fallback execution contract:
+
+1. Prepare one bundle per tester (`cloud-1`, `cloud-2`, `device-s22`, `device-a51`) or reuse an existing artifact root with `--artifacts-root`.
+2. Give the assigned reviewer only the generated bundle path; the bundle is the discovery boundary.
+3. Seed each report with the bundle-provided `fill_trip_from_skeleton.py` command.
+4. Write reviewer output to `tools/qa-agents/_inputs/<tester>.json`.
+5. Aggregate with:
+
+```bash
+python3 tools/qa-agents/aggregate_wp13.py --packet-kind ai-human-proxy
+```
+
+6. Use the resulting packet at `docs/operations/evidence/wp-13/2026-05-03-wp13-packet-ai-human-proxy.md` as the disclosed moderation-backed fallback artifact for the controlled MVP.
+
+Policy boundary:
+
+1. This path may close the WP-13 moderation leg for the controlled Play Store MVP when moderators are unavailable.
+2. It must remain explicitly labeled `AI human-proxy`.
+3. It does not replace current machine-verifiable lane evidence.
+4. It does not authorize broader public-launch claims or scope expansion.
+
+## Runbook: WP-13 AI testers / AI human-proxy deterministic capture (`run_ai_tester.py`)
+
+**Why this blocks:** Maestro talks to the phone over a **local gRPC tunnel** (host `tcp:7001` ↔ `adb reverse`). `adb install` succeeding does **not** prove Maestro can attach. Stale Maestro processes, a second host consumer of port **7001**, or a wireless serial mismatch yields **`device … is not connected`** before any YAML runs.
+
+**Smooth path (do in order):**
+
+1. `adb devices` — confirm the **exact** serial strings match `tools/qa-agents/run_ai_tester.py` → `DEVICES` (wireless `adb-…​._adb-tls-connect._tcp` rows must be `device`, not `offline`).
+2. Per phone, before the eight-flow journey:  
+   `bash scripts/dev/maestro-local-bootstrap.sh --serial '<serial>'`  
+   (clears reverse rules on that device, re-binds **7001**, kills stray `maestro test` / Studio, runs a noop flow). **Run one device at a time** if you hit “address already in use” on **7001**.
+3. `python3 tools/qa-agents/run_ai_tester.py --tester device-s22` then `… device-a51` (runner also invokes the bootstrap script after `adb install`).
+4. Merge qualitative fields into `tools/qa-agents/_inputs/device-*.json` from the newest `tmp/qa-agents/<tester>/<stamp>/` logs if needed.
+5. `python3 tools/qa-agents/aggregate_wp13.py` — expect exit **1** (**hold**) until gate rows pass.
+
+Policy boundary:
+
+1. These AI-tester runs are valid for deterministic QA support, artifact review, and blocker summaries.
+2. On their own, they do **not** satisfy the WP-13 moderation leg; the approved bundle plus the proxy reporting workflow is required for that.
+3. Use the AI packet to pre-screen or seed the fallback moderation packet, not as a substitute for the packet itself.
+4. If human moderators are unavailable, label the session `AI human-proxy` and complete the bundle-driven proxy packet path.
+5. Use the bundle setup path before treating an `AI human-proxy` session as moderation-backed fallback evidence.
+
+**If Maestro says `device … is not connected` but `adb devices` shows `device`:** Maestro 2.x maintains its **own** device attachment path (see `~/.maestro/tests/*/maestro.log`). Try: unlock the phone, disable/re-enable **Wireless debugging**, switch to a **USB serial** (update `DEVICES` in `run_ai_tester.py` temporarily), reboot `adb kill-server && adb start-server`, upgrade/downgrade Maestro, or run the same commands from a normal terminal session outside IDE automation.
 
 ## Runbook: Performance Regression Check
 
@@ -98,7 +175,7 @@ refuses to measure debuggable builds without `--allow-debuggable`. See
 [android-performance-contract.md](../architecture/android-performance-contract.md)
 for the rationale and the 2026-05-02 RCA. For the broader operation-by-operation
 follow-up plan, see
-[`android-operational-performance-plan.md`](../operations/android-operational-performance-plan.md).
+[`android-operational-performance-plan.md`](../architecture/performance/android-operational-performance-plan.md).
 
 Run the script three times and compare medians — the first run is always
 warmup-skewed because of cold ART, cold Compose runtime, and cold IME.
@@ -172,9 +249,9 @@ Promotion rule:
 
 ### Local Maestro Bootstrap Recovery
 
-If `lane maestro` or `lane journey --mode strict` fails with a `localhost:7001`
-gRPC error before any flow logic runs, the Maestro local driver did not bind.
-Run:
+If `lane maestro` or another locally bootstrapped Maestro smoke fails with a
+`localhost:7001` gRPC error before any flow logic runs, the Maestro local driver
+did not bind. Run:
 
 ```bash
 bash scripts/dev/maestro-local-bootstrap.sh --serial <serial>
@@ -183,6 +260,11 @@ bash scripts/dev/maestro-local-bootstrap.sh --serial <serial>
 Then re-run the lane. If the bootstrap probe fails twice in a row, switch to
 the wired USB path or the emulator-backed local smoke; do not retry the
 wireless serial in a loop.
+
+This is a local Maestro harness recovery step, not the default explanation for
+strict `journey`. If strict `journey` already reaches instrumentation or
+send-capture, inspect `journey-report.json`, the send-capture artifacts, and
+the active send/readiness failure before using this helper.
 
 ## Runbook: Bundle Download E2E (Remote Manifest + Local Fixture Server)
 
@@ -336,9 +418,10 @@ bash scripts/dev/maestro-cloud-upload-status.sh \
 
 Operator notes:
 
-1. Hosted uploads can be `launched=true` but still remain `PENDING` for a while; classify that as hosted infrastructure latency unless a real flow verdict exists.
-2. Keep the upload id, upload URL, and project id with the run note so polling and external inspection are possible later.
-3. Use the parallel wrapper only when you intentionally want both configured accounts to run the same suite. Keep single-account reruns explicit when isolating one issue.
+1. Fresh hosted uploads can be `launched=true` and remain `PENDING` for a while; classify that as hosted infrastructure latency unless a real flow verdict exists.
+2. If an older preserved upload id polls as blank status or returns `404`, treat it as stale provenance rather than live blocker truth. Start a fresh hosted rerun and preserve the new upload id instead of continuing to cite the old one as current state.
+3. Keep the upload id, upload URL, and project id with the run note so polling and external inspection are possible later.
+4. Use the parallel wrapper only when you intentionally want both configured accounts to run the same suite. Keep single-account reruns explicit when isolating one issue.
 
 ## Runbook: Cloud GPU vs CPU Benchmark (Hosted Benchmark)
 
@@ -408,6 +491,7 @@ Artifacts to check after the lane completes:
 2. `journey-summary.md`
 3. each send-window `*-runtime-log-signals.md` linked from the journey summary
 4. the original send-window logcat if the summarized finding needs raw-line confirmation
+5. when the lane requested `send-capture`, inspect `run-01/screenshots/instrumentation/<stamp>/journey-send-capture.json` first; strict `journey` now prefers the instrumentation-produced send-capture artifact and only falls back to the Maestro kickoff path if that artifact is absent
 
 
 ```bash
@@ -415,6 +499,8 @@ python3 tools/devctl/main.py lane journey --repeats 1 --mode strict --reply-time
 ```
 
 Use `--mode valid-output` for slower devices where terminal output validation is required over SLA-oriented strictness.
+
+If the emulator path crashes the app under memory pressure during instrumentation send-capture, do not treat that emulator run as final launch authority. Preserve the artifact for diagnosis, then re-run the strict lane on the physical-device path that the launch gate actually uses.
 
 If you only need to inspect the latest output, use the report helper:
 

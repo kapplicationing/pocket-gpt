@@ -5,9 +5,10 @@ Use this path to get productive in 10 minutes.
 ## 1) Understand the project shape
 
 1. Read `README.md`.
-2. Read `docs/start-here/resource-map.md`.
-3. Read `docs/start-here/source-of-truth-matrix.md`.
-4. Open `docs/operations/execution-board.md` for current priorities.
+2. Read `docs/start-here/README.md`.
+3. Read `docs/start-here/resource-map.md`.
+4. Read `docs/start-here/source-of-truth-matrix.md`.
+5. Open `docs/operations/execution-board.md` for current priorities.
 
 ## 2) Verify your local environment
 
@@ -42,7 +43,13 @@ If you want to test on a real device instead of the emulator:
 
 - `docs/start-here/phone-setup-guide.md`
 
-## 5) Work contract
+## 6) Understand first-session UX
+
+If your work touches the initial user journey:
+
+- `docs/start-here/onboarding-spec.md`
+
+## 7) Work contract
 
 1. `docs/operations/execution-board.md` is the only mutable status board.
 2. Ticket specs live under `docs/operations/tickets/`.

@@ -5,6 +5,7 @@ Use this map to jump to the right source quickly.
 ## Start Here
 
 - New joiner path: `docs/start-here/new-joiner.md`
+- First-session onboarding contract: `docs/start-here/onboarding-spec.md`
 - Principal PM handover: `docs/start-here/principal-pm-handover.md`
 - Source-of-truth ownership: `docs/start-here/source-of-truth-matrix.md`
 - Documentation drift tracker: `docs/start-here/documentation-drift-register.md`

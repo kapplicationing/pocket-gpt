@@ -1,6 +1,6 @@
 # Principal PM Handover
 
-Last updated: 2026-04-26  
+Last updated: 2026-05-03  
 Audience: Principal PM
 
 This handover reflects the retained repo evidence and planning docs currently checked into the repository, plus the current April release-control updates tracked on the execution board.  
@@ -44,7 +44,7 @@ Current execution policy is intentionally ordered:
 1. Finish code and contract closure first.
 2. Restore machine-verifiable evidence through cloud-first reruns.
 3. Use one narrow real-device canary as a final OEM/runtime confirmation path.
-4. Run moderated WP-13 only after the deterministic path is stable enough to measure real usability signal.
+4. Run the moderation-backed WP-13 leg only after the deterministic path is stable enough to measure real usability signal.
 5. Keep broad public claim language narrower than implementation reality until `PROD-10`, `SEC-02`, and current-window evidence support expansion.
 
 ## Current Release Posture
@@ -62,17 +62,17 @@ The retained gate evidence shows that provisioning preflight was previously bloc
 
 The current blocker chain is more operational than architectural:
 
-1. `android-instrumented` now has a current-window pass, but the required promotion set is still incomplete because `maestro` and strict `journey` remain open,
-2. corrected cloud uploads for `runtime-ready`, `model-management`, and `send-after-ready` have been accepted, but the latest targeted `send-after-ready` uploads remain `PENDING` in Maestro Cloud without hosted verdicts during bounded polling,
-3. wireless Samsung Maestro remains a physical-canary harness blocker before app logic begins, even after retry and transport recovery,
-4. strict `journey` still remains an authoritative gate row even though cloud-first is the default machine-verifiable execution path, and the corrected kickoff rerun still confirms a local `localhost:7001` Maestro bootstrap failure before app logic rather than a new app regression,
-5. and the moderated WP-13 packet is still incomplete.
+1. `android-instrumented` now has a preserved current-window pass on the S906N canary at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`, but the required promotion set is still incomplete because hosted/default cloud coverage, publishable physical-device `maestro`, and the WP-13 packet are still open,
+2. hosted/default cloud evidence is mixed rather than absent: `first-run`, `gpu`, and `session-drawer` still have preserved passes, account 1 runtime-ready now has a fresh launched pass at `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-1-meteredfix/upload-status.json`, but the live blockers are now split. Account 1 `send-after-ready` fails later at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account-1-current/status.json` with `Assertion is false: id: message_bubble_assistant_complete is visible`, while account 2 current model-management still fails earlier at `tmp/maestro-cloud-targeted/20260504T025141Z-account-2-model-management-fresh/upload-status.json` with `Assertion is false: id: session_drawer_button is visible`,
+3. fresh helper-fix reruns exist at `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-1-helperfix/upload-status.json` and `tmp/maestro-cloud-targeted/20260504T0045Z-scenario-runtime-ready-smoke-account-2-rerun/upload-status.json`, but both are still `PENDING` without app launch and therefore represent cloud-infra noise rather than new app verdicts,
+4. the physical-device Samsung canary still lacks a publishable current-window `maestro` report because the canonical S22 lane emitted an empty `passed` report, while a direct preserved S22 Maestro run failed in bootstrap with `UNAVAILABLE` / `localhost:7001` connection refusal, so the launch canon cannot truthfully call that lane passed. But the S22 now has a fresher non-Maestro physical canary at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, and strict `journey` is no longer missing authority: S22 already preserves a current-window pass at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/`, the emulator remains diagnostic-only, and the A51 now publishes a fresher strict artifact set at `tmp/devctl-artifacts/2026-05-04/192.168.1.44:37643/journey/20260504-004041/` but still times out in `LOADING` / `Prefill...`,
+5. and the disclosed `AI human-proxy` WP-13 packet now exists with measured values, but it is still a `hold` packet and cannot offset missing machine-verifiable lane passes.
 
 Current evidence anchors the PM should use:
 
-1. Local authoritative proof already in hand: `tmp/devctl-artifacts/2026-04-26/adb-RR8NB087YTF-P4Pfzs._adb-tls-connect._tcp/android-instrumented/20260426-142357/`
+1. Local authoritative proof already in hand: `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`
 2. Repo-side launch snapshot: `build/devctl/launch-readiness/launch-readiness-report.md`
-3. Current machine-evidence gap list: hosted/default `runtime-ready` / `model-management` / `send-after-ready`, plus strict `journey`
+3. Current machine-evidence gap list: preserved physical-device `maestro`, launched hosted/default verdicts that still fail with `Setup` never clearing, plus the cloud-infra queue noise on the latest helper-fix reruns
 
 Story-level gate picture from the retained launch matrix:
 
@@ -105,8 +105,9 @@ The current open work falls into three main buckets:
    - current-window cloud and authoritative lane evidence
    - `ENG-20`
    - required lane reruns and hosted verdict closure
-2. Human evidence:
-   - moderated WP-13 packet
+2. Human/proxy evidence:
+   - the disclosed `AI human-proxy` WP-13 packet is now measured but still recommends `hold`
+   - a human-moderated replacement remains preferred if launch needs stronger non-proxy closure
    - onboarding, recovery, and privacy-comprehension metrics
 3. Release governance and ops:
    - privacy/claim parity
@@ -126,11 +127,11 @@ The current open work can be managed through eight execution workstreams:
 
 The critical path is:
 
-1. restore current-window cloud-first technical evidence where hosted execution is valid,
-2. get a clean hosted verdict for `send-after-ready`,
-3. preserve the current authoritative `android-instrumented` proof and close the strict `journey` row,
+1. preserve the current authoritative `android-instrumented` proof,
+2. preserve a publishable physical-device `maestro` report and close targeted hosted `send-after-ready`,
+3. close the strict `journey` row,
 4. confirm the result on one narrow physical-device canary once the harness is usable enough for final brush,
-5. complete the minimum moderated usability packet,
+5. interpret or replace the measured `AI human-proxy` packet with stronger moderation-backed evidence only after the deterministic path is stable,
 6. then make the release decision.
 
 Newer April documentation adds `QA-14`, `QA-15`, and `PROD-12` as operating-model work to make that path faster and cleaner. Those items improve execution quality, but they should be treated as `Ready` planning work, not closed evidence.
@@ -159,8 +160,8 @@ Evidence strength is mixed.
    - feature and UX evidence showing the core MVP surface exists
    - March QA matrix and retained closure evidence for implemented product areas
 2. Weak:
-   - the current-window promotion-path evidence set is still incomplete even though a fresh `android-instrumented` pass now exists locally, because hosted/default `maestro` gaps and strict `journey` are still open
-   - moderated WP-13 packet still lacks measured values
+   - the current-window promotion-path evidence set is still incomplete even though a fresh `android-instrumented` pass now exists locally, because physical-device `maestro`, targeted hosted `send-after-ready`, and strict `journey` are still open
+   - the disclosed `AI human-proxy` WP-13 packet now has measured values, but it remains a `hold` packet rather than a passing human-moderated closeout
    - release readiness cannot be inferred from earlier implementation evidence alone
 
 There is also a freshness nuance the PM should account for:
@@ -175,12 +176,12 @@ The PM job here is cross-functional release governance, not net-new scope defini
 
 The highest-value PM actions are:
 
-1. Keep technical evidence and moderated evidence clearly separated.
+1. Keep technical evidence and moderation-backed evidence clearly separated.
 2. Prevent subjective human research from being used to excuse missing technical gates.
-3. Prevent passing automation from being mistaken for trust/comprehension evidence that only moderated sessions can provide.
+3. Prevent passing automation from being mistaken for trust/comprehension evidence unless it is explicitly routed through the disclosed `AI human-proxy` fallback packet.
 4. Keep marketing and public claims constrained to verified privacy and product evidence.
 5. Force every release-date conversation to anchor on passed gates, not informal confidence.
-6. Keep the execution order strict: code first, cloud-first machine evidence second, authoritative device/CI rows third, physical canary brush fourth, human-required closure last.
+6. Keep the execution order strict: code first, cloud-first machine evidence second, authoritative device/CI rows third, physical canary brush fourth, moderation-backed closure last.
 
 ## Release-Date Guidance
 
@@ -189,7 +190,7 @@ A credible release date should not be set from optimism or target pressure.
 It should only be prepared after:
 
 1. required authoritative lanes have fresh current-window pass IDs,
-2. the WP-13 packet contains measured values,
+2. the WP-13 packet contains measured values and no longer recommends `hold`,
 3. the remaining physical-device canary work has moved from harness diagnosis to final brush,
 4. and `PROD-10` can be rerun from current evidence instead of placeholders and blocked rows.
 
@@ -204,7 +205,7 @@ No public or firm internal release date should be committed until:
 1. all required launch-gate rows pass,
 2. current-window pass IDs exist for `android-instrumented`, `maestro`, and `journey`,
 3. journey send-capture is clean,
-4. moderated WP-13 metrics are filled,
+4. moderation-backed WP-13 metrics are filled and no longer support a `hold` recommendation,
 5. and claim parity is locked to verified controls.
 
 Branch hygiene remains real operational work, not just documentation:
@@ -217,8 +218,8 @@ Branch hygiene remains real operational work, not just documentation:
 
 1. Review the current release board and active ticket set.
 2. Use the release-unblock workstream split to assign owners and dependencies.
-3. Track deterministic technical work separately from moderated usability work.
-4. Schedule release-date planning only after the technical and human-required evidence sets are both materially complete.
+3. Track deterministic technical work separately from moderation-backed usability work.
+4. Schedule release-date planning only after the technical and moderation-backed evidence sets are both materially complete.
 
 ## Recommended Reading Order
 

@@ -1,15 +1,21 @@
 # AI-Sub-Agent Launch Verification & Blocker Closure — Implementation Plan
 
+Status note:
+
+1. This is a secondary implementation plan, not launch canon.
+2. Canonical launch policy now lives in `docs/operations/play-store-launch-program.md`, `docs/testing/test-strategy.md`, and `docs/operations/tickets/prod-12-human-required-gate-split.md`.
+3. Agent outputs are valid for deterministic QA support only; they do not replace moderated WP-13 evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the remaining Play-Store launch hold by (1) re-deriving the app's flow contract from actual source code, (2) re-aligning Maestro flows to that contract, (3) dispatching four AI tester sub-agents (two Maestro-Cloud-driven, two physical-device-driven) to act as first-party "human" reviewers against PRD Workflows A/B/C plus all six WP-13 failure-state journeys, (4) compiling their findings into a moderated-style WP-13 packet, then (5) closing the four downstream release-governance tickets so the launch decision can be re-run from current evidence and `main` can be published.
+**Goal:** Close the remaining Play-Store launch hold by (1) re-deriving the app's flow contract from actual source code, (2) re-aligning Maestro flows to that contract, (3) dispatching four AI tester sub-agents (two Maestro-Cloud-driven, two physical-device-driven) to run deterministic scripted QA across PRD Workflows A/B/C plus the WP-13 failure-state journeys, (4) compiling their findings into an AI-assisted pre-screen packet, then (5) using that output to support downstream release-governance tickets so the launch decision can be re-run from current evidence and `main` can be published when the human-required gate is also satisfied.
 
 **Architecture:**
 
-1. **Code → Truth**: a single manifest (`docs/operations/launch-flow-truth.md`) is generated from the actual `apps/mobile-android` source. It is the only authority for what selectors, copy strings, CTAs, error codes, and stage-machine transitions exist in the build.
+1. **Code → Truth**: a single manifest (`docs/testing/generated/launch-flow-truth.md`) is generated from the actual `apps/mobile-android` source. It is the only authority for what selectors, copy strings, CTAs, error codes, and stage-machine transitions exist in the build.
 2. **Truth → Flows**: `tests/maestro/`, `tests/maestro/shared/`, and `tests/maestro-cloud/` are audited against the manifest. Drift gets fixed in this PR; any fix is a small, contract-focused commit.
 3. **Flows → Sub-Agent Fleet**: a thin Python orchestrator (`tools/qa-agents/`) spawns four AI tester sub-agents (cloud-1, cloud-2, device-S22, device-A51). Each gets the same scripted trip (Workflows A/B/C + recovery + manifest-outage + timeout) and produces a deterministic JSON trip report against the WP-13 schema. Sub-agents are LLM-driven `Task(subagent_type="generalPurpose")` workers, not Maestro flows running themselves.
-4. **Reports → Decision**: an aggregator turns four trip reports into one WP-13 packet, then re-runs `PROD-10` from the new evidence. Hosted infra-pending uploads (`mupload_01kq4fc793fdathk37tk97jkmd`, `mupload_01kq4fq5hpf6f9m53fm7pq8ew0`) are polled and re-fired in parallel; `localhost:7001` strict-`journey` bootstrap is fixed locally so authoritative journey lane has a current-window pass.
+4. **Reports → Decision support**: an aggregator turns four trip reports into one AI-assisted pre-screen packet, then feeds deterministic findings into `PROD-10` preparation. Hosted infra-pending uploads (`mupload_01kq4fc793fdathk37tk97jkmd`, `mupload_01kq4fq5hpf6f9m53fm7pq8ew0`) are polled and re-fired in parallel; `localhost:7001` strict-`journey` bootstrap is fixed locally so authoritative journey lane has a current-window pass.
 5. **Governance**: SEC-02 is re-verified, MKT-08 captures assets from the new screenshot pack, MKT-10 freezes claims against the new pass set, PROD-13 packages the submission, and `main` is fast-forwarded to `origin/main`.
 
 **Tech Stack:** Maestro CLI (cloud + local), `tools/devctl` Python orchestrator, `adb` over `tcp/tls`, Kotlin/Compose source as ground truth, JSON Schema for trip reports, Markdown for governance artifacts, Anthropic-style sub-agent dispatch via the parent agent's `Task` tool.
@@ -28,7 +34,7 @@
 
 | Layer         | Path                                                                                                  | Responsibility                                                                                    | Action                                  |
 | ------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| Truth         | `docs/operations/launch-flow-truth.md`                                                                | Single source of truth, derived from app code                                                     | Create                                  |
+| Truth         | `docs/testing/generated/launch-flow-truth.md`                                                         | Single source of truth, derived from app code                                                     | Create                                  |
 | Truth         | `tools/qa-agents/code_truth_manifest.py`                                                              | Script that emits the truth manifest by walking Compose `testTag`/`stringResource`/CTA call sites | Create                                  |
 | Flows         | `tests/maestro/shared/*.yaml`, `tests/maestro/scenario-*.yaml`, `tests/maestro-cloud/scenario-*.yaml` | E2E flows                                                                                         | Patch to match truth where drift exists |
 | Orchestrator  | `tools/qa-agents/__init__.py`, `tools/qa-agents/run_ai_tester.py`                                     | Spawns one tester (cloud or device) and persists its trip report                                  | Create                                  |
@@ -38,7 +44,7 @@
 | Triage loop   | `tools/qa-agents/triage_failure.py`                                                                   | QA-15 agent-assisted triage from one failed run                                                   | Create                                  |
 | Hosted infra  | `scripts/dev/maestro-cloud-watch.sh`                                                                  | Poll hosted `PENDING` uploads + re-fire on null verdict (closes infra-pending blocker)            | Create                                  |
 | Local Maestro | `scripts/dev/maestro-local-bootstrap.sh`                                                              | Resolves the `localhost:7001` Maestro bootstrap on the wired Samsung path                         | Create                                  |
-| Evidence      | `docs/operations/evidence/wp-13/2026-05-02-ai-tester-fleet-run-01.md`                                 | Aggregate evidence note                                                                           | Create                                  |
+| Evidence      | planned AI-tester fleet evidence note under `docs/operations/evidence/wp-13/`                           | Aggregate deterministic QA note                                                                   | Create                                  |
 | Evidence      | `docs/operations/evidence/wp-13/2026-05-02-wp13-packet-run-02-ai-moderated.md`                        | WP-13 packet (run-02), `tester=AI-agent` honestly disclosed                                       | Create                                  |
 | Decision      | `docs/operations/tickets/prod-10-launch-gate-matrix.md`                                               | Update required-row state from new evidence                                                       | Modify                                  |
 | Decision      | `docs/operations/execution-board.md`                                                                  | Update sprint board statuses                                                                      | Modify                                  |
@@ -61,7 +67,7 @@
 
 - Create: `tools/qa-agents/__init__.py`
 - Create: `tools/qa-agents/code_truth_manifest.py`
-- Create: `docs/operations/launch-flow-truth.md` (committed output of the script)
+- Create: `docs/testing/generated/launch-flow-truth.md` (committed output of the script)
 
 **- [ ] Step 1: Create the `tools/qa-agents` package**
 
@@ -75,7 +81,7 @@ printf '"""AI-tester orchestration for PocketAgent launch verification."""\n' > 
 Create `tools/qa-agents/code_truth_manifest.py` with the following content. It is intentionally read-only, plain Python 3.11+, no external dependencies. It walks `apps/mobile-android/src/main/kotlin` (and `*/res/values/strings.xml`) and emits a Markdown manifest grouped by surface.
 
 ```python
-"""Generate docs/operations/launch-flow-truth.md from the app source code.
+"""Generate docs/testing/generated/launch-flow-truth.md from the app source code.
 
 Authority list emitted per surface:
   - testTag values used in Compose
@@ -98,7 +104,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "apps/mobile-android/src/main/kotlin/com/pocketagent/android"
 RES = REPO / "apps/mobile-android/src/main/res/values"
-OUT = REPO / "docs/operations/launch-flow-truth.md"
+OUT = REPO / "docs/testing/generated/launch-flow-truth.md"
 
 TEST_TAG = re.compile(r"\.testTag\(\s*\"([^\"]+)\"\s*\)")
 LITERAL  = re.compile(r"text\s*=\s*\"([^\"]{2,80})\"")
@@ -205,7 +211,7 @@ if __name__ == "__main__":
 python3 tools/qa-agents/code_truth_manifest.py
 ```
 
-Expected: `wrote docs/operations/launch-flow-truth.md`. Open it and confirm at minimum:
+Expected: `wrote docs/testing/generated/launch-flow-truth.md`. Open it and confirm at minimum:
 
 - `ChatShell` lists `session_drawer_button`, `composer_input`, `send_button`, `message_bubble_assistant_complete`.
 - `RuntimeStatus`/`RecoveryBanners` lists `UI-RUNTIME-001`, `UI-STARTUP-001`.
@@ -216,7 +222,7 @@ Expected: `wrote docs/operations/launch-flow-truth.md`. Open it and confirm at m
 **- [ ] Step 4: Commit**
 
 ```bash
-git add tools/qa-agents/__init__.py tools/qa-agents/code_truth_manifest.py docs/operations/launch-flow-truth.md
+git add tools/qa-agents/__init__.py tools/qa-agents/code_truth_manifest.py docs/testing/generated/launch-flow-truth.md
 git commit -m "qa: emit launch-flow-truth manifest from app source as ground truth"
 ```
 
@@ -246,7 +252,7 @@ Triage each warning into one of:
 
 **- [ ] Step 2: Cross-check shared helpers against truth manifest**
 
-For each helper in `tests/maestro/shared/`, every `id:`/`text:` selector must appear in `docs/operations/launch-flow-truth.md`. The known high-traffic helpers to check first:
+For each helper in `tests/maestro/shared/`, every `id:`/`text:` selector must appear in `docs/testing/generated/launch-flow-truth.md`. The known high-traffic helpers to check first:
 
 - `bootstrap-runtime-ready.yaml`
 - `bootstrap-to-ready.yaml`
@@ -264,7 +270,7 @@ Each fix is a separate small commit, with the message format:
 test(maestro): align <flow>.yaml selector to current source truth
 
 Drift: <selector> changed from "<old>" to "<new>" in <kotlin file>.
-Authority: docs/operations/launch-flow-truth.md § <surface>.
+Authority: docs/testing/generated/launch-flow-truth.md § <surface>.
 ```
 
 **- [ ] Step 4: Verify the lifecycle gate flow runs locally on the S22**
@@ -466,7 +472,7 @@ git commit -m "qa: add trip-report schema and template for AI tester sub-agents"
 **Files:**
 
 - Create: `tools/qa-agents/run_ai_tester.py`
-- Create: `tools/qa-agents/_artifacts.py`
+- Create: an artifact-helper module inside `tools/qa-agents/`
 - Create: `tools/qa-agents/tests/test_run_ai_tester.py`
 
 **- [ ] Step 1: Write the runner**
@@ -972,7 +978,7 @@ Android user who just installed PocketAgent.
 # Authority
 
 The ONLY source of truth for selectors, copy, error codes, and stage transitions
-is `docs/operations/launch-flow-truth.md`. Do not infer behavior from old
+is `docs/testing/generated/launch-flow-truth.md`. Do not infer behavior from old
 maestro flows or old evidence notes — they may have drifted.
 
 The PRD acceptance criteria you must judge against:
@@ -981,7 +987,7 @@ The PRD acceptance criteria you must judge against:
 3. `docs/operations/tickets/prod-10-launch-gate-matrix.md` (required rows S-A..S-G)
 4. `docs/ux/implemented-behavior-reference.md` (live-app behavior reference)
 5. `docs/ux/error-recovery-guide.md` (deterministic codes, CTA hierarchy)
-6. `docs/ux/onboarding-spec.md`
+6. `docs/start-here/onboarding-spec.md`
 7. `docs/ux/model-management-flow.md`
 
 # Procedure
@@ -1388,8 +1394,8 @@ python3 tools/qa-agents/triage_failure.py tmp/qa-agents/cloud-1/$(ls tmp/qa-agen
 cat tmp/qa-15-triage-run-01.json
 ```
 
-Paste the output into a new evidence note,
-`docs/operations/evidence/wp-13/2026-05-02-qa-15-triage-run-01.md`, with a
+Paste the output into a new evidence note under
+`docs/operations/evidence/wp-13/`, with a
 two-sentence prose summary identifying the owning area. This satisfies QA-15
 acceptance row 1 ("at least one cloud-run failure is triaged through the
 agent workflow end to end").
@@ -1397,7 +1403,7 @@ agent workflow end to end").
 **- [ ] Step 3: Commit**
 
 ```bash
-git add tools/qa-agents/triage_failure.py docs/operations/evidence/wp-13/2026-05-02-qa-15-triage-run-01.md
+git add tools/qa-agents/triage_failure.py <qa-15-triage-evidence-note>
 git commit -m "qa-15: agent-assisted triage executed end-to-end on first failure"
 ```
 
@@ -1500,7 +1506,7 @@ If any tester observed privacy-claim divergence, downgrade that row from
 
 Each tester captured screenshots under `tmp/qa-agents/<tester>/<utc>/`. Pick
 one canonical screenshot per PROD-10 row (S-A..S-G), copy it under
-`docs/operations/evidence/wp-13/2026-05-02-mkt-08-proof-assets/`, and append
+the retained MKT-08 proof-asset folder under `docs/operations/evidence/wp-13/`, and append
 to MKT-08:
 
 ```
@@ -1545,7 +1551,7 @@ git add docs/operations/tickets/sec-02-privacy-claim-parity-audit.md \
         docs/operations/tickets/mkt-10-claim-freeze-v1.md \
         docs/operations/tickets/prod-11-pilot-support-incident-playbook.md \
         docs/operations/tickets/prod-13-play-store-submission-readiness.md \
-        docs/operations/evidence/wp-13/2026-05-02-mkt-08-proof-assets/
+        <mkt-08-proof-asset-folder>
 git commit -m "governance: re-anchor SEC-02/MKT-08/MKT-10/PROD-11/PROD-13 to AI-moderated run-02 evidence"
 ```
 

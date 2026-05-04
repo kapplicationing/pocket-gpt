@@ -4,12 +4,57 @@
       "start-here/new-joiner.md",
       "start-here/resource-map.md",
       "start-here/source-of-truth-matrix.md",
-      "start-here/documentation-drift-register.md"
+      "start-here/documentation-drift-register.md",
+      "governance/documentation-lifecycle.md"
+    ],
+    "docs/governance/README.md": [
+      "documentation-lifecycle.md",
+      "docs-accuracy-manifest.json"
+    ],
+    "docs/start-here/README.md": [
+      "new-joiner.md",
+      "resource-map.md",
+      "source-of-truth-matrix.md"
+    ],
+    "docs/architecture/README.md": [
+      "system-context.md",
+      "android-performance-contract.md",
+      "performance/android-operational-performance-plan.md"
+    ],
+    "docs/architecture/performance/README.md": [
+      "android-operational-performance-plan.md"
+    ],
+    "docs/product/README.md": [
+      "feature-catalog.md",
+      "docs/prd/phase-0-prd.md"
+    ],
+    "docs/roadmap/README.md": [
+      "current-release-plan.md"
+    ],
+    "docs/security/README.md": [
+      "privacy-model.md",
+      "risk-register.md"
     ],
     "docs/operations/README.md": [
       "execution-board.md",
       "evidence/index.md",
       "tickets/"
+    ],
+    "docs/operations/templates/README.md": [
+      "marketing/",
+      "wp-09/"
+    ],
+    "docs/operations/runbooks/README.md": [
+      "marketing/"
+    ],
+    "docs/operations/policies/README.md": [
+      "wp-09/"
+    ],
+    "docs/operations/historical/README.md": [
+      "post-mortems/"
+    ],
+    "docs/operations/tickets/archive/README.md": [
+      "eng-22-provisioning-startup-check-lane-blocker.md"
     ],
     "docs/ux/README.md": [
       "implemented-behavior-reference.md",
@@ -17,7 +62,11 @@
     ],
     "docs/testing/README.md": [
       "test-strategy.md",
-      "runbooks.md"
+      "runbooks.md",
+      "generated/README.md"
+    ],
+    "docs/testing/generated/README.md": [
+      "launch-flow-truth.md"
     ]
   },
   "evidence_retention": {

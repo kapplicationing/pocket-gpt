@@ -16,7 +16,7 @@ This section defines user-facing behavior contracts for MVP and release readines
 ## Documents
 
 - `docs/ux/user-journey-map.md`
-- `docs/ux/onboarding-spec.md`
+- `docs/start-here/onboarding-spec.md`
 - `docs/ux/model-management-flow.md`
 - `docs/ux/design-system-basics.md`
 - `docs/ux/markdown-rendering-options.md`

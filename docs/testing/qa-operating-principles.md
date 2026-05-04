@@ -13,6 +13,16 @@ Use it with:
 
 ## Principles
 
+### 0. Default Android evidence is emulator + connected device + cloud
+
+Use:
+
+1. emulator for fast harness/bootstrap proof
+2. connected device for real hardware/storage/permission proof
+3. cloud for hosted contract proof
+
+Do not silently substitute one surface for another when the changed risk touches startup, provisioning, runtime readiness, selectors, or release confidence.
+
 ### 1. Test the real contract, not a remembered contract
 
 Before changing a flow or rerunning a broad lane:
@@ -43,6 +53,8 @@ Every failure should be labeled as one of:
 4. `hosted infrastructure`
 
 Only rerun after something in that failure class has changed.
+
+If the same path gets stuck twice, stop and pivot. Choose the smallest higher-signal command or another surface in the matrix before widening again.
 
 ### 4. Preserve first-failure artifacts
 
@@ -131,7 +143,7 @@ Every agent result should return:
 5. hosted smoke fan-out
 6. local authoritative lanes
 7. physical-device final brush
-8. human-required closure
+8. moderation-backed closure (`human-moderated` preferred, disclosed `AI human-proxy` fallback when needed)
 
 ## Anti-Patterns
 

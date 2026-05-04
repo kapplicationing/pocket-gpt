@@ -1,5 +1,10 @@
 # TurboQuant KV Cache Quantization Implementation Plan
 
+Status note:
+
+1. This is a runtime/R&D implementation plan, not part of the controlled Play Store MVP critical path.
+2. Treat TurboQuant launch relevance as conditional: only bring it onto the prod path if a required-lane blocker is traced to it.
+
 ## Completion Status
 
 | Phase | Description | Status |

@@ -12,7 +12,7 @@ Capture claim-safe proof assets from the pilot build and finalize Play Store lis
 ## Inputs
 
 1. `docs/ux/play-store-listing-spec.md`
-2. `docs/operations/mkt-04-demo-asset-capture-runbook.md`
+2. `docs/operations/runbooks/marketing/mkt-04-demo-asset-capture-runbook.md`
 3. `docs/operations/tickets/prod-10-launch-gate-matrix.md`
 
 ## Deliverables

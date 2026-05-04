@@ -51,4 +51,4 @@ Lifecycle: Ready
 1. `docs/operations/tickets/mkt-09-channel-scorecard-run-01.md`
 2. `docs/operations/tickets/mkt-10-claim-freeze-v1.md`
 3. `docs/operations/tickets/prod-10-launch-gate-matrix.md`
-4. `docs/operations/wp-09-ux-feedback-taxonomy-intake-policy.md`
+4. `docs/operations/policies/wp-09/wp-09-ux-feedback-taxonomy-intake-policy.md`

@@ -4,7 +4,9 @@ Offline, privacy-first AI assistant for Android — runs large language models d
 
 Source of truth:
 - Runnable commands live in `scripts/dev/README.md`.
+- Documentation front door lives in `docs/start-here/README.md`.
 - Current launch scope, claim boundaries, and readiness order live in `docs/operations/play-store-launch-program.md` and `docs/operations/tickets/prod-10-launch-gate-matrix.md`.
+- Current release posture and blocker chain live in `docs/roadmap/current-release-plan.md` and `docs/operations/execution-board.md`.
 
 ## Features
 
@@ -19,6 +21,15 @@ Source of truth:
 - **Voice activation (limited beta)** — controlled/closed-track voice surface, not a broad public launch claim
 
 Launch scope note: public launch claims stay bounded to the core chat surface, prompt-first local tools, and single-image attach/Q&A. Voice remains a limited beta until evidence, privacy wording, and device-tier language are ready for wider promotion.
+
+Current controlled-MVP claim surface:
+
+- offline local chat
+- prompt-first local tools
+- single-image Q&A
+- privacy-first local behavior
+
+Anything broader than that should be treated as implementation detail until the launch canon and current-window evidence say otherwise.
 
 ## Tech Stack
 

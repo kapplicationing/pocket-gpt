@@ -1,7 +1,9 @@
-"""Aggregate N trip reports into one WP-13 packet (run-02, AI-moderated).
+"""Aggregate N trip reports into one WP-13 packet.
 
 Reads JSON files from tools/qa-agents/_inputs/*.json
-Writes docs/operations/evidence/wp-13/2026-05-02-wp13-packet-run-02-ai-moderated.md
+Writes a markdown packet for either:
+  - ai-moderated
+  - ai-human-proxy
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from statistics import mean
 ROOT = Path(__file__).resolve().parents[2]
 IN = ROOT / "tools/qa-agents/_inputs"
 OUT = ROOT / "docs/operations/evidence/wp-13/2026-05-02-wp13-packet-run-02-ai-moderated.md"
+OUT_HUMAN_PROXY = ROOT / "docs/operations/evidence/wp-13/2026-05-03-wp13-packet-ai-human-proxy.md"
 
 THRESHOLDS = {
     "A": 90.0,
@@ -55,7 +58,57 @@ def verdict(actual: float, threshold: float, op: str) -> str:
     return "PASS" if ok else "FAIL"
 
 
-def main() -> int:
+def _header(packet_kind: str) -> list[str]:
+    if packet_kind == "ai-human-proxy":
+        return [
+            "# WP-13 Packet (AI Human-Proxy)",
+            "",
+            "Last updated: 2026-05-03",
+            "Owner: QA + Product",
+            "Tester kind: AI human-proxy (subagent reviewers over deterministic run artifacts)",
+            "",
+            "## Authority Note",
+            "",
+            "This packet is retained as AI human-proxy evidence.",
+            "",
+            "1. It applies the same workflows, recovery journeys, and reporting utilities a human moderator would use.",
+            "2. It is valid for launch-readiness review when human moderators are unavailable.",
+            "3. It remains proxy evidence and should stay clearly labeled as such in governance and claim decisions.",
+            "",
+        ]
+    return [
+        "# WP-13 Packet (Run-02, AI-Moderated)",
+        "",
+        "Last updated: 2026-05-02",
+        "Owner: QA + Product",
+        "Tester kind: AI-agent (4 sub-agents)",
+        "",
+        "## Authority Note",
+        "",
+        "This packet is retained as deterministic pre-screening evidence only.",
+        "",
+        "1. It can support machine-verifiable QA triage, artifact review, and blocker summaries.",
+        "2. It does **not** satisfy WP-13 human-required closure.",
+        "3. The release gate still requires a human-moderated packet with measured values before `PROD-10` can advance.",
+        "",
+    ]
+
+
+def _output_path(packet_kind: str) -> Path:
+    return OUT_HUMAN_PROXY if packet_kind == "ai-human-proxy" else OUT
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--packet-kind",
+        default="ai-moderated",
+        choices=["ai-moderated", "ai-human-proxy"],
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+
     reports = load_reports()
     if len(reports) < 4:
         print(f"warn: expected 4 trip reports, got {len(reports)}", file=sys.stderr)
@@ -83,16 +136,7 @@ def main() -> int:
         ("Critical UX blockers (S0+S1 count)", 0.0, float(s0 + s1), "<="),
     ]
 
-    out = [
-        "# WP-13 Packet (Run-02, AI-Moderated)",
-        "",
-        "Last updated: 2026-05-02",
-        "Owner: QA + Product",
-        "Tester kind: AI-agent (4 sub-agents) — PROD-12 deviation: humans still owed when reviewers are available.",
-        "",
-        "## Cohort Metadata",
-        "",
-    ]
+    out = _header(args.packet_kind) + ["## Cohort Metadata", ""]
     for r in reports:
         tid = r["tester_id"]
         kind = r["tester_kind"]
@@ -109,11 +153,16 @@ def main() -> int:
 
     overall_pass = all(verdict(actual, thr, op) == "PASS" for _, thr, actual, op in rows)
     recommendation = "promote" if overall_pass else "hold"
+    decision_label = (
+        "AI human-proxy recommendation"
+        if args.packet_kind == "ai-human-proxy"
+        else "AI-moderated recommendation"
+    )
 
     out += [
         "",
         "## Decision",
-        f"- AI-moderated recommendation: **{recommendation}**",
+        f"- {decision_label}: **{recommendation}**",
         "",
         "## Per-Tester Trip Reports",
         "",
@@ -123,12 +172,13 @@ def main() -> int:
         ended = r["timestamps"].get("ended_utc", "")
         out.append(f"- `{tid}`: artifacts under `tmp/qa-agents/{tid}/` (session ended {ended})")
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("\n".join(out) + "\n", encoding="utf-8")
+    out_path = _output_path(args.packet_kind)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(out) + "\n", encoding="utf-8")
     try:
-        display = OUT.relative_to(ROOT)
+        display = out_path.relative_to(ROOT)
     except ValueError:
-        display = OUT
+        display = out_path
     print(f"wrote {display}")
     return 0 if recommendation == "promote" else 1
 

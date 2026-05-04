@@ -1,6 +1,6 @@
 # Test Strategy (Canonical Playbook)
 
-Last updated: 2026-04-25
+Last updated: 2026-05-03
 
 ## Source Of Truth
 
@@ -8,6 +8,8 @@ Last updated: 2026-04-25
 2. This document: quality strategy, lane policy, release gates
 3. Task-focused runbooks: `docs/testing/runbooks.md`
 4. Screenshot review workflow: `docs/testing/screenshot-regression-workflow.md`
+5. Flow selector/copy authority for automated QA: `docs/testing/generated/launch-flow-truth.md`
+6. Hot-path performance contract: `docs/architecture/android-performance-contract.md`
 
 ## Quality Policy
 
@@ -15,6 +17,16 @@ Last updated: 2026-04-25
 2. Core user flows must be verifiable on both host and Android device lanes.
 3. Product claims are publishable only when tests and evidence align.
 4. Known quality debt requires owner, severity, and closure target.
+
+## Default Android Evidence Matrix
+
+For Android UI/runtime changes, default evidence is:
+
+1. Emulator for fast harness/bootstrap proof.
+2. One connected device for real transport, permissions, storage, thermals, and OEM behavior.
+3. Cloud for hosted fan-out and hosted-contract confirmation.
+
+Do not silently substitute one surface for another when startup, provisioning, runtime readiness, selectors, or release confidence changed.
 
 ## Core Flow Coverage Contract
 
@@ -45,6 +57,12 @@ Last updated: 2026-04-25
 4. Runtime/UI change local check: use the relevant device lanes from the command contract.
 5. Weekly release rehearsal: use stage-2/device closure lanes plus the evidence packet.
 
+Stop-and-pivot rule:
+
+1. If the same path gets stuck twice, stop rerunning it.
+2. Classify the blocker as product, harness/bootstrap, device transport, or cloud infrastructure.
+3. Pivot to the smallest higher-signal command or another surface in the matrix before widening again.
+
 ## Efficiency Techniques That Worked
 
 1. Lock the flow contract before rerunning broad lanes.
@@ -55,7 +73,8 @@ Last updated: 2026-04-25
    - shell/navigation smoke is different from model-management smoke.
    - mixed-purpose flows create noisy failures and rerun churn.
 3. Classify failures before rerunning.
-   - every failure should be tagged as `flow drift`, `product bug`, `device harness`, or `hosted infrastructure`.
+   - every non-pass should carry one primary class: `product defect`, `harness/bootstrap failure`, `cloud infra failure`, or `device transport failure`.
+   - note secondary detail such as selector drift or flow drift under the primary class; do not invent a second competing top-level label.
    - only rerun after something in that class changed.
 4. Preserve first-failure artifacts before retrying.
    - first screenshot + logcat + runner output usually explain more than a later retried failure.
@@ -98,6 +117,11 @@ Last updated: 2026-04-25
    - used when build or Kotlin-quality issues needed to be separated from QA harness failures.
 4. `pocketgpt-coding-best-practices`
    - used when test or tooling changes touched repo-specific architecture or conventions and needed to stay aligned with the codebase.
+
+Flow-truth rule in practice:
+
+1. When selectors, copy, CTAs, or runtime-state labels change, regenerate `docs/testing/generated/launch-flow-truth.md` before widening Maestro or AI-tester reruns.
+2. Treat the generated flow-truth manifest as the only selector/copy authority for automated QA maintenance.
 
 ## Tooling Gaps We Still Want
 
@@ -149,7 +173,7 @@ Last updated: 2026-04-25
    - per-step correctness classification (`pass`, `product_signal_fail`, `harness_noise_fail`, `infra_fail`)
    - blocking/non-blocking decision used by the gate
 4. Product-signal-only policy:
-   - known harness-noise failures in selected expensive lanes (currently strict kickoff-harness journey failures and screenshot-pack compose-harness failures) are recorded as caveats, not blockers, in promotion gating.
+   - known harness-noise failures in selected expensive lanes (currently screenshot-pack compose-harness failures, plus any strict `journey` Maestro fallback noise when the instrumentation-produced send-capture artifact is absent) are recorded as caveats, not blockers, in promotion gating.
 
 ## Risk-Based Lifecycle Gate Policy
 
@@ -182,8 +206,8 @@ Primary workflow: `.github/workflows/ci.yml`
 
 1. Local `devctl` lanes are the fastest path to root cause because they bundle preflight checks, provisioning sanity, structured runtime snapshots, screenshots, and logcat in one run.
 2. CI emulators are the best place for deterministic required checks that protect `main` and enforce contracts consistently.
-3. Cloud/device automation is the default path for machine-verifiable reruns once artifact parity is proven, but it is still not a replacement for the physical-device canary or human-required moderation.
-4. The preferred launch sequence is code closure first, cloud-first reruns second, physical-device canary third, and human-required moderation last.
+3. Cloud/device automation is the default path for machine-verifiable reruns once artifact parity is proven, but it is still not a replacement for the physical-device canary or the moderation-backed WP-13 leg.
+4. The preferred launch sequence is code closure first, cloud-first reruns second, physical-device canary third, and moderation-backed review last.
 4. First-run lifecycle failures can be environment-sensitive; preserving first-attempt artifacts is essential even when retry passes.
 5. Cloud smoke should validate one focused contract per flow; benchmark and qualification paths should be tagged separately and kept out of smoke/default fan-out.
 
@@ -195,13 +219,28 @@ Automate by default:
 2. UI wiring and deterministic flow assertions
 3. Governance checks and drift reports
 
-Human-required checkpoints:
+Moderation-backed checkpoints:
 
 1. Physical-device environment control and anomalies
-2. Moderated usability packet evaluation
+2. WP-13 packet evaluation through `human-moderated` by default or disclosed `AI human-proxy` fallback when moderators are unavailable
 3. Final go/no-go call when multiple evidence sources conflict
+4. Privacy/trust/comprehension interpretation for WP-13
 
-Cloud/device automation is the default execution path for machine-verifiable QA evidence. Use `docs/testing/cloud-first-qa-operating-model.md` for the operating split between cloud/agent runs and human-required moderation.
+Agent boundary:
+
+1. Agents may schedule runs, inspect artifacts, compare failures, and package deterministic evidence.
+2. Agents may also execute the disclosed `AI human-proxy` fallback path when they use the approved bundle/setup flow and the same WP-13 workflow/reporting utilities as human moderation.
+3. `AI human-proxy` packets may close the moderation-backed leg for the controlled MVP, but they never replace missing machine-verifiable evidence and must remain labeled as proxy-derived in governance artifacts.
+
+AI human-proxy mode:
+
+1. Use only when human moderators are unavailable and the deterministic technical path is materially stable enough that proxy sessions are unlikely to be dominated by basic runtime breakage.
+2. Keep `AI human-proxy` output separate from machine-verifiable evidence, but allow it to satisfy the moderation-backed WP-13 leg for the controlled MVP.
+3. It can close packet completion, facilitator/script cleanup, obvious blocker discovery logs, and clearly disclosed `promote`/`iterate`/`hold` recommendations for the controlled MVP.
+4. It cannot close missing machine-verifiable rows, undisclosed claim expansion, or broader public-launch research needs.
+5. Require the small-discovery-path setup tooling before running `AI human-proxy` sessions so the fallback path starts from one comparable setup contract.
+
+Cloud/device automation is the default execution path for machine-verifiable QA evidence. Use `docs/testing/cloud-first-qa-operating-model.md` for the operating split between cloud/agent runs and moderation-backed review.
 
 ## Evidence Rules
 

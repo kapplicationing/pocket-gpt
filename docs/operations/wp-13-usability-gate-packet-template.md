@@ -1,6 +1,6 @@
 # WP-13 Usability Gate Packet Template
 
-Last updated: 2026-03-05
+Last updated: 2026-05-03
 Owner: Product
 Support: QA, Design, Engineering, Marketing
 
@@ -9,16 +9,30 @@ Support: QA, Design, Engineering, Marketing
 Operational template for WP-13 closure and promotion decisions.
 This packet complements technical gates with moderated usability outcomes.
 
+## Authority And Closure Boundary
+
+1. `human-moderated` is the preferred session mode for WP-13.
+2. `ai-human-proxy` is the disclosed fallback mode when moderators are unavailable for the controlled Play Store MVP.
+3. `ai-human-proxy` sessions must use the approved small-discovery-path bundle, the same workflow script, the same lane inputs, and the same reporting schema/templates as human moderation.
+4. `ai-human-proxy` packets may close the WP-13 moderation-backed leg for the controlled MVP when current machine-verifiable lane evidence is already in hand and the fallback reason is recorded in this packet.
+5. `ai-human-proxy` packets cannot close missing machine-verifiable evidence, broader public-launch research needs, or undisclosed trust/claim expansions beyond the controlled MVP.
+6. Keep machine-verifiable evidence linked here, but separate from the human/proxy interpretation recorded in this packet.
+
 ## Cohort Metadata
 
-1. Cohort id:
-2. Build id + commit:
-3. Build variant/build id details:
-4. Device set used (required-tier + best-effort):
-5. Session window (UTC):
-6. Moderator(s):
-7. Run owner (`run_owner`):
-8. Run host (`run_host`):
+1. Session mode (`human-moderated` or `ai-human-proxy`):
+2. Moderator availability status / fallback reason:
+3. Proxy operator(s) (if `ai-human-proxy`):
+4. Small-discovery-path setup tool/version + artifact root (once tooling exists):
+5. Proxy bundle manifest path (if `ai-human-proxy`):
+6. Cohort id:
+7. Build id + commit:
+8. Build variant/build id details:
+9. Device set used (required-tier + best-effort):
+10. Session window (UTC):
+11. Moderator(s):
+12. Run owner (`run_owner`):
+13. Run host (`run_host`):
 
 ## Lane Pass IDs (Required)
 
@@ -41,7 +55,7 @@ This packet complements technical gates with moderated usability outcomes.
 
 ## Task Script (Workflow A/B/C)
 
-Each participant executes without intervention:
+Each participant or proxy reviewer executes without intervention:
 
 1. Workflow A - Offline quick answer.
 2. Workflow B - Local tool task.
@@ -58,9 +72,9 @@ Record per participant:
 
 | Metric | Threshold | Actual | Pass |
 |---|---|---|---|
-| Workflow A completion (n=5+) | `>= 90%` |  |  |
-| Workflow B completion (n=5+) | `>= 90%` |  |  |
-| Workflow C completion (n=5+) | `>= 80%` |  |  |
+| Workflow A completion (`human-moderated n=5+`, `ai-human-proxy n=4+`) | `>= 90%` |  |  |
+| Workflow B completion (`human-moderated n=5+`, `ai-human-proxy n=4+`) | `>= 90%` |  |  |
+| Workflow C completion (`human-moderated n=5+`, `ai-human-proxy n=4+`) | `>= 80%` |  |  |
 | Onboarding completion | `>= 80%` |  |  |
 | Recovery completion (`NotReady -> Ready`) | `>= 85%` |  |  |
 | Runtime/model confusion reports | `<= 10%` |  |  |
@@ -106,11 +120,17 @@ For each category, provide top findings and owner:
 4. If yes, blocker + owner + ETA:
 5. Recommendation scope (`promote`/`iterate`/`hold`):
 
+For `ai-human-proxy` packets:
+
+1. `promote` is allowed only for the controlled Play Store MVP fallback path.
+2. The decision log must explicitly disclose that the moderation-backed leg was closed by proxy due to moderator unavailability.
+3. Any recommendation remains bounded to the verified claim surface and current machine-verifiable evidence.
+
 ## Decision
 
 1. Product recommendation (`promote`/`iterate`/`hold`):
 2. QA concurrence (`yes`/`no`):
 3. Engineering concurrence (`yes`/`no`):
 4. Marketing concurrence (`yes`/`no`):
-5. Conditions to close WP-13 (if not promote):
+5. Conditions to close WP-13 or retire the proxy fallback (if not promote):
 6. Decision date (UTC):

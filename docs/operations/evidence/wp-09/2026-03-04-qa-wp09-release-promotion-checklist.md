@@ -51,7 +51,7 @@ Usage: Cohort expansion and release promotion gate
 ## Evidence Links
 
 1. QA checkpoint packet: `docs/operations/evidence/wp-09/2026-03-04-qa-wp09-rollout-quality-checkpoints.md`
-2. Incident taxonomy + intake policy: `docs/operations/wp-09-ux-feedback-taxonomy-intake-policy.md`
+2. Incident taxonomy + intake policy: `docs/operations/policies/wp-09/wp-09-ux-feedback-taxonomy-intake-policy.md`
 3. Weekly QA matrix run: `docs/operations/evidence/wp-09/2026-03-04-qa-10-weekly-ui-regression-matrix-run-01.md`
 4. WP-13 usability packet decision state: `docs/operations/evidence/wp-13/2026-03-04-wp13-usability-gate-run-01.md`
 5. WP-12 runtime closure baseline: `docs/operations/evidence/wp-12/2026-03-05-eng-13-native-runtime-rerun.md`

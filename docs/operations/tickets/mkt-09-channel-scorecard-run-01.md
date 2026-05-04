@@ -11,7 +11,7 @@ Execute the first 7-day channel experiment and produce a keep/iterate/stop recom
 
 ## Inputs
 
-1. `docs/operations/mkt-03-7-day-scorecard-template.md`
+1. `docs/operations/templates/marketing/mkt-03-7-day-scorecard-template.md`
 2. `docs/operations/tickets/prod-10-launch-gate-matrix.md`
 3. `docs/operations/tickets/prod-09-soft-gate-pilot-policy.md`
 

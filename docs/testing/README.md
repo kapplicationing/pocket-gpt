@@ -22,6 +22,8 @@ Canonical ownership by concern:
 18. Cloud-first QA operating model and human-vs-machine gate split: `docs/testing/cloud-first-qa-operating-model.md`
 19. QA operating doctrine for the team: `docs/testing/qa-operating-principles.md`
 20. Launch readiness snapshot runbook: `bash scripts/dev/launch-readiness.sh` and `docs/testing/runbooks.md`
+21. Generated contract index: `docs/testing/generated/README.md`
+22. Generated QA selector/copy truth: `docs/testing/generated/launch-flow-truth.md`
 
 Consolidation rule:
 

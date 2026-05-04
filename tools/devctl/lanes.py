@@ -5035,11 +5035,7 @@ def _lane_journey_impl(raw_args: Sequence[str], context: RuntimeContext) -> None
         prompt_default=lane_cfg.prompt_default,
     )
     maestro_bin = shutil.which("maestro")
-    if maestro_bin is None:
-        raise DevctlError(
-            "ENVIRONMENT_ERROR",
-            "Maestro CLI is not installed. Install with: curl -Ls https://get.maestro.mobile.dev | bash",
-        )
+    maestro_missing_message = "Maestro CLI is not installed. Install with: curl -Ls https://get.maestro.mobile.dev | bash"
 
     android_configured, resolved_env = _resolve_android_env(context.env)
     if not android_configured:
@@ -5210,6 +5206,8 @@ def _lane_journey_impl(raw_args: Sequence[str], context: RuntimeContext) -> None
                     mode=args.mode,
                 )
                 if send_step is None:
+                    if maestro_bin is None:
+                        raise DevctlError("ENVIRONMENT_ERROR", maestro_missing_message)
                     send_step = _run_send_capture_stage(
                         context=context,
                         maestro_bin=maestro_bin,
@@ -5232,6 +5230,8 @@ def _lane_journey_impl(raw_args: Sequence[str], context: RuntimeContext) -> None
                     continue
 
             if "maestro" in args.steps:
+                if maestro_bin is None:
+                    raise DevctlError("ENVIRONMENT_ERROR", maestro_missing_message)
                 for flow in selected_flows:
                     flow_path = REPO_ROOT / flow
                     if not flow_path.exists():

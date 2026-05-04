@@ -145,11 +145,11 @@ baseline, so each individual fix appeared to "do nothing":
       stability/composer items.
 - [x] `AGENTS.md` — added rule #8 forbidding perf measurement on `debug` and
       pointing to the benchmark variant.
-- [x] `.claude/skills/debug-pocket-gpt/SKILL.md` — new "Performance Debugging"
+- [x] `.agents/skills/debug-pocket-gpt/SKILL.md` — new "Performance Debugging"
       section with build-variant rule, methodology, common pitfalls.
-- [x] `.claude/skills/pocketgpt-coding-best-practices/SKILL.md` — added Compose
+- [x] `.agents/skills/pocketgpt-coding-best-practices/SKILL.md` — added Compose
       Stability Rules and Performance Contract Quick Checklist sections.
-- [x] `.claude/skills/pocketgpt-coding-best-practices/references/repo-conventions.md`
+- [x] `.agents/skills/pocketgpt-coding-best-practices/references/repo-conventions.md`
       — added Compose performance anti-patterns subsection.
 - [x] `.claude/skills/maestro-android-cli/SKILL.md` — added build-variant lesson.
 - [x] `.claude/skills/android-compose-ui-audit/SKILL.md` — extended audit

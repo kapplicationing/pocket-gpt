@@ -5,6 +5,8 @@ Owner: Tech Lead + Product
 
 This document records repeated patterns from the current launch-unblock effort so the team can keep improving the program while work is still active.
 
+This file is historical. Use `docs/operations/execution-board.md`, `docs/roadmap/current-release-plan.md`, and `docs/operations/play-store-launch-program.md` for the active controlled-MVP state.
+
 Mutable status remains in `docs/operations/execution-board.md`. This file is for patterns and controls, not ticket state.
 
 ## Current Learnings

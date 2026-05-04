@@ -1,6 +1,6 @@
 # Testing Runbooks
 
-Last updated: 2026-05-03
+Last updated: 2026-05-04
 
 These runbooks are short task guides. Strategy and gates stay in `docs/testing/test-strategy.md`.
 
@@ -51,7 +51,7 @@ python3 tools/devctl/main.py gate promotion --include-screenshot-pack
 bash scripts/dev/launch-readiness.sh
 ```
 
-Use this before weekly launch review, PM planning, or release-date discussion.
+Use this before weekly launch review, PM planning, or publication review.
 It compiles the current execution board, `PROD-10`, and key launch-ticket statuses into two launch-readiness artifacts under `build/devctl/launch-readiness/`:
 
 1. `launch-readiness-report.json`
@@ -63,6 +63,7 @@ Launch review ordering stays strict:
 2. Run cloud-first machine-verifiable reruns second.
 3. Use one narrow physical-device canary third.
 4. Run moderation-backed review last.
+5. Once the gate is already green, switch to `docs/operations/publication-closeout-checklist.md` for operator closeout.
 
 ## Runbook: Android UI/Runtime Smoke
 
@@ -138,7 +139,9 @@ Policy boundary:
    (clears reverse rules on that device, re-binds **7001**, kills stray `maestro test` / Studio, runs a noop flow). **Run one device at a time** if you hit “address already in use” on **7001**.
 3. `python3 tools/qa-agents/run_ai_tester.py --tester device-s22` then `… device-a51` (runner also invokes the bootstrap script after `adb install`).
 4. Merge qualitative fields into `tools/qa-agents/_inputs/device-*.json` from the newest `tmp/qa-agents/<tester>/<stamp>/` logs if needed.
-5. `python3 tools/qa-agents/aggregate_wp13.py` — expect exit **1** (**hold**) until gate rows pass.
+5. `python3 tools/qa-agents/aggregate_wp13.py`
+   - expect exit **0** when the current packet lands on `promote`
+   - expect exit **1** only when the filled reviewer inputs still support `hold`
 
 Policy boundary:
 
@@ -229,17 +232,17 @@ Use the hardened lane entry instead of raw `maestro test` so the lifecycle run i
 Use this when debugging a specific runtime crash/hang on one device. Keep the flow minimal and local under `tmp/`.
 
 ```bash
-bash scripts/dev/scoped-repro.sh --flow tmp/maestro-repro.yaml
+maestro-android scoped --flow tmp/maestro-repro.yaml
 ```
 
 Speed loop options:
 
 1. Re-run without rebuilding/installing app:
-   - `bash scripts/dev/scoped-repro.sh --flow tmp/maestro-repro.yaml --no-build --no-install`
+   - `maestro-android scoped --flow tmp/maestro-repro.yaml --no-build --no-install`
 2. Target a specific device:
-   - `bash scripts/dev/scoped-repro.sh --flow tmp/maestro-repro.yaml --serial your-device-id`
-3. Override crash signature regex:
-   - `bash scripts/dev/scoped-repro.sh --flow tmp/maestro-repro.yaml --pattern "<regex>"`
+   - `maestro-android scoped --flow tmp/maestro-repro.yaml --device your-device-id`
+3. Use the legacy shell wrapper only if you explicitly need compatibility with old artifact locations:
+   - `bash scripts/dev/scoped-repro.sh --flow tmp/maestro-repro.yaml`
 
 Promotion rule:
 
@@ -254,7 +257,7 @@ If `lane maestro` or another locally bootstrapped Maestro smoke fails with a
 did not bind. Run:
 
 ```bash
-bash scripts/dev/maestro-local-bootstrap.sh --serial <serial>
+maestro-android device probe --device <serial>
 ```
 
 Then re-run the lane. If the bootstrap probe fails twice in a row, switch to

@@ -1,6 +1,6 @@
 # MKT-10 Claim Freeze v1
 
-Last updated: 2026-04-26
+Last updated: 2026-05-04
 Owner: Marketing
 Support: Product, Security
 Status: Ready
@@ -19,10 +19,14 @@ Freeze claim language for launch windows so only evidence-safe claims are used e
 
 ## Internal-Only Claims (Not Yet External)
 
-1. Claims requiring moderated UX metrics not yet populated (`WP-13` run-02 pending).
+1. Broader public-launch or non-proxy trust claims that go beyond the current disclosed controlled-MVP packet.
 2. Privacy-control depth claims without full claim parity verification (`SEC-02` partial rows).
 3. Voice activation/STT/TTS claims beyond clearly labeled limited-beta closed-track materials.
 4. Any performance claim lacking latest required-tier artifact links.
+
+## Execution Note
+
+The claim set is now defined and publish-safe for the controlled MVP. This ticket remains open until launch copy, listing assets, and any channel experiments actually apply the frozen claim blocks and record the claim set used.
 
 ## Claim Mapping Contract
 

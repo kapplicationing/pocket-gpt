@@ -16,7 +16,7 @@ This section is the cross-functional execution system.
 - Task runbooks: `docs/testing/runbooks.md`
 - QA operating doctrine: `docs/testing/qa-operating-principles.md`
 - Cloud-first QA operating model: `docs/testing/cloud-first-qa-operating-model.md`
-- Launch program learnings: `docs/operations/launch-program-learnings.md`
+- Active publication closeout path: `docs/operations/publication-closeout-checklist.md`
 - Android operational performance plan: `docs/architecture/performance/android-operational-performance-plan.md`
 
 ## Status Contract
@@ -29,11 +29,10 @@ This section is the cross-functional execution system.
 
 - Active boards and plans stay at the top level:
   - `execution-board.md`
-  - `launch-program-learnings.md`
   - `play-store-launch-program.md`
   - `play-store-submission-readiness.md`
+  - `publication-closeout-checklist.md`
   - `qa-improvement-action-plan.md`
-  - `release-unblock-workstreams.md`
 - Generated QA truth lives under `docs/testing/generated/`.
 - Active tickets stay under `tickets/`.
 - Completed ticket specs move to `tickets/archive/`.

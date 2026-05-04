@@ -13,6 +13,7 @@ This is the onboarding front door for the repo.
   1. `docs/start-here/principal-pm-handover.md`
   2. `docs/roadmap/current-release-plan.md`
   3. `docs/operations/execution-board.md`
+  4. `docs/operations/publication-closeout-checklist.md`
 
 - I need current status only:
   1. `docs/operations/execution-board.md`

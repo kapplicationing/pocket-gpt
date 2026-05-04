@@ -3,7 +3,7 @@
 Last updated: 2026-04-25
 Owner: QA
 Support: Engineering, Product
-Status: Ready
+Status: Done
 
 ## Objective
 
@@ -46,3 +46,11 @@ Move repeatable QA evidence collection to cloud/device automation for machine-ve
 2. `docs/testing/test-strategy.md`
 3. `docs/testing/runbooks.md`
 4. `docs/operations/execution-board.md`
+
+## 2026-05-04 Update
+
+Closed for the controlled MVP:
+
+1. The current promoted evidence set now includes current hosted/default targeted proofs plus the preserved narrow physical canary.
+2. Cloud-first execution and artifact expectations are now documented in the testing canon.
+3. The physical-device canary remains explicit and limited while wireless Maestro stays harness-class only.

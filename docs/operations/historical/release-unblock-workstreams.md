@@ -5,6 +5,8 @@ Owner: Tech Lead + Functional Owners
 
 This document is the static execution split for the current release-unblock effort.
 
+This file is historical. Use `docs/roadmap/current-release-plan.md`, `docs/operations/play-store-launch-program.md`, and `docs/operations/publication-closeout-checklist.md` for the active controlled-MVP state.
+
 Mutable status remains in `docs/operations/execution-board.md`.
 
 Current status note: Workstream 1 host-side mitigation is landed and the active device rerun has moved past provisioning preflight. The next live deterministic blocker is the runtime-ready lifecycle/bootstrap path leaving the app `Unloaded`.

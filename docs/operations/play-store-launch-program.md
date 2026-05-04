@@ -1,12 +1,12 @@
 # PocketAgent Play Store Launch Program
 
-Last updated: 2026-05-03  
+Last updated: 2026-05-04  
 Owner: Product + Tech Lead
 
 Mutable status stays in `docs/operations/execution-board.md`.
-Program learnings stay in `docs/operations/launch-program-learnings.md`.
+Program learnings stay in `docs/operations/historical/launch-program-learnings.md`.
 
-Current status note: launch remains `Hold`. The retained provisioning `SIGILL` class is no longer the first live failure, and the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight rather than a new generic native-runtime defect; that local code path is now understood and fixed. The freshest preserved authoritative proof is still the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`, and the freshest physical canary is now the S22 provisioning pass at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`. Wireless Samsung `maestro` remains harness-class supporting evidence only. The launched hosted/default surface is now split rather than converged: account 1 runtime-ready now passes at `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-1-meteredfix/upload-status.json`, account 1 `send-after-ready` fails later at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account-1-current/upload-status.json` with `Assertion is false: id: message_bubble_assistant_complete is visible`, and account 2 current model-management still fails at `tmp/maestro-cloud-targeted/20260504T025141Z-account-2-model-management-fresh/upload-status.json` with `Assertion is false: id: session_drawer_button is visible`. The fresh account-2 runtime-ready reruns at `tmp/maestro-cloud-targeted/20260504T0045Z-scenario-runtime-ready-smoke-account-2-rerun/`, `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-2-meteredfix/`, and `tmp/maestro-cloud-targeted/20260504T013500Z-scenario-runtime-ready-smoke-account-2-classify/` remain `PENDING` with `completed=false` and `wasAppLaunched=false`, so they are cloud-infra noise rather than new app verdicts. Strict `journey` is no longer blocked on missing authority: the latest S22 strict-journey rerun still preserves a current-window send-capture completion at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/journey-report.json` with `phase=completed`, `placeholder_visible=false`, and `first_token_ms=180222`. The emulator rerun at `tmp/devctl-artifacts/2026-05-03/emulator-5554/journey/20260503-235023/journey-report.json` remains diagnostic-only and still times out in `LOADING` with `model_status_detail=Prefill...` plus the visible slow-state message, while the A51 stays off the critical path because its latest strict run at `tmp/devctl-artifacts/2026-05-04/192.168.1.44:37643/journey/20260504-004041/` still times out in send-capture with `phase=timeout`, `runtime_status=LOADING`, and `model_status_detail=Prefill...`. The disclosed `AI human-proxy` WP-13 packet now exists but remains a measured `hold`. Branch-wise, local `main` is already fast-forwarded to the same tip as `codex/launch-readiness-implementation`; the remaining branch-closeout work is publication from local `main` to `origin/main`, not an internal merge between those two local refs.
+Current status note: the controlled-MVP launch gate can now advance. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker has been cleared. The freshest preserved authoritative proof is still the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`, and the freshest physical canary is the S22 provisioning pass at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`. Wireless Samsung `maestro` remains harness-class supporting evidence only. Hosted/default coverage is now current and green on the required targeted surfaces: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`. Strict `journey` still preserves a current-window S22 send-capture completion at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/journey-report.json` with `phase=completed`, `placeholder_visible=false`, and `first_token_ms=180222`; keep that long-prefill shape as rollout/perf caution, not as a blocker. The emulator and A51 strict runs remain diagnostic-only. The disclosed `AI human-proxy` WP-13 packet now lands on `promote` for the controlled MVP. Branch-wise, local `main` is already fast-forwarded to the same tip as `codex/launch-readiness-implementation`; the remaining branch-closeout work is publication from local `main` to `origin/main`, not an internal merge between those two local refs.
 
 Execution policy for the active program:
 
@@ -28,7 +28,7 @@ Branch/merge note for the active program:
 1. `codex/launch-readiness-implementation` is still the preserved name for the launch integration lineage, but local `main` is already at the same tip.
 2. The live branch-hygiene gap is local `main` versus `origin/main`, not `main` versus `codex/launch-readiness-implementation`.
 3. Older `codex/*` branches appear subsumed into local `main`; `cursor/cloud-agent-1775007300791-5ig66` remains intentionally separate and should not be merged wholesale into launch closeout.
-4. Safe merge-back/publication now means auditing `origin/main..main`, validating the final gate state, and then pushing `main` once the launch hold is cleared, rather than inventing another internal merge step.
+4. Safe merge-back/publication now means auditing `origin/main..main`, validating the final gate state, and then pushing `main` from a clean worktree, rather than inventing another internal merge step.
 
 ## Objective
 
@@ -53,19 +53,18 @@ This program is complete only when:
 ## Critical Path
 
 1. Preserve the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`.
-2. Close hosted/default machine-verifiable gaps, with special focus on preserving a publishable direct S22 physical canary substitute and clearing the current targeted hosted/default failure set rather than treating one cloud flow as the whole blocker.
-3. Preserve the current-window strict `journey` proof and treat its near-timeout first-token behavior as perf/risk context, not as a missing-authority blocker.
-4. Use one narrow real-device Samsung canary only as final OEM/runtime confirmation once the cloud/default path is materially stable.
-5. Carry the disclosed `AI human-proxy` packet truthfully and only replace it with human-moderated evidence if promotion needs stronger non-proxy closure.
-6. Re-run the release decision flow and finalize the Play Store submission package.
-7. Publish local `main` to `origin/main` only after the launch hold is cleared.
+2. Preserve the current hosted/default targeted pass roots and the S22 physical canary substitute as the publication evidence set.
+3. Preserve the current-window strict `journey` proof and treat its near-timeout first-token behavior as perf/risk context only.
+4. Carry the disclosed `AI human-proxy` packet truthfully and only replace it with human-moderated evidence if promotion needs stronger non-proxy closure.
+5. Finalize the Play Store submission package and decision package from the promoted evidence set.
+6. Publish local `main` to `origin/main` only from a clean worktree.
 
 ## Current Evidence Anchors
 
 1. Current local authoritative proof: `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`
 2. Current repo-side launch snapshot: `build/devctl/launch-readiness/launch-readiness-report.md`
 3. Earlier hosted/default preserved passes: `tmp/maestro-cloud-first-run/junit.xml`, `tmp/maestro-cloud-s22/junit.xml`, `tmp/maestro-cloud-session-drawer/junit.xml`, `tmp/maestro-cloud-targeted/20260503T150550Z-scenario-model-management-split-smoke-account-1/status.json`, `tmp/maestro-cloud-targeted/20260503T150759Z-scenario-model-management-split-smoke-account-2/status.json`
-4. Latest targeted cloud blockers: account 1 and account 2 are now split. Account 1 runtime-ready passes at `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-1-meteredfix/upload-status.json`, but account 1 `send-after-ready` fails later at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account-1-current/upload-status.json` with `Assertion is false: id: message_bubble_assistant_complete is visible`. Account 2 current model-management still fails earlier at `tmp/maestro-cloud-targeted/20260504T025141Z-account-2-model-management-fresh/upload-status.json` with `Assertion is false: id: session_drawer_button is visible`. The fresh account-2 runtime-ready reruns are still `PENDING` without app launch, so they do not replace the launched blocker evidence.
+4. Current targeted cloud proof: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 current model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`. Older account-2 runtime-ready reruns that remain `PENDING` without app launch stay classified as infra noise rather than blocker evidence.
 5. Current strict `journey` authority note: `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/journey-report.json` remains the preserved physical strict-journey proof even though the first token only appears at `180222ms` with `runtime_status=LOADING` and `model_status_detail=Prefill...`; `tmp/devctl-artifacts/2026-05-03/emulator-5554/journey/20260503-235023/journey-report.json` remains a diagnostic prefill-stall artifact; and the A51 is still non-authoritative because `tmp/devctl-artifacts/2026-05-04/192.168.1.44:37643/journey/20260504-004041/` still times out in send-capture after a 180s budget with `phase=timeout`, `runtime_status=LOADING`, and `model_status_detail=Prefill...`.
 
 ## Current Execution Graph
@@ -82,8 +81,8 @@ Dependencies:
 Current work:
 
 1. Preservation of the S906N `android-instrumented` pass and its artifact root
-2. Preservation or rerun of publishable direct S22 physical canary evidence while wireless Maestro remains harness-class only
-3. Closure of the current targeted hosted/default failure set (`send-after-ready`, runtime-ready smoke, and the latest account-2 model-management reruns)
+2. Preservation of publishable direct S22 physical canary evidence while wireless Maestro remains harness-class only
+3. Preservation of the current hosted/default targeted pass set
 4. Preservation of the current strict-journey authority already in hand, with emulator/A51 strict reruns treated as diagnostic-only unless they add new authority
 5. Explicit non-pass classification on every rerun: `product defect`, `harness/bootstrap failure`, `cloud infra failure`, or `device transport failure`
 
@@ -137,7 +136,7 @@ Dependencies:
 
 Current work:
 
-1. `PROD-12`, `PROD-11`, `SEC-02`, `MKT-08`, `MKT-10`, `PROD-13`
+1. `PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, `PROD-13`
 2. Claim/copy freeze against verified behavior only
 3. Launch decision memo and rollout recommendation
 4. README and outward-facing copy remain bounded to offline chat, prompt-first tools, single-image Q&A, and privacy-first local behavior, with voice still limited-beta only
@@ -155,7 +154,7 @@ Current work:
 
 1. Keep local `main` and `codex/launch-readiness-implementation` recognized as the same launch tip.
 2. Keep `cursor/cloud-agent-1775007300791-5ig66` out of the launch path unless a specific change is deliberately extracted.
-3. Publish by pushing local `main` to `origin/main` after final gate review.
+3. Publish by pushing local `main` to `origin/main` after final gate review from a clean worktree.
 
 ## Parallel Agent Support Topology
 
@@ -196,160 +195,67 @@ Responsibilities:
 3. Make the final go/no-go recommendation.
 4. Keep proxy-derived decisions explicitly disclosed in governance and launch materials.
 
-### Engineer 1: Runtime Setup And Packaging Owner
+## Closeout Ownership
 
-Own the startup/setup contract that still determines whether single-image and first-session claims are evidence-safe.
+### Release Owner
 
-Responsibilities:
-
-1. Keep the fixed multimodal companion sync (`mmproj`) path stable in setup/provisioning preflight and recovery flows.
-2. Preserve the local startup/readiness contract so first-session setup proof stays deterministic under authoritative lane execution.
-3. Pair with Engineer 2 on any setup regressions exposed by hosted/default reruns.
-
-Exit criteria:
-
-1. Setup/provisioning preflight remains claim-safe for single-image coverage.
-2. Recovery/setup evidence no longer regresses because of companion-artifact or startup contract drift.
-3. Evidence notes record the active setup contract and artifact roots rather than the old retained crash signature.
-
-### Engineer 2: Android Runtime / Startup Reliability Owner
-
-Own startup/readiness recovery and stale metadata healing.
+Own the final package and publication decision.
 
 Responsibilities:
 
-1. Fix `UI-STARTUP-001` and `MODEL_ARTIFACT_CONFIG_MISSING` paths that still wedge startup or scenario coverage.
-2. Make uninstall/reinstall/cache-restore behavior deterministic on the release canary path.
-3. Ensure startup checks self-heal stale runtime metadata instead of requiring manual cleanup.
+1. Keep the promoted evidence set and publication checklist aligned.
+2. Approve the exact release bundle, track, and claim-safe listing package.
+3. Publish only from a clean worktree after reviewing `origin/main..main`.
 
-Exit criteria:
+### QA / Evidence Owner
 
-1. Startup/readiness paths no longer fail on stale runtime metadata.
-2. Maestro startup/readiness flows are stable.
-3. Reinstall/recovery behavior is deterministic on the canary device path.
-
-### Engineer 3: Send / Timeout / Reliability Owner
-
-Own `ENG-20` and strict journey reliability.
+Own preservation of the promoted evidence set.
 
 Responsibilities:
 
-1. Complete timeout/cancel/send contract closure.
-2. Ensure timeout maps to `UI-RUNTIME-001`.
-3. Ensure send exits cleanly, preserves context, and always emits required send-capture fields.
-4. Tighten unit/runtime/UI coverage around timeout, cancel, retry, and placeholder lifecycle.
+1. Keep the preserved `android-instrumented`, hosted/default targeted cloud, S22 physical canary, and strict `journey` artifacts referenced consistently.
+2. Run targeted rechecks only if a new blocker appears; classify any new non-pass under the four-way taxonomy.
+3. Keep `bash scripts/dev/launch-readiness.sh` and `PROD-10` aligned to the same evidence roots.
 
-Exit criteria:
+### Product / Marketing Owner
 
-1. The documented timeout/cancel contract is fully satisfied.
-2. Journey send-capture fields are present in every passing and failing run.
-3. Strict journey reruns are trustworthy enough for release gating.
-
-### Engineer 4: QA Automation / Cloud Evidence Owner
-
-Own deterministic QA evidence generation and `QA-14`.
+Own copy, assets, and package readiness.
 
 Responsibilities:
 
-1. Make cloud/device automation the default rerun path for machine-verifiable lanes.
-2. Prove artifact parity between cloud runs and the current local/devctl evidence shape.
-3. Keep one narrow physical-device canary for OEM/runtime-specific failures.
-4. Align runbooks, command docs, and lane guidance so cloud is not treated as merely supplemental for deterministic reruns.
+1. Apply only the frozen claim set to listing copy and proof assets.
+2. Close `MKT-08`, `MKT-10`, and `PROD-13` from the promoted evidence state.
+3. Keep any broader public-launch or non-proxy expansion work out of this closeout.
 
-Exit criteria:
+### Support / Operations Owner
 
-1. Cloud-backed reruns exist for `android-instrumented`, hosted/default runtime-readiness coverage, `journey`, `screenshot-pack`, and lifecycle smoke where applicable; wireless Maestro remains supplemental while it is harness-class.
-2. Artifact schema matches what `PROD-10` and WP-13 need.
-3. The current targeted hosted/default reruns return clearing verdicts, or any remaining cloud-only failures are explicitly classified with preserved upload provenance rather than being taught as resolved.
-4. The canary-device rule is explicit and limited.
-
-### Engineer 5: Release Tooling / Evidence Ops Owner
-
-Own agent-assisted triage, QA-13 operationalization, and Play Store launch-prep tooling support.
+Own support-readiness and rollout notes.
 
 Responsibilities:
 
-1. Operationalize the agent-assisted artifact review loop from `QA-15`.
-2. Make `QA-13` a real weekly gate with journey/send-capture evidence feeding weekly QA output and WP-13 inputs.
-3. Support Play Store submission readiness by validating screenshot/asset capture flow, release build repeatability, and evidence packaging for decision review.
+1. Close `PROD-11` with the current contact path, support metadata, and rollout/incident notes.
+2. Record the chosen track, release identifiers, and rollback plan.
+3. Keep operator-facing closeout steps in `docs/operations/publication-closeout-checklist.md`.
 
-Exit criteria:
+## Closeout Phases
 
-1. One failed cloud run has been triaged end-to-end by the agent workflow.
-2. Weekly send-capture gate is live and feeding current evidence.
-3. Release evidence is packaged cleanly enough for PM, QA, and release review.
+### Phase 1: Preserve The Promoted State
 
-## Phase Plan
+1. Keep the existing evidence roots, packet, and claim map stable.
+2. Do not reopen solved launch-gate rows without a new first-failure artifact.
+3. Keep wireless Samsung Maestro harness-class only.
 
-### Phase 1: Critical Path Stabilization
+### Phase 2: Prepare The Publication Package
 
-Run in parallel across Engineers 1, 2, and 3.
+1. Finalize support metadata, release versioning, rollout notes, and claim-safe listing assets.
+2. Keep release copy, screenshots, and videos tied to the frozen claim set.
+3. Record the final package inputs in the submission checklist.
 
-Deliverables:
+### Phase 3: Publish Cleanly
 
-1. `ENG-23` native provisioning crash fix candidate
-2. `ENG-24` startup/readiness self-healing closure
-3. `ENG-20` timeout/cancel/send reliability closure
-4. QA-14 doc/tooling alignment draft
-5. QA-13 plumbing and QA-15 agent-triage scaffolding
-
-Dependency rule:
-
-1. Required lane reruns do not count as release evidence until Engineers 1-3 are functionally stable.
-
-### Phase 2: Evidence Restoration
-
-Starts only when Phase 1 is stable enough for reruns.
-
-Deliverables:
-
-1. Fresh cloud-first hosted/default verdicts where applicable, including `send-after-ready`
-2. Journey send-capture output with `phase=completed` and `placeholder_visible=false`
-3. Updated evidence notes with artifact roots
-4. Cloud/device parity proof for deterministic lanes
-5. Preserved current-window `android-instrumented` pass ID plus fresh strict `journey` pass ID
-6. One narrow real-device canary confirmation after cloud evidence is materially stable
-
-Dependency rule:
-
-1. Human moderation should not start final measurement until deterministic flows are stable enough that subjective signal is not polluted by obvious technical failures.
-
-Execution note:
-
-1. Use hosted fan-out and agent triage to find and prove deterministic regressions first.
-2. Use the physical device only for OEM/runtime-specific confirmation and the final pre-promotion brush.
-
-### Phase 3: Human-Required Closure
-
-Cross-functional, with engineering support on standby.
-
-Deliverables:
-
-1. Moderated WP-13 packet with measured values
-2. `PROD-11` support-readiness closure
-3. `SEC-02` privacy/claim parity closure
-4. `MKT-08` proof asset package
-5. `MKT-10` claim freeze
-6. `PROD-13` Play Store submission package draft
-
-Dependency rule:
-
-1. No release-date commitment before WP-13 has measured values and claim/support readiness are closed.
-
-### Phase 4: Launch Decision And Store Submission
-
-This is the gate-consumption phase, not another feature phase.
-
-Deliverables:
-
-1. `PROD-12` machine-verifiable vs moderation-backed gate split executed from current evidence
-2. `PROD-10` rerun from current evidence only
-3. Final rollout recommendation and release-date decision
-4. Play Store submission package ready for the chosen track
-
-Dependency rule:
-
-1. If required rows do not pass, publish `hold` or `iterate` with explicit blockers and no date commitment.
+1. Confirm `bash scripts/dev/launch-readiness.sh` still reports `Promote`.
+2. Clean the worktree or isolate non-publication work before pushing `main`.
+3. Push `main`, upload the selected release bundle, and publish to the chosen Play track.
 
 ## Internal Contracts That Must Be Stable
 
@@ -358,14 +264,14 @@ Dependency rule:
 3. QA artifact contract: cloud/device reruns must produce the pass IDs, reports, screenshots, logcat, and runtime fields required by launch gates.
 4. Gate taxonomy: machine-verifiable evidence and moderation-backed evidence stay explicitly separated through `PROD-12`.
 5. Claim boundary: retention/reset/per-tool privacy controls remain internal-only claims until explicitly implemented and verified.
-6. Evidence authority split: cloud-first is the default machine-verifiable execution path, but `android-instrumented` and strict `journey` remain authoritative gate rows and are not replaced by hosted smoke alone.
+6. Evidence authority split: cloud-first is the default machine-verifiable execution path, but `android-instrumented`, current hosted/default targeted proofs, and strict `journey` remain the retained gate roots and are not replaced by unrelated smoke alone.
 7. Older AI-moderated outputs remain deterministic QA support only; disclosed `AI human-proxy` outputs may satisfy the moderation-backed WP-13 leg for the controlled MVP when they use the approved bundle/setup path.
 8. Performance-contract audits and benchmark-only evidence are part of launch-readiness expectations for risky UI/runtime hot-path changes.
 9. TurboQuant remains outside the launch critical path unless a concrete launch blocker is traced to it.
 
 ## Required Output Artifacts
 
-1. Current evidence IDs for `android-instrumented`, hosted/default runtime-readiness coverage, and `journey`, plus direct S22 physical canary artifacts while wireless Maestro remains harness-class
+1. Current evidence IDs for `android-instrumented`, hosted/default targeted cloud coverage, and `journey`, plus direct S22 physical canary artifacts while wireless Maestro remains harness-class
 2. Current WP-13 packet with measured values
 3. Current claim-safe Play Store asset package
 4. Current support and incident playbook
@@ -374,11 +280,10 @@ Dependency rule:
 ## Weekly Operating Cadence
 
 1. Start the week with `bash scripts/dev/launch-readiness.sh` and review the generated report.
-2. Review board blockers against the five engineering ownership areas and keep code closure ahead of evidence expansion.
-3. Run cloud-first machine-verifiable evidence before scheduling real-device confirmation or moderated sessions.
+2. Review board blockers against the closeout ownership areas and keep publication/package work separate from new engineering work.
+3. Run cloud-first machine-verifiable evidence only when a new blocker appears; otherwise preserve the promoted artifact roots.
 4. Keep machine-verifiable evidence and moderation-backed evidence on separate tracks.
-5. Run release-date planning only when the readiness report and current evidence both support it.
-6. Before publishing `main`, confirm it still matches `codex/launch-readiness-implementation`, audit `origin/main..main`, and verify that no unrelated visible branch needs deliberate extraction.
+5. Before publishing `main`, confirm the publication checklist is closed, audit `origin/main..main`, and verify that no unrelated visible branch needs deliberate extraction.
 
 ## Completion Rule
 
@@ -389,4 +294,5 @@ The program is complete when:
 3. journey send-capture is clean,
 4. WP-13 contains measured values,
 5. privacy/claim/support/asset work is closed,
-6. and `PROD-13` is ready for submission.
+6. `PROD-13` is ready for submission,
+7. and the chosen publication worktree is clean enough to push intentionally.

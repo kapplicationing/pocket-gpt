@@ -1,7 +1,6 @@
 # General
 .DS_Store
 *.log
-!docs/operations/evidence/**/*.log
 tmp/
 .claude/*
 !.claude/skills/
@@ -29,9 +28,18 @@ local.properties
 # Python
 .venv/
 __pycache__/
+.pytest_cache/
+*.py[cod]
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.tox/
+.coverage*
+htmlcov/
 
 # Generated reviewer/operator inputs
-tools/qa-agents/_inputs/*.json
+tools/qa-agents/_inputs/*
+!tools/qa-agents/_inputs/.gitkeep
 
 # Benchmark and device logs
 scripts/benchmarks/logcat-*.txt

@@ -35,7 +35,7 @@ Use this map to jump to the right source quickly.
 
 - Current release plan: `docs/roadmap/current-release-plan.md`
 - Active board and ownership: `docs/operations/execution-board.md`
-- Release-unblock workstream split: `docs/operations/release-unblock-workstreams.md`
+- Publication closeout checklist: `docs/operations/publication-closeout-checklist.md`
 - Ticket specs: `docs/operations/tickets/`
 - Evidence index and retention model: `docs/operations/evidence/index.md`
 - Privacy model and controls: `docs/security/privacy-model.md`

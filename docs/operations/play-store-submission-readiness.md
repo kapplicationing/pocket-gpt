@@ -1,6 +1,6 @@
 # Play Store Submission Readiness
 
-Last updated: 2026-04-26  
+Last updated: 2026-05-04  
 Owner: Product + Marketing + Release Ops
 
 Mutable status stays in `docs/operations/execution-board.md`.
@@ -12,10 +12,19 @@ Define the final cross-functional checklist that must be complete before PocketA
 ## Hard Prerequisites
 
 1. `PROD-10` required rows are all `PASS`.
-2. Latest `android-instrumented`, `maestro`, and `journey` pass IDs exist in the current release window.
+2. Latest `android-instrumented` and `journey` pass IDs exist in the current release window, plus a valid current-window physical canary substitute while wireless Maestro remains harness-class only.
 3. Latest journey send-capture report shows `phase=completed` and `placeholder_visible=false`.
 4. WP-13 packet has measured values with no placeholder fields.
 5. `SEC-02`, `PROD-11`, `MKT-08`, and `MKT-10` are closed enough to support publish-safe copy and support handling.
+
+## Current State
+
+As of 2026-05-04, the promotion gate is already green for the controlled MVP. The remaining work is submission/package execution:
+
+1. final release build versioning and install validation,
+2. final claim-safe listing assets,
+3. current support/publication metadata,
+4. and Play Console submission inputs.
 
 ## Release Package
 
@@ -56,3 +65,7 @@ Do not submit if any of the following remain true:
 3. WP-13 still contains `not collected` fields,
 4. claim parity is partial for any external claim block being used,
 5. or the release build cannot be reproduced cleanly.
+
+## Human-Needed Closeout
+
+Use `docs/operations/publication-closeout-checklist.md` as the operator-facing final sequence for publication and wrap-up.

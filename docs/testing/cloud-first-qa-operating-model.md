@@ -1,6 +1,6 @@
 # Cloud-First QA Operating Model
 
-Last updated: 2026-05-03
+Last updated: 2026-05-04
 Owner: QA + Engineering  
 Support: Product
 
@@ -116,16 +116,16 @@ Required setup dependency:
 2. Enter human moderation only after scripted flows are stable enough to be worth measuring.
 3. Use the moderated or proxy packet to answer questions that automation cannot answer, with proxy sessions disclosed as fallback.
 
-## Unblock Sequence For Current Work
+## Current Controlled-MVP State
 
-1. Keep the current blocker chain honest: the old retained provisioning blocker was narrowed to missing `mmproj` sync in `devctl` preflight and has been addressed in local code; local authoritative onboarding proof and a current-window `android-instrumented` pass now exist, but the remaining open work is not just one hosted `send-after-ready` verdict. The latest targeted cloud reruns are still red across `send-after-ready`, runtime-ready smoke, and current account-2 model-management reruns after earlier same-day passes, while strict `journey` still lacks current-window proof and moderation-backed evidence remains incomplete.
-2. Run the required hosted/default machine-verifiable flows first and attach pass IDs, upload ids, and artifact roots to the active tickets.
-3. If hosted `send-after-ready` returns `infra_status_fetch_failed`, polls with blank status fields, or an older preserved upload id no longer resolves through the Maestro Cloud API, treat that as missing hosted verdict / stale provenance rather than a product regression. Preserve the old upload id as history, then rerun a fresh hosted/default or targeted `send-after-ready` flow and carry the new upload provenance forward.
-4. Use agents to inspect failures, compare deltas, and narrow remaining issues.
-5. Preserve the current authoritative `android-instrumented` artifact set unless the code under review invalidates it, and re-run strict `journey` once the cloud/default technical path is materially stable. Do not teach the old local Maestro kickoff/bootstrap failure as the active strict-`journey` blocker unless the rerun actually dies before instrumentation starts.
-6. Run one narrow physical-device canary after the cloud path is materially stable, and do not let wireless Samsung harness noise overwrite a clean hosted result.
-7. Run the human-moderated or `AI human-proxy` WP-13 packet only after the scripted gates are green or the remaining question is explicitly subjective.
-8. Publish a promote/iterate/hold recommendation only after both technical and moderation-backed evidence are present.
+1. The controlled-MVP gate is already promoted from current evidence.
+2. Hosted/default targeted cloud proofs are preserved and green on the required targeted surfaces:
+   - account 1 `send-after-ready`
+   - account 2 model-management
+3. `android-instrumented` and strict S22 `journey` remain preserved authoritative roots.
+4. Wireless Samsung Maestro remains harness-class only and should not be reopened as gate authority unless a new artifact proves the failure moved inside the app.
+5. The disclosed `AI human-proxy` packet is complete and currently lands on `promote`.
+6. From here, cloud-first QA work is preservation and targeted recheck work, not broad unblock discovery.
 
 ## How Future Work Should Be Structured
 

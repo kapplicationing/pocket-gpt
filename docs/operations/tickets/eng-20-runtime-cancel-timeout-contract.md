@@ -3,7 +3,7 @@
 Last updated: 2026-04-25
 Owner: Engineering
 Support: QA, Product
-Status: Done for host-side contract; pending final strict journey evidence under `QA-11`
+Status: Done
 
 ## Objective
 
@@ -61,4 +61,4 @@ Host-side contract coverage landed:
 2. Journey report serialization backfills required failed send-capture fields so `phase`, `placeholder_visible`, runtime status, backend, and active model are never ambiguous in failure evidence.
 3. Existing app/runtime tests and devctl lane/gate tests pass under the fast lane.
 
-Strict journey proof is now downstream of the active runtime-ready blocker in `QA-11`: the device rerun can reach the lane harness, but the app can still remain `Unloaded` before valid send-capture evidence begins.
+The controlled-MVP launch evidence set now preserves strict S22 send-capture completion under `QA-11`, so the remaining launch blocker framing no longer applies to this ticket.

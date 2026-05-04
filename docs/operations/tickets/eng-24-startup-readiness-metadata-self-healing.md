@@ -3,7 +3,7 @@
 Last updated: 2026-04-25
 Owner: Engineering
 Support: QA
-Status: Done for host-side implementation; pending final device canary evidence under `QA-11`
+Status: Done
 
 ## Objective
 
@@ -41,10 +41,7 @@ Completed:
 2. `./gradlew :packages:app-runtime:test --tests "com.pocketagent.runtime.StartupChecksUseCaseTest"`
 3. `bash scripts/dev/test.sh fast`
 
-Blocked:
-
-1. Active `QA-11` reruns can now reach the lane harness, but the Maestro/runtime-ready contract can still leave the app `Unloaded` before startup/readiness proof completes.
-2. Reinstall/cache-restore canary proof remains under `QA-11`.
+Final canary and current-window evidence are now preserved under the promoted `QA-11` evidence set, so this ticket is fully closed for the controlled MVP.
 
 ## References
 

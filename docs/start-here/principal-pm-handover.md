@@ -1,6 +1,6 @@
 # Principal PM Handover
 
-Last updated: 2026-05-03  
+Last updated: 2026-05-04  
 Audience: Principal PM
 
 This handover reflects the retained repo evidence and planning docs currently checked into the repository, plus the current April release-control updates tracked on the execution board.  
@@ -8,9 +8,9 @@ The retained release-gate evidence in the repo is still March-heavy, so use `doc
 
 ## Executive Summary
 
-Promotion status is `Hold`. PocketAgent is not release-date-ready from the retained repository evidence.
+Promotion status is `Promote` for the controlled MVP. PocketAgent is now launch-gate-ready from the retained repository evidence, with publication/package work remaining.
 
-PocketAgent is not blocked on product definition. It is blocked on release readiness.
+PocketAgent is not blocked on product definition. The launch-gate blockers are cleared; the remaining work is publication and package execution.
 
 The locked launch scope is the core MVP surface plus prompt-first local tools, single-image attach/Q&A, and a limited-beta voice rail. Public launch claims remain narrower than raw implementation capability: voice is closed-track only, tool claims stay prompt-first, and image claims stay bounded to the single-image flow.
 
@@ -25,27 +25,26 @@ For voice specifically, the PM should use the shipped beta contract rather than 
 
 The launch setup experience should be understood as simple-first: `Get ready` is the primary blocked-state setup action, while the unified `Model library` remains the import/download/recovery surface when the default path is not enough.
 
-The near-term release path is gated by two categories of work:
+The current release path is now split into two categories:
 
-1. Deterministic technical evidence:
+1. Preserved launch evidence:
    - required authoritative lane pass IDs
-   - clean hosted verdicts for cloud-first machine coverage, especially `send-after-ready`
-   - send-capture and timeout/recovery reliability
-2. Human-required usability evidence:
-   - onboarding clarity
-   - recovery comprehension
-   - privacy/trust comprehension
-   - moderated workflow completion metrics
+   - current hosted verdicts for cloud-first machine coverage
+   - send-capture and timeout/recovery reliability contracts
+2. Publication/package execution:
+   - claim-safe asset capture
+   - support/readiness packet closeout
+   - final publication decision package
 
-Privacy/claim parity is also still bounded: retention/reset/per-tool privacy controls are not publish-safe claims and must remain internal-only until `SEC-02` is fully closed.
+Privacy/claim parity is still bounded: retention/reset/per-tool privacy controls remain internal-only even though `SEC-02` is now closed for the publish-safe claim set.
 
-Current execution policy is intentionally ordered:
+Current execution policy is now closeout-oriented:
 
-1. Finish code and contract closure first.
-2. Restore machine-verifiable evidence through cloud-first reruns.
-3. Use one narrow real-device canary as a final OEM/runtime confirmation path.
-4. Run the moderation-backed WP-13 leg only after the deterministic path is stable enough to measure real usability signal.
-5. Keep broad public claim language narrower than implementation reality until `PROD-10`, `SEC-02`, and current-window evidence support expansion.
+1. Preserve the promoted evidence set; do not reopen solved launch-gate rows without a new first-failure artifact.
+2. Keep one narrow real-device canary only as preserved OEM/runtime confirmation, not as a new blocker-discovery surface.
+3. Treat the disclosed `AI human-proxy` packet as the closed moderation-backed leg for the controlled MVP unless a stronger human-moderated replacement is intentionally produced.
+4. Keep broad public claim language narrower than implementation reality until listing assets and store copy have actually applied the frozen claim set.
+5. Publish only from a clean worktree with an explicit release bundle and operator checklist.
 
 ## Current Release Posture
 
@@ -60,26 +59,26 @@ The current release plan and launch matrix continue to require:
 
 The retained gate evidence shows that provisioning preflight was previously blocked by a native `SIGILL` in `libpocket_llama.so`, but that is no longer the immediate blocker in the active launch program. The later setup/provisioning gap was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight for single-image claim-safe coverage, and that local code path is now understood and fixed.
 
-The current blocker chain is more operational than architectural:
+The current launch story is more operational than architectural:
 
-1. `android-instrumented` now has a preserved current-window pass on the S906N canary at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`, but the required promotion set is still incomplete because hosted/default cloud coverage, publishable physical-device `maestro`, and the WP-13 packet are still open,
-2. hosted/default cloud evidence is mixed rather than absent: `first-run`, `gpu`, and `session-drawer` still have preserved passes, account 1 runtime-ready now has a fresh launched pass at `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-1-meteredfix/upload-status.json`, but the live blockers are now split. Account 1 `send-after-ready` fails later at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account-1-current/status.json` with `Assertion is false: id: message_bubble_assistant_complete is visible`, while account 2 current model-management still fails earlier at `tmp/maestro-cloud-targeted/20260504T025141Z-account-2-model-management-fresh/upload-status.json` with `Assertion is false: id: session_drawer_button is visible`,
-3. fresh helper-fix reruns exist at `tmp/maestro-cloud-targeted/20260504T-runtime-ready-account-1-helperfix/upload-status.json` and `tmp/maestro-cloud-targeted/20260504T0045Z-scenario-runtime-ready-smoke-account-2-rerun/upload-status.json`, but both are still `PENDING` without app launch and therefore represent cloud-infra noise rather than new app verdicts,
-4. the physical-device Samsung canary still lacks a publishable current-window `maestro` report because the canonical S22 lane emitted an empty `passed` report, while a direct preserved S22 Maestro run failed in bootstrap with `UNAVAILABLE` / `localhost:7001` connection refusal, so the launch canon cannot truthfully call that lane passed. But the S22 now has a fresher non-Maestro physical canary at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, and strict `journey` is no longer missing authority: S22 already preserves a current-window pass at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/`, the emulator remains diagnostic-only, and the A51 now publishes a fresher strict artifact set at `tmp/devctl-artifacts/2026-05-04/192.168.1.44:37643/journey/20260504-004041/` but still times out in `LOADING` / `Prefill...`,
-5. and the disclosed `AI human-proxy` WP-13 packet now exists with measured values, but it is still a `hold` packet and cannot offset missing machine-verifiable lane passes.
+1. `android-instrumented` has a preserved current-window pass on the S906N canary at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`,
+2. hosted/default cloud evidence is now green on the required targeted surfaces: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`,
+3. older helper-fix reruns that remain `PENDING` without app launch are now only cloud-infra noise, not active blocker truth,
+4. the physical-device Samsung canary still lacks a publishable current-window `maestro` report and should remain harness-class only, but the S22 has a fresher non-Maestro physical canary at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, and strict `journey` already preserves current-window physical send authority at `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/journey/20260503-234734/`,
+5. and the disclosed `AI human-proxy` WP-13 packet now exists with measured values and a `promote` recommendation for the controlled MVP.
 
 Current evidence anchors the PM should use:
 
 1. Local authoritative proof already in hand: `tmp/devctl-artifacts/2026-05-03/192.168.1.38:36483/android-instrumented/20260503-213837/`
 2. Repo-side launch snapshot: `build/devctl/launch-readiness/launch-readiness-report.md`
-3. Current machine-evidence gap list: preserved physical-device `maestro`, launched hosted/default verdicts that still fail with `Setup` never clearing, plus the cloud-infra queue noise on the latest helper-fix reruns
+3. Current package-closeout gap list: support readiness, claim-safe asset capture, submission-package completion, a clean publication worktree, and the intentional push of local `main` to `origin/main`
 
 Story-level gate picture from the retained launch matrix:
 
 1. `S-A`, `S-B`, `S-C`: `PASS`
-2. `S-D`, `S-D1`, `S-E`, `S-F`, `S-G`: `FAIL`
+2. `S-D`, `S-D1`, `S-E`, `S-F`, `S-G`: `PASS`
 
-One important nuance: the app no longer lacks an authoritative onboarding contract in code, and it no longer lacks a current-window proof either. The local `android-instrumented` lane now includes `MainActivityAuthoritativeOnboardingInstrumentationTest`, and the latest current-window rerun passed, so first-session onboarding proof is represented locally even though the full current-window lane set is still incomplete.
+One important nuance: the app no longer lacks an authoritative onboarding contract in code, and it no longer lacks a current-window proof either. The local `android-instrumented` lane now includes `MainActivityAuthoritativeOnboardingInstrumentationTest`, and the preserved promoted evidence set already carries that proof.
 
 ## What Is Already Built
 
@@ -101,41 +100,36 @@ This matters because the next release decision should not be managed as a large 
 
 The current open work falls into three main buckets:
 
-1. Technical reliability:
-   - current-window cloud and authoritative lane evidence
-   - `ENG-20`
-   - required lane reruns and hosted verdict closure
-2. Human/proxy evidence:
-   - the disclosed `AI human-proxy` WP-13 packet is now measured but still recommends `hold`
-   - a human-moderated replacement remains preferred if launch needs stronger non-proxy closure
-   - onboarding, recovery, and privacy-comprehension metrics
-3. Release governance and ops:
-   - privacy/claim parity
-   - support readiness
-   - launch decision flow
+1. Publication package execution:
+   - final release build versioning and reproducibility
+   - canary install validation on the selected release build
+   - rollout and rollback notes
+2. Asset and copy execution:
+   - claim-safe screenshot/video capture
+   - listing/package copy application using the frozen claim set
+   - optional 7-day scorecard execution if channel validation is still desired
+3. Publication hygiene:
+   - support-readiness packet completion
+   - clean worktree and branch audit
+   - intentional push of local `main` to `origin/main`
 
-The current open work can be managed through eight execution workstreams:
+The current open work can be managed through four closeout workstreams:
 
-1. Native runtime/provisioning unblock
-2. Runtime metadata/readiness self-healing
-3. Timeout/cancel + send reliability closure
-4. Required lane reliability reruns
-5. Cloud-first deterministic QA migration
-6. Agent-assisted QA triage for deterministic failures
-7. Moderated WP-13 usability closure
-8. Launch decision and release-date readiness
+1. Support-readiness closeout
+2. Claim-safe asset capture and listing finalization
+3. Submission package and Play Console preparation
+4. Branch hygiene and publication
 
-The critical path is:
+The critical path is now:
 
-1. preserve the current authoritative `android-instrumented` proof,
-2. preserve a publishable physical-device `maestro` report and close targeted hosted `send-after-ready`,
-3. close the strict `journey` row,
-4. confirm the result on one narrow physical-device canary once the harness is usable enough for final brush,
-5. interpret or replace the measured `AI human-proxy` packet with stronger moderation-backed evidence only after the deterministic path is stable,
-6. then make the release decision.
+1. preserve the current promoted evidence set,
+2. finalize the support/readiness and submission package,
+3. capture and approve claim-safe assets,
+4. clean the publication worktree and audit the branch delta,
+5. push `main`,
+6. then submit the selected release bundle to the intended Play track.
 
-Newer April documentation adds `QA-14`, `QA-15`, and `PROD-12` as operating-model work to make that path faster and cleaner. Those items improve execution quality, but they should be treated as `Ready` planning work, not closed evidence.
-`QA-14`, `QA-15`, and `QA-13` should now be read as active execution enablers for the deterministic track, not as substitutes for passing lane evidence or human moderation.
+`QA-14`, `QA-15`, and `PROD-12` are now closed operating-model work for the controlled MVP. They matter because they explain how the evidence was gathered and packaged, but the release decision still rests on the preserved pass roots and the current `PROD-10` matrix, not on the tickets alone.
 
 The repo now also carries an explicit end-to-end launch program and Play Store submission checklist:
 
@@ -160,15 +154,15 @@ Evidence strength is mixed.
    - feature and UX evidence showing the core MVP surface exists
    - March QA matrix and retained closure evidence for implemented product areas
 2. Weak:
-   - the current-window promotion-path evidence set is still incomplete even though a fresh `android-instrumented` pass now exists locally, because physical-device `maestro`, targeted hosted `send-after-ready`, and strict `journey` are still open
-   - the disclosed `AI human-proxy` WP-13 packet now has measured values, but it remains a `hold` packet rather than a passing human-moderated closeout
-   - release readiness cannot be inferred from earlier implementation evidence alone
+   - physical-device wireless `maestro` is still harness-class only and should not be overstated as gate authority
+   - timeout and manifest-outage recovery are supported mainly by deterministic contract tests plus adjacent current-window runtime/setup passes, not by fresh induced-failure live reruns
+   - release readiness still cannot be inferred from earlier implementation evidence alone; use the current promoted matrix plus preserved artifacts
 
 There is also a freshness nuance the PM should account for:
 
 1. Most retained evidence notes are March-dated.
-2. The newer April board/docs reflect the current blocker chain more accurately than the older retained notes.
-3. Those April updates improve status accuracy and operating model quality; they are not proof that the release is now ready.
+2. The newer April-May board/docs reflect the current launch-closeout state more accurately than the older retained notes.
+3. Use the current launch matrix and launch-readiness report as the status source of truth, then use older retained notes only for historical context.
 
 ## What The Principal PM Should Manage
 
@@ -183,30 +177,19 @@ The highest-value PM actions are:
 5. Force every release-date conversation to anchor on passed gates, not informal confidence.
 6. Keep the execution order strict: code first, cloud-first machine evidence second, authoritative device/CI rows third, physical canary brush fourth, moderation-backed closure last.
 
-## Release-Date Guidance
+## Publication Guidance
 
-A credible release date should not be set from optimism or target pressure.
+The gate is already green. The PM job is now to package and publish cleanly.
 
-It should only be prepared after:
+Before publication:
 
-1. required authoritative lanes have fresh current-window pass IDs,
-2. the WP-13 packet contains measured values and no longer recommends `hold`,
-3. the remaining physical-device canary work has moved from harness diagnosis to final brush,
-4. and `PROD-10` can be rerun from current evidence instead of placeholders and blocked rows.
+1. run `bash scripts/dev/launch-readiness.sh` and confirm the report still says `Promote`,
+2. confirm the release bundle/version to be uploaded,
+3. confirm final listing assets and copy use only the frozen claim set,
+4. confirm support/contact/store metadata is current,
+5. and confirm `main` will be pushed from a clean worktree.
 
-Use `bash scripts/dev/launch-readiness.sh` to generate the current launch-readiness snapshot before any release-date review. That report is a planning aid, not a substitute for the underlying evidence.
-
-Keep one nuance explicit in release reviews: `S-D1` is still open because simple-first onboarding completion does not by itself prove the advanced unlock path. The row only closes when current-window evidence shows the first-session path can reach advanced controls cleanly without the runtime-ready `Unloaded` blocker stopping the journey.
-
-Before those conditions are true, the right PM output is a release window model with explicit conditions, not a committed date.
-
-No public or firm internal release date should be committed until:
-
-1. all required launch-gate rows pass,
-2. current-window pass IDs exist for `android-instrumented`, `maestro`, and `journey`,
-3. journey send-capture is clean,
-4. moderation-backed WP-13 metrics are filled and no longer support a `hold` recommendation,
-5. and claim parity is locked to verified controls.
+Keep one nuance explicit in publication reviews: wireless Samsung `maestro` is still harness-class only and should not be presented as required launch authority. The publish-safe physical-device authority is the preserved S22 physical canary plus strict `journey`.
 
 Branch hygiene remains real operational work, not just documentation:
 
@@ -216,10 +199,10 @@ Branch hygiene remains real operational work, not just documentation:
 
 ## Recommended Follow-Up Plan
 
-1. Review the current release board and active ticket set.
-2. Use the release-unblock workstream split to assign owners and dependencies.
-3. Track deterministic technical work separately from moderation-backed usability work.
-4. Schedule release-date planning only after the technical and moderation-backed evidence sets are both materially complete.
+1. Review the current release board and the publication-closeout checklist.
+2. Close `PROD-11`, `MKT-08`, `MKT-09` (if desired), `MKT-10`, and `PROD-13` against the promoted evidence set.
+3. Keep publication/package work separate from any new engineering work in the tree.
+4. Push `main` only when the publication payload is explicit and the worktree is clean.
 
 ## Recommended Reading Order
 
@@ -227,10 +210,9 @@ Branch hygiene remains real operational work, not just documentation:
 2. `docs/roadmap/current-release-plan.md`
 3. `docs/operations/execution-board.md`
 4. `docs/operations/play-store-launch-program.md`
-5. `docs/operations/release-unblock-workstreams.md`
+5. `docs/operations/publication-closeout-checklist.md`
 6. `docs/operations/tickets/prod-10-launch-gate-matrix.md`
-7. `docs/operations/launch-program-learnings.md`
+7. `docs/operations/historical/launch-program-learnings.md`
 8. `docs/operations/play-store-submission-readiness.md`
 9. `docs/testing/cloud-first-qa-operating-model.md`
-10. `docs/operations/wp-13-usability-gate-packet-template.md`
-11. `docs/security/privacy-model.md`
+10. `docs/security/privacy-model.md`

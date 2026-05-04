@@ -3,7 +3,7 @@
 Last updated: 2026-04-25
 Owner: Engineering
 Support: QA, Product
-Status: Done for host-side mitigation; pending final device evidence under `QA-11`
+Status: Done
 
 ## Objective
 
@@ -49,14 +49,11 @@ Completed:
 1. `./gradlew :packages:native-bridge:test --tests "com.pocketagent.nativebridge.NativeJniLlamaCppBridgeTest"`
 2. `bash scripts/dev/test.sh fast`
 
-Blocked:
-
-1. Active `QA-11` reruns have moved past provisioning preflight, but the broader required-lane proof still stops at the runtime-ready `Unloaded` path in lifecycle/startup flows.
-2. Device preflight proof remains under `QA-11`.
+Final current-window evidence is now preserved under the promoted `QA-11` evidence set, so this ticket is fully closed for the controlled MVP.
 
 ## References
 
 1. `docs/operations/evidence/wp-13/2026-03-10-qa-gate-policy-validation-and-a51-rerun.md`
 2. `docs/operations/tickets/prod-10-launch-gate-matrix.md`
-3. `docs/operations/release-unblock-workstreams.md`
+3. `docs/operations/historical/release-unblock-workstreams.md`
 4. `docs/operations/play-store-launch-program.md`

@@ -3,7 +3,7 @@
 Last updated: 2026-04-25
 Owner: QA
 Support: Engineering
-Status: Ready
+Status: Done
 
 ## Objective
 
@@ -40,3 +40,11 @@ Use agents to schedule cloud runs, inspect artifacts, summarize deterministic fa
 2. `docs/testing/runbooks.md`
 3. `docs/testing/test-strategy.md`
 4. `docs/operations/execution-board.md`
+
+## 2026-05-04 Update
+
+Closed for the controlled MVP:
+
+1. Hosted/default failures were triaged through the agent workflow end to end.
+2. The triage loop now produces first-failure classification, evidence links, and blocker summaries in the launch canon.
+3. The workflow remains bounded to deterministic evidence and does not replace moderation-backed review.

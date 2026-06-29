@@ -239,12 +239,10 @@ internal fun ModelSheet(
                     model = model,
                     version = version,
                     eligibility = libraryState.eligibility.eligibilityFor(model.modelId, version.version),
-                    defaultGetReadyModelId = libraryState.defaultGetReadyModelId,
                     activeModel = activeModel,
                     loadedModel = modelLoadingState.loadedModel,
                     busy = busy,
                     onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
-                    onSetDefaultVersion = { modelId, ver -> onEvent(ModelSheetEvent.SetDefaultVersion(modelId, ver)) },
                     onLoadVersion = { modelId, ver -> onEvent(ModelSheetEvent.LoadVersion(modelId, ver)) },
                     onRemoveVersion = { modelId, ver -> onEvent(ModelSheetEvent.RequestRemove(modelId, ver)) },
                 )
@@ -503,12 +501,10 @@ private fun DownloadedModelCard(
     model: ProvisionedModelState,
     version: ModelVersionDescriptor,
     eligibility: ModelVersionEligibility,
-    defaultGetReadyModelId: String?,
     activeModel: com.pocketagent.runtime.RuntimeLoadedModel?,
     loadedModel: com.pocketagent.runtime.RuntimeLoadedModel?,
     busy: Boolean,
     onImportModel: (String) -> Unit,
-    onSetDefaultVersion: (String, String) -> Unit,
     onLoadVersion: (String, String) -> Unit,
     onRemoveVersion: (String, String) -> Unit,
 ) {
@@ -517,7 +513,6 @@ private fun DownloadedModelCard(
     val badge = resolveDownloadedModelBadge(
         model = model,
         version = version,
-        defaultGetReadyModelId = defaultGetReadyModelId,
         activeModel = activeModel,
         loadedModel = loadedModel,
     )
@@ -525,9 +520,6 @@ private fun DownloadedModelCard(
     val statusColor = when (badge) {
         DownloadedModelBadge.LOADED -> MaterialTheme.colorScheme.primary
         DownloadedModelBadge.SWITCHING -> MaterialTheme.colorScheme.tertiary
-        DownloadedModelBadge.DEFAULT,
-        DownloadedModelBadge.ACTIVE,
-        -> MaterialTheme.colorScheme.secondary
         DownloadedModelBadge.READY -> MaterialTheme.colorScheme.outline
     }
     val loadDisabledReason = when {
@@ -566,8 +558,6 @@ private fun DownloadedModelCard(
                     label = when (badge) {
                         DownloadedModelBadge.LOADED -> stringResource(id = R.string.ui_loaded)
                         DownloadedModelBadge.SWITCHING -> stringResource(id = R.string.ui_switching)
-                        DownloadedModelBadge.DEFAULT -> stringResource(id = R.string.ui_default)
-                        DownloadedModelBadge.ACTIVE -> stringResource(id = R.string.ui_active)
                         DownloadedModelBadge.READY -> stringResource(id = R.string.ui_ready)
                     },
                     pulsing = badge == DownloadedModelBadge.SWITCHING,
@@ -606,16 +596,6 @@ private fun DownloadedModelCard(
                         ),
                 ) {
                     Text(stringResource(id = if (isLoaded) R.string.ui_loaded else R.string.ui_load))
-                }
-                OutlinedButton(
-                    onClick = { haptic(); onSetDefaultVersion(model.modelId, version.version) },
-                    enabled = !version.isActive,
-                    modifier = modelLibrarySetActiveButtonModifier(
-                        modelId = model.modelId,
-                        version = version.version,
-                    ),
-                ) {
-                    Text(stringResource(id = if (version.isActive) R.string.ui_active else R.string.ui_set_active))
                 }
                 OutlinedButton(onClick = { haptic(); onImportModel(model.modelId) }) {
                     Text(stringResource(id = if (model.isProvisioned) R.string.ui_replace_file else R.string.ui_import))
@@ -946,9 +926,6 @@ private fun versionIdentityKey(modelId: String, version: String): String = "$mod
 internal fun modelLibraryLoadButtonTag(modelId: String, version: String): String =
     "model_library_load_${modelId}_${version}"
 
-internal fun modelLibrarySetActiveButtonTag(modelId: String, version: String): String =
-    "model_library_set_active_${modelId}_${version}"
-
 internal fun modelLibraryDownloadButtonTag(modelId: String, version: String): String =
     "model_library_download_${modelId}_${version}"
 
@@ -957,14 +934,6 @@ private fun modelLibraryLoadButtonModifier(modelId: String, version: String): Mo
         Modifier.testTag("model_library_load_qwen3-0.6b-q4_k_m_q4_k_m")
     } else {
         Modifier.testTag(modelLibraryLoadButtonTag(modelId, version))
-    }
-}
-
-private fun modelLibrarySetActiveButtonModifier(modelId: String, version: String): Modifier {
-    return if (isLaunchDefaultModelVersion(modelId, version)) {
-        Modifier.testTag("model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m")
-    } else {
-        Modifier.testTag(modelLibrarySetActiveButtonTag(modelId, version))
     }
 }
 

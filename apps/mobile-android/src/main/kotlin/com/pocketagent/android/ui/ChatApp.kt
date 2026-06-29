@@ -103,20 +103,17 @@ fun PocketAgentApp(
             )
         }
     }
-    val presetRevision by viewModel.presetBackingStore.revisionFlow().collectAsState(initial = 0L)
-    val headerUiState by remember(modelLoadingState, runtime.routingMode, presetRevision) {
+    val headerUiState by remember(modelLoadingState) {
         derivedStateOf {
             deriveChatHeaderUiState(
                 modelLoadingState = modelLoadingState,
-                routingMode = runtime.routingMode,
-                presetBackingStore = viewModel.presetBackingStore,
             )
         }
     }
     val activeRuntimeModelLabel = headerUiState.activeRuntimeModelLabel
-    val activeModelId by remember(modelLoadingState.loadedModel, runtime.activeModelId) {
+    val activeModelId by remember(modelLoadingState.loadedModel) {
         derivedStateOf {
-            modelLoadingState.loadedModel?.modelId ?: runtime.activeModelId
+            modelLoadingState.loadedModel?.modelId
         }
     }
     val canAttachImages by remember(activeModelId) {
@@ -137,9 +134,9 @@ fun PocketAgentApp(
             specProvider = foregroundRuntimeServices.modelSpecProvider,
         )
     }
-    val thinkingToggleModelId by remember(modelLoadingState.loadedModel, runtime.activeModelId) {
+    val thinkingToggleModelId by remember(modelLoadingState.loadedModel) {
         derivedStateOf {
-            modelLoadingState.loadedModel?.modelId ?: runtime.activeModelId
+            modelLoadingState.loadedModel?.modelId
         }
     }
     val showThinkingToggle by remember(thinkingToggleModelId, interactionRegistry) {
@@ -387,7 +384,6 @@ fun PocketAgentApp(
             topBar = {
                 PocketAgentTopBar(
                     activeRuntimeModelLabel = activeRuntimeModelLabel,
-                    lastUsedModelLabel = lastUsedModelLabel,
                     hasInstalledModels = hasInstalledModels,
                     onOpenSessionDrawer = { viewModel.showSurface(ModalSurface.SessionDrawer) },
                     onModelPresetSelected = handlePresetSelected,

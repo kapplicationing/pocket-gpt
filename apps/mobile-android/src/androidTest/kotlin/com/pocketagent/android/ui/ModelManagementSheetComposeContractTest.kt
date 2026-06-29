@@ -297,7 +297,7 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
-    fun installedVersionActionTagsDispatchLoadAndSetActiveEvents() {
+    fun installedVersionActionTagDispatchesLoadEventOnly() {
         val events = mutableListOf<ModelSheetEvent>()
         val inactiveSnapshot = sampleSnapshot(installed = true, activeVersion = false)
         val idleLoadingState = ModelLoadingState.Idle(
@@ -325,17 +325,11 @@ class ModelManagementSheetComposeContractTest {
         }
 
         val loadTag = modelLibraryLoadButtonTag("qwen3.5-0.8b-q4", "q4_0")
-        val setActiveTag = modelLibrarySetActiveButtonTag("qwen3.5-0.8b-q4", "q4_0")
         composeRule.onNodeWithTag("unified_model_sheet")
             .performScrollToNode(hasTestTag(loadTag))
         composeRule.onNodeWithTag(loadTag).assertIsDisplayed()
-        composeRule.onNodeWithTag(setActiveTag).assertIsDisplayed()
-        composeRule.onNodeWithTag(setActiveTag).performClick()
         composeRule.onNodeWithTag(loadTag).performClick()
         composeRule.runOnIdle {
-            assertTrue(
-                events.contains(ModelSheetEvent.SetDefaultVersion("qwen3.5-0.8b-q4", "q4_0")),
-            )
             assertTrue(
                 events.contains(ModelSheetEvent.LoadVersion("qwen3.5-0.8b-q4", "q4_0")),
             )

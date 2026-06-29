@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 
 class ModelLibraryUxDecisionsTest {
     @Test
-    fun `default badge is reserved for active product default model`() {
+    fun `provisioned default version is ready when not loaded`() {
         val model = provisionedModel(
             modelId = "qwen3.5-0.8b-q4",
             activeVersion = "q4_0",
@@ -20,16 +20,15 @@ class ModelLibraryUxDecisionsTest {
         val badge = resolveDownloadedModelBadge(
             model = model,
             version = model.installedVersions.first(),
-            defaultGetReadyModelId = "qwen3.5-0.8b-q4",
             activeModel = null,
             loadedModel = null,
         )
 
-        assertEquals(DownloadedModelBadge.DEFAULT, badge)
+        assertEquals(DownloadedModelBadge.READY, badge)
     }
 
     @Test
-    fun `active non default version shows active badge instead of default`() {
+    fun `provisioned active non default version is ready when not loaded`() {
         val model = provisionedModel(
             modelId = "qwen3-1.7b-q4_k_m",
             activeVersion = "q4_k_m",
@@ -39,16 +38,15 @@ class ModelLibraryUxDecisionsTest {
         val badge = resolveDownloadedModelBadge(
             model = model,
             version = model.installedVersions.first(),
-            defaultGetReadyModelId = "qwen3.5-0.8b-q4",
             activeModel = null,
             loadedModel = null,
         )
 
-        assertEquals(DownloadedModelBadge.ACTIVE, badge)
+        assertEquals(DownloadedModelBadge.READY, badge)
     }
 
     @Test
-    fun `loaded badge wins over default and active badges`() {
+    fun `loaded badge wins over provisioned active metadata`() {
         val model = provisionedModel(
             modelId = "qwen3.5-0.8b-q4",
             activeVersion = "q4_0",
@@ -58,7 +56,6 @@ class ModelLibraryUxDecisionsTest {
         val badge = resolveDownloadedModelBadge(
             model = model,
             version = model.installedVersions.first(),
-            defaultGetReadyModelId = "qwen3.5-0.8b-q4",
             activeModel = RuntimeLoadedModel(modelId = "qwen3.5-0.8b-q4", modelVersion = "q4_0"),
             loadedModel = RuntimeLoadedModel(modelId = "qwen3.5-0.8b-q4", modelVersion = "q4_0"),
         )
@@ -206,7 +203,6 @@ class ModelLibraryUxDecisionsTest {
         val badge = resolveDownloadedModelBadge(
             model = model,
             version = version,
-            defaultGetReadyModelId = "qwen3.5-0.8b-q4",
             activeModel = null,
             loadedModel = null,
         )
@@ -230,7 +226,6 @@ class ModelLibraryUxDecisionsTest {
         val badge = resolveDownloadedModelBadge(
             model = model,
             version = version,
-            defaultGetReadyModelId = "qwen3.5-0.8b-q4",
             activeModel = activeModel,
             loadedModel = loadedModel,
         )
@@ -255,20 +250,18 @@ class ModelLibraryUxDecisionsTest {
         val loadedBadge = resolveDownloadedModelBadge(
             model = model,
             version = q4km,
-            defaultGetReadyModelId = "qwen3-1.7b-q4_k_m",
             activeModel = null,
             loadedModel = loadedModel,
         )
-        val activeBadge = resolveDownloadedModelBadge(
+        val provisionedActiveBadge = resolveDownloadedModelBadge(
             model = model,
             version = q40,
-            defaultGetReadyModelId = "qwen3-1.7b-q4_k_m",
             activeModel = null,
             loadedModel = loadedModel,
         )
 
         assertEquals(DownloadedModelBadge.LOADED, loadedBadge)
-        assertEquals(DownloadedModelBadge.ACTIVE, activeBadge)
+        assertEquals(DownloadedModelBadge.READY, provisionedActiveBadge)
     }
 }
 

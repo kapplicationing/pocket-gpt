@@ -7,8 +7,6 @@ import com.pocketagent.runtime.RuntimeLoadedModel
 internal enum class DownloadedModelBadge {
     LOADED,
     SWITCHING,
-    DEFAULT,
-    ACTIVE,
     READY,
 }
 
@@ -21,7 +19,6 @@ internal data class RemoveVersionPlan(
 internal fun resolveDownloadedModelBadge(
     model: ProvisionedModelState,
     version: ModelVersionDescriptor,
-    defaultGetReadyModelId: String?,
     activeModel: RuntimeLoadedModel?,
     loadedModel: RuntimeLoadedModel?,
 ): DownloadedModelBadge {
@@ -34,13 +31,6 @@ internal fun resolveDownloadedModelBadge(
         loadedModel != activeModel
     if (isRequested) {
         return DownloadedModelBadge.SWITCHING
-    }
-    val isActive = version.isActive || model.activeVersion == version.version
-    if (isActive && model.modelId == defaultGetReadyModelId) {
-        return DownloadedModelBadge.DEFAULT
-    }
-    if (isActive) {
-        return DownloadedModelBadge.ACTIVE
     }
     return DownloadedModelBadge.READY
 }

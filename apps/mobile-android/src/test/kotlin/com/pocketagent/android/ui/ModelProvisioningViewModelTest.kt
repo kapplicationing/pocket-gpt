@@ -30,6 +30,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
+import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.testutil.fakeUri
 import com.pocketagent.nativebridge.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
@@ -47,6 +48,7 @@ import org.junit.Before
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -309,7 +311,7 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
-    fun `load and offload model update lifecycle state`() = runTest(dispatcher) {
+    fun `load and manual offload clears loaded model but preserves last used restore target`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
@@ -325,7 +327,18 @@ class ModelProvisioningViewModelTest {
         val offloadResult = viewModel.offloadModel("manual")
         advanceUntilIdle()
         assertTrue(offloadResult?.success == true)
-        assertEquals(null, viewModel.uiState.value.lifecycle.loadedModel)
+        assertNull(viewModel.uiState.value.lifecycle.loadedModel)
+        assertEquals(
+            RuntimeLoadedModel("qwen3.5-0.8b-q4", "1"),
+            viewModel.uiState.value.lifecycle.lastUsedModel,
+        )
+        val visibleState = viewModel.modelLoadingState.value
+        assertTrue(visibleState is ModelLoadingState.Idle)
+        assertNull(visibleState.loadedModel)
+        assertEquals(
+            RuntimeLoadedModel("qwen3.5-0.8b-q4", "1"),
+            visibleState.lastUsedModel,
+        )
     }
 
     @Test

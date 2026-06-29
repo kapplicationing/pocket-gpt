@@ -34,7 +34,6 @@ import com.pocketagent.core.ModelPreset
 @Composable
 internal fun PocketAgentTopBar(
     activeRuntimeModelLabel: String?,
-    lastUsedModelLabel: String?,
     hasInstalledModels: Boolean,
     onOpenSessionDrawer: () -> Unit,
     onModelPresetSelected: (ModelPreset) -> Unit,
@@ -84,7 +83,6 @@ internal fun PocketAgentTopBar(
                     label = {
                         Text(
                             text = activeRuntimeModelLabel
-                                ?: lastUsedModelLabel
                                 ?: stringResource(id = R.string.ui_models_title),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

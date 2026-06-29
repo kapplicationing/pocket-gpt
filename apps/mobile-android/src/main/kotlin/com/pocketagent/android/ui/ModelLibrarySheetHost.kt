@@ -78,15 +78,6 @@ internal fun ModelLibrarySheetHost(
                     is ModelSheetEvent.CancelDownload -> scope.launch {
                         actions.cancelDownload(event.taskId)
                     }
-                    is ModelSheetEvent.SetDefaultVersion -> {
-                        scope.launch {
-                            val changed = actions.activateVersion(
-                                event.modelId,
-                                event.version,
-                            )
-                            if (!changed) return@launch
-                        }
-                    }
                     is ModelSheetEvent.LoadVersion -> scope.launch {
                         actions.loadModelVersion(event.modelId, event.version, closeOnSuccess = true)
                     }

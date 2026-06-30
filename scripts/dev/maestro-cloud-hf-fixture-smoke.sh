@@ -84,6 +84,21 @@ if [[ -z "${RUN_ROOT}" ]]; then
 fi
 mkdir -p "${RUN_ROOT}"
 
+FIXTURE_HEALTH_URL="${FIXTURE_BASE_URL%/}/health"
+if ! python3 - "${FIXTURE_HEALTH_URL}" <<'PY' >/dev/null 2>&1
+import sys
+import urllib.request
+
+url = sys.argv[1]
+with urllib.request.urlopen(url, timeout=5) as response:
+    raise SystemExit(0 if response.status == 200 else 1)
+PY
+then
+  echo "Fixture server is not healthy at ${FIXTURE_HEALTH_URL}." >&2
+  echo "Start scripts/dev/hf-fixture-server.py and expose it with a public tunnel before running cloud smoke." >&2
+  exit 1
+fi
+
 BUILD_LOG="${RUN_ROOT}/build.log"
 GRADLE_USER_HOME=.gradle-home ./gradlew --no-daemon \
   -Ppocketgpt.enableNativeBuild=true \

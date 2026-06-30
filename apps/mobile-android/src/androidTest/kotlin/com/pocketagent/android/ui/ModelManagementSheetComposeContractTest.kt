@@ -414,6 +414,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithTag("model_library_hf_check_url").performClick()
         composeRule.onNodeWithTag("model_library_hf_candidate_card").assertIsDisplayed()
         composeRule.onNodeWithText("Model card: https://huggingface.co/owner/repo").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_open_model_card").performClick()
         composeRule.onNodeWithText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_storage_impact").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_queue_download").performClick()
@@ -427,6 +428,7 @@ class ModelManagementSheetComposeContractTest {
                     ),
                 ),
             )
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
             assertTrue(events.contains(ModelSheetEvent.DownloadVersion(candidate.version)))
         }
     }
@@ -456,6 +458,7 @@ class ModelManagementSheetComposeContractTest {
 
         composeRule.onNodeWithTag("model_library_hf_recent").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
+        composeRule.onNodeWithTag("model_library_hf_recent_open_model_card").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_remove").performClick()
 
         composeRule.runOnIdle {
@@ -467,6 +470,7 @@ class ModelManagementSheetComposeContractTest {
                     ),
                 ),
             )
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
             assertTrue(events.contains(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)))
         }
     }

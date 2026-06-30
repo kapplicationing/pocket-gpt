@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.PresetBackingStore
@@ -44,6 +45,7 @@ internal fun ModelLibrarySheetHost(
     val runtimeModelState = remember(provisioningState) {
         provisioningState.toRuntimeModelUiState()
     } ?: return
+    val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
     val runtimeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pendingRemoveVersion by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -73,6 +75,9 @@ internal fun ModelLibrarySheetHost(
                     }
                     is ModelSheetEvent.RemoveRecentHuggingFaceModel -> scope.launch {
                         actions.removeRecentHuggingFaceModel(event.id)
+                    }
+                    is ModelSheetEvent.OpenExternalUrl -> {
+                        uriHandler.openUri(event.url)
                     }
                     is ModelSheetEvent.DownloadVersion -> actions.downloadVersion(event.version)
                     is ModelSheetEvent.PauseDownload -> scope.launch {

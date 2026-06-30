@@ -71,6 +71,13 @@ if [[ -z "${RUN_ROOT}" ]]; then
 fi
 mkdir -p "${RUN_ROOT}"
 
+DEVICE_STATE="$(adb -s "${SERIAL}" get-state 2>/dev/null || true)"
+if [[ "${DEVICE_STATE}" != "device" ]]; then
+  echo "Device ${SERIAL} is not online for adb; state=${DEVICE_STATE:-missing}." >&2
+  echo "Re-pair wireless debugging or connect over USB, then rerun this wrapper." >&2
+  exit 1
+fi
+
 SERVER_LOG="${RUN_ROOT}/hf-fixture-server.log"
 SERVER_MANIFEST="${RUN_ROOT}/hf-fixture-manifest.json"
 JUNIT_PATH="${RUN_ROOT}/maestro-junit.xml"

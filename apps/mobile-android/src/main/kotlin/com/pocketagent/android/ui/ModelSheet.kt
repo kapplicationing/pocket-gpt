@@ -237,6 +237,7 @@ internal fun ModelSheet(
                 },
                 onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
+                onOpenModelCard = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
                 onRemoveRecent = { recent -> onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)) },
                 onRecheckRecent = { recent ->
                     huggingFaceInput = recent.originUrl
@@ -398,6 +399,7 @@ private fun HuggingFaceAcquisitionSection(
     onCheck: () -> Unit,
     onClear: () -> Unit,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
+    onOpenModelCard: (String) -> Unit,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
@@ -511,6 +513,7 @@ private fun HuggingFaceAcquisitionSection(
                         availableStorageBytes = availableStorageBytes,
                         queueing = false,
                         onDownloadVersion = onDownloadVersion,
+                        onOpenModelCard = onOpenModelCard,
                     )
                 }
                 is HuggingFaceAcquisitionUiState.Enqueueing -> {
@@ -519,6 +522,7 @@ private fun HuggingFaceAcquisitionSection(
                         availableStorageBytes = availableStorageBytes,
                         queueing = true,
                         onDownloadVersion = onDownloadVersion,
+                        onOpenModelCard = onOpenModelCard,
                     )
                 }
             }
@@ -528,6 +532,7 @@ private fun HuggingFaceAcquisitionSection(
                     recentModels = recentModels,
                     onRemoveRecent = onRemoveRecent,
                     onRecheckRecent = onRecheckRecent,
+                    onOpenModelCard = onOpenModelCard,
                 )
             }
         }
@@ -539,6 +544,7 @@ private fun HuggingFaceRecentModelsSection(
     recentModels: List<HuggingFaceRecentModel>,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
+    onOpenModelCard: (String) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -561,6 +567,7 @@ private fun HuggingFaceRecentModelsSection(
                 recent = recent,
                 onRemoveRecent = onRemoveRecent,
                 onRecheckRecent = onRecheckRecent,
+                onOpenModelCard = onOpenModelCard,
             )
         }
     }
@@ -571,8 +578,10 @@ private fun HuggingFaceRecentModelRow(
     recent: HuggingFaceRecentModel,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
+    onOpenModelCard: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val modelCardUrl = "https://huggingface.co/${recent.repoId}"
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -633,6 +642,12 @@ private fun HuggingFaceRecentModelRow(
                 Text(stringResource(id = R.string.ui_hf_recent_recheck))
             }
             TextButton(
+                onClick = { onOpenModelCard(modelCardUrl) },
+                modifier = Modifier.testTag("model_library_hf_recent_open_model_card"),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_open_model_card))
+            }
+            TextButton(
                 onClick = { onRemoveRecent(recent) },
                 modifier = Modifier.testTag("model_library_hf_recent_remove"),
             ) {
@@ -658,6 +673,7 @@ private fun HuggingFaceCandidateCard(
     availableStorageBytes: Long?,
     queueing: Boolean,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
+    onOpenModelCard: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val modelCardUrl = "https://huggingface.co/${candidate.reference.repoId}"
@@ -681,6 +697,12 @@ private fun HuggingFaceCandidateCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TextButton(
+                onClick = { onOpenModelCard(modelCardUrl) },
+                modifier = Modifier.testTag("model_library_hf_open_model_card"),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_open_model_card))
+            }
             Text(
                 text = stringResource(
                     id = R.string.ui_hf_candidate_source,

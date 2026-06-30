@@ -30,8 +30,9 @@ Green proof from 2026-06-30:
 Blocked or pending proof:
 
 1. Local fixture Maestro is not fully green yet. The standalone probe failures were caused by probing before the app was installed; the wrapper-installed probe passed. The first full fixture flow then failed because it anchored on the `Download queue` header while the tiny fixture completed. The flow now targets the queue card id instead. The rerun was interrupted by wireless ADB going `offline` before the flow could reach the fake server beyond `/health`. Latest interrupted run: `tmp/hf-fixture-smoke/20260630T074038Z`.
-2. Maestro Cloud execution requires uploading the private debug APK to Maestro Cloud. The repo has a wrapper and flow, but an agent should not run it without explicit approval for that external upload.
-3. Live HF download remains a manual long-running compatibility probe, not a default CI gate.
+2. A later reconnect attempt still classified the local device proof as transport-blocked: `adb devices` saw `192.168.246.27:40781 offline`, `adb reconnect offline` removed the stale transport, and `adb connect 192.168.246.27:40781` failed. The next useful proof needs the phone re-paired or attached by USB.
+3. Maestro Cloud execution requires uploading the private debug APK to Maestro Cloud. The repo has a wrapper and flow, but an agent should not run it without explicit approval for that external upload.
+4. Live HF download remains a manual long-running compatibility probe, not a default CI gate.
 
 ## Implemented V1 Surfaces
 
@@ -65,6 +66,7 @@ Implemented:
 4. Recheck action that reuses the canonical HF URL and target, then routes through the same validation path before queueing.
 5. Remove action for stale recent entries.
 6. Checked/queued relative timestamps in the recent row.
+7. Model-card open action for each recent entry.
 
 Intentional boundaries:
 
@@ -81,9 +83,11 @@ Implemented:
 2. Debug/test endpoint adapter through `-Ppocketgpt.hfFixtureBaseUrl`.
 3. Local fixture smoke wrapper: `scripts/dev/maestro-hf-fixture-smoke.sh`.
 4. Local wrapper bootstrap probe gate, so harness failures fail early.
-5. Cloud fixture flow: `tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml`.
-6. Cloud fixture wrapper: `scripts/dev/maestro-cloud-hf-fixture-smoke.sh`.
-7. Documentation for public fixture exposure through `cloudflared`, `ngrok`, `localhost.run`, Tailscale Funnel, or a tiny hosted VM.
+5. Local wrapper ADB state preflight, so offline wireless transports fail before starting the fixture server.
+6. Cloud fixture flow: `tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml`.
+7. Cloud fixture wrapper: `scripts/dev/maestro-cloud-hf-fixture-smoke.sh`.
+8. Cloud wrapper fixture `/health` preflight, so an unreachable public fixture URL fails before build/upload.
+9. Documentation for public fixture exposure through `cloudflared`, `ngrok`, `localhost.run`, Tailscale Funnel, or a tiny hosted VM.
 
 ## Tech Roadmap
 
@@ -108,8 +112,18 @@ Goal: prove hosted paste/check/queue/pause/resume/cancel/retry/install-row behav
 Default path:
 
 1. Start `scripts/dev/hf-fixture-server.py` locally.
-2. Expose it with a public tunnel, preferably `cloudflared tunnel --url http://127.0.0.1:8765`.
+2. Expose it with one public HTTPS or HTTP URL.
 3. Run `scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url <public-url>`.
+
+Simple exposure options:
+
+1. `cloudflared tunnel --url http://127.0.0.1:8765`: simplest when `cloudflared` is available; no inbound router change.
+2. `ngrok http 8765`: simple and inspectable, but requires an ngrok account in many setups.
+3. `ssh -R 80:127.0.0.1:8765 nokey@localhost.run`: useful when SSH egress is available and no extra tunnel tool is installed.
+4. `tailscale funnel 8765`: good if the machine is already on Tailscale and Funnel is enabled.
+5. Tiny hosted VM or short-lived container: most CI-like and stable; run `hf-fixture-server.py` there and point Maestro Cloud at it.
+
+Do not use plain `localhost` for Maestro Cloud. In cloud runs, `localhost` is the hosted device or runner environment, not the developer machine that runs the fixture server.
 
 Constraint:
 
@@ -181,15 +195,14 @@ Already present:
 5. Compatibility summary.
 6. Blocked reason.
 7. Storage impact against current free space.
-8. Model-card URL.
+8. Model-card URL with an open action handled by the sheet host.
 9. Explicit target-mapping copy.
 10. Queueing disabled-state semantics.
 
 Next polish:
 
 1. License link when Hub metadata exposes it.
-2. Make the model-card URL clickable if the app introduces outbound link handling.
-3. Add richer compatibility detail once GGUF metadata extraction is available before install.
+2. Add richer compatibility detail once GGUF metadata extraction is available before install.
 
 ### 3. Recent HF Downloads
 
@@ -254,9 +267,9 @@ Implementation shape:
 
 ## Recommended Next Order
 
-1. Prove app launch outside Maestro and classify the Samsung Maestro bootstrap issue.
-2. Run the cloud fixture smoke only after explicit APK-upload approval.
-3. Add candidate preview storage/license/model-card polish.
-4. Add recent-entry delete and timestamp polish.
-5. Design HF search against the existing candidate pipeline.
+1. Restore a stable local device transport, then rerun the local HF fixture smoke wrapper on the pinned serial.
+2. Run the cloud fixture smoke only after explicit APK-upload approval and with a public fixture URL from one of the documented tunnel/host options.
+3. Add license/model-card metadata from Hub responses when the acquisition client exposes it.
+4. Design HF search against the existing candidate pipeline.
+5. Decide whether recent HF downloads need a richer user catalog after actual redownload use.
 6. Defer private/gated, arbitrary model IDs, and multimodal until the current proof matrix is stable.

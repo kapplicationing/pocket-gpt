@@ -478,6 +478,7 @@
     <string name="ui_hf_checking">Checking…</string>
     <string name="ui_hf_candidate_target">Runtime target mapping: %1$s</string>
     <string name="ui_hf_candidate_model_card">Model card: %1$s</string>
+    <string name="ui_hf_open_model_card">Open model card</string>
     <string name="ui_hf_candidate_source">Source: %1$s @ %2$s</string>
     <string name="ui_hf_candidate_prompt_profile">Prompt profile: %1$s</string>
     <string name="ui_hf_candidate_sha">SHA-256: %1$s…</string>

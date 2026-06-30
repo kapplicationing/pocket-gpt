@@ -32,7 +32,10 @@ tags:
     visible:
       id: "model_library_hf_search_results"
     timeout: 30000
+- assertVisible: "Repo: fixture/tiny-gguf"
 - assertVisible: "fixture/tiny-gguf / tiny.gguf"
+- assertVisible: "File: tiny.gguf"
+- assertVisible: "Downloads: 42 | Likes: 7 | License: apache-2.0"
 - tapOn:
     id: "model_library_hf_search_use_file"
 - extendedWaitUntil:

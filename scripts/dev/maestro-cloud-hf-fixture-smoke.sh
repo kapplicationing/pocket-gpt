@@ -13,6 +13,7 @@ API_KEY_ENV="$(pocketgpt_default_maestro_cloud_key_env)"
 FIXTURE_BASE_URL="${POCKETGPT_HF_FIXTURE_BASE_URL:-}"
 FLOW="tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml"
 RUN_ROOT=""
+ALLOW_LOCAL_FIXTURE_URL=0
 
 usage() {
   cat <<'USAGE'
@@ -23,6 +24,7 @@ Options:
   --api-level <level>        Android API level. Default: 34.
   --api-key-env <env>        Use MAESTRO_CLOUD_API_KEY or MAESTRO_CLOUD_API_KEY_2.
   --run-root <path>          Write artifacts under this directory.
+  --allow-local-fixture-url  Allow loopback/private fixture URLs for wrapper debugging only.
   --help                     Show this help text.
 
 Fixture exposure examples:
@@ -50,6 +52,10 @@ while [[ $# -gt 0 ]]; do
     --run-root)
       RUN_ROOT="${2:?missing run root}"
       shift 2
+      ;;
+    --allow-local-fixture-url)
+      ALLOW_LOCAL_FIXTURE_URL=1
+      shift
       ;;
     --help)
       usage
@@ -79,22 +85,80 @@ case "${FIXTURE_BASE_URL}" in
     ;;
 esac
 
+if [[ "${ALLOW_LOCAL_FIXTURE_URL}" -ne 1 ]]; then
+  if ! python3 - "${FIXTURE_BASE_URL}" <<'PY'
+import ipaddress
+import sys
+from urllib.parse import urlparse
+
+url = sys.argv[1]
+host = urlparse(url).hostname or ""
+normalized = host.strip("[]").lower()
+blocked_names = {"localhost", "127.0.0.1", "::1"}
+if normalized in blocked_names or normalized.endswith(".localhost") or normalized.endswith(".local"):
+    print(f"Fixture URL host is local-only and Maestro Cloud cannot reach it: {host}", file=sys.stderr)
+    raise SystemExit(1)
+try:
+    address = ipaddress.ip_address(normalized)
+except ValueError:
+    raise SystemExit(0)
+if address.is_loopback or address.is_private or address.is_link_local or address.is_reserved or address.is_multicast:
+    print(f"Fixture URL host is not public and Maestro Cloud cannot reach it: {host}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+  then
+    echo "Expose the fixture with a public URL, for example cloudflared, ngrok, localhost.run, Tailscale Funnel, or a short-lived hosted VM." >&2
+    echo "Use --allow-local-fixture-url only to debug this wrapper without running a real cloud device." >&2
+    exit 64
+  fi
+fi
+
 if [[ -z "${RUN_ROOT}" ]]; then
   RUN_ROOT="tmp/maestro-cloud-hf-fixture/$(date -u +%Y%m%dT%H%M%SZ)"
 fi
 mkdir -p "${RUN_ROOT}"
 
-FIXTURE_HEALTH_URL="${FIXTURE_BASE_URL%/}/health"
-if ! python3 - "${FIXTURE_HEALTH_URL}" <<'PY' >/dev/null 2>&1
+if ! python3 - "${FIXTURE_BASE_URL%/}" <<'PY' >/dev/null 2>&1
+import json
 import sys
 import urllib.request
 
-url = sys.argv[1]
-with urllib.request.urlopen(url, timeout=5) as response:
-    raise SystemExit(0 if response.status == 200 else 1)
+base_url = sys.argv[1]
+
+def request(path, headers=None):
+    req = urllib.request.Request(base_url + path, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=5) as response:
+        body = response.read()
+        return response.status, body
+
+status, body = request("/health")
+if status != 200 or body.strip() != b"ok":
+    raise SystemExit(1)
+
+status, body = request("/api/models?search=tiny")
+search = json.loads(body.decode("utf-8"))
+if status != 200 or not any(item.get("id") == "fixture/tiny-gguf" for item in search):
+    raise SystemExit(1)
+
+status, body = request("/api/models/fixture/tiny-gguf/tree/main")
+tree = json.loads(body.decode("utf-8"))
+if status != 200 or not any(
+    item.get("path") == "tiny.gguf"
+    and item.get("lfs", {}).get("oid")
+    and item.get("lfs", {}).get("size")
+    for item in tree
+):
+    raise SystemExit(1)
+
+status, body = request(
+    "/fixture/tiny-gguf/resolve/main/tiny.gguf",
+    headers={"Range": "bytes=0-0"},
+)
+if status != 206 or len(body) != 1:
+    raise SystemExit(1)
 PY
 then
-  echo "Fixture server is not healthy at ${FIXTURE_HEALTH_URL}." >&2
+  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
   echo "Start scripts/dev/hf-fixture-server.py and expose it with a public tunnel before running cloud smoke." >&2
   exit 1
 fi

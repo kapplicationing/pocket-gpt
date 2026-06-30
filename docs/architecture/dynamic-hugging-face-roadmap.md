@@ -88,8 +88,9 @@ Implemented:
 5. Local wrapper ADB state preflight, so offline wireless transports fail before starting the fixture server.
 6. Cloud fixture flow: `tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml`.
 7. Cloud fixture wrapper: `scripts/dev/maestro-cloud-hf-fixture-smoke.sh`.
-8. Cloud wrapper fixture `/health` preflight, so an unreachable public fixture URL fails before build/upload.
-9. Documentation for public fixture exposure through `cloudflared`, `ngrok`, `localhost.run`, Tailscale Funnel, or a tiny hosted VM.
+8. Cloud wrapper fixture preflight for `/health`, HF search, tree metadata, and byte-range artifact download, so an unreachable or incomplete public fixture URL fails before build/upload.
+9. Cloud wrapper rejects loopback/private fixture URLs by default because Maestro Cloud cannot reach the developer machine's `localhost`.
+10. Documentation for public fixture exposure through `cloudflared`, `ngrok`, `localhost.run`, Tailscale Funnel, or a tiny hosted VM.
 
 ## Tech Roadmap
 

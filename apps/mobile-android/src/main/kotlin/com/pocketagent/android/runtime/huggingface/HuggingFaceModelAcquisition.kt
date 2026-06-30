@@ -114,6 +114,20 @@ data class HuggingFaceHubRepositoryMetadata(
     val licenseUrl: String?,
 )
 
+data class HuggingFaceSearchFileResult(
+    val reference: HuggingFaceModelReference,
+    val displayName: String,
+    val modelCardUrl: String,
+    val downloads: Long?,
+    val likes: Long?,
+    val license: String?,
+    val gated: Boolean,
+    val private: Boolean,
+) {
+    val canonicalUrl: String
+        get() = reference.canonicalResolveUrl
+}
+
 data class HuggingFaceCandidate(
     val reference: HuggingFaceModelReference,
     val target: HuggingFaceTargetModel,
@@ -149,12 +163,16 @@ interface HuggingFaceHubClient {
     suspend fun lookupFile(reference: HuggingFaceModelReference): HuggingFaceHubFileMetadata
 
     suspend fun lookupRepository(reference: HuggingFaceModelReference): HuggingFaceHubRepositoryMetadata? = null
+
+    suspend fun searchFiles(query: String, limit: Int): List<HuggingFaceSearchFileResult> = emptyList()
 }
 
 interface HuggingFaceEndpointAdapter {
     fun treeApiUrl(reference: HuggingFaceModelReference): HttpUrl
 
     fun modelInfoApiUrl(reference: HuggingFaceModelReference): HttpUrl
+
+    fun modelSearchApiUrl(query: String, limit: Int): HttpUrl
 
     fun artifactDownloadUrl(reference: HuggingFaceModelReference): String
 }
@@ -184,6 +202,16 @@ object RealHuggingFaceEndpointAdapter : HuggingFaceEndpointAdapter {
             .addPathSegment("revision")
             .addPathSegment(reference.revision)
         return builder.build()
+    }
+
+    override fun modelSearchApiUrl(query: String, limit: Int): HttpUrl {
+        return HUGGING_FACE_BASE_URL.toHttpUrl().newBuilder()
+            .addPathSegment("api")
+            .addPathSegment("models")
+            .addQueryParameter("search", query)
+            .addQueryParameter("limit", limit.coerceIn(1, MAX_SEARCH_RESULTS).toString())
+            .addQueryParameter("full", "true")
+            .build()
     }
 
     override fun artifactDownloadUrl(reference: HuggingFaceModelReference): String {
@@ -218,6 +246,16 @@ class FixtureHuggingFaceEndpointAdapter(
             .addPathSegment("revision")
             .addPathSegment(reference.revision)
         return builder.build()
+    }
+
+    override fun modelSearchApiUrl(query: String, limit: Int): HttpUrl {
+        return baseUrl.newBuilder()
+            .addPathSegment("api")
+            .addPathSegment("models")
+            .addQueryParameter("search", query)
+            .addQueryParameter("limit", limit.coerceIn(1, MAX_SEARCH_RESULTS).toString())
+            .addQueryParameter("full", "true")
+            .build()
     }
 
     override fun artifactDownloadUrl(reference: HuggingFaceModelReference): String {
@@ -296,10 +334,33 @@ class OkHttpHuggingFaceHubClient(
             }
         }.getOrNull()
     }
+
+    override suspend fun searchFiles(query: String, limit: Int): List<HuggingFaceSearchFileResult> {
+        val request = Request.Builder()
+            .get()
+            .url(endpointAdapter.modelSearchApiUrl(query, limit))
+            .build()
+        return runCatching {
+            DownloadHttpClient.base().newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Hugging Face returned HTTP ${response.code}")
+                }
+                parseModelSearchResponse(response.body?.string().orEmpty(), limit)
+            }
+        }.getOrElse { error ->
+            throw HuggingFaceAcquisitionException(
+                reason = HuggingFaceAcquisitionBlockReason.NETWORK_ERROR,
+                userMessage = "Could not search Hugging Face. Check the network, then try again.",
+                cause = error,
+            )
+        }
+    }
 }
 
 interface HuggingFaceModelAcquisition {
     fun supportedTargets(): List<HuggingFaceTargetModel>
+
+    suspend fun searchFiles(query: String, limit: Int = DEFAULT_SEARCH_LIMIT): List<HuggingFaceSearchFileResult>
 
     suspend fun resolveCandidate(
         input: String,
@@ -313,6 +374,14 @@ class DefaultHuggingFaceModelAcquisition(
 ) : HuggingFaceModelAcquisition {
     override fun supportedTargets(): List<HuggingFaceTargetModel> {
         return supportedTextTargets()
+    }
+
+    override suspend fun searchFiles(query: String, limit: Int): List<HuggingFaceSearchFileResult> {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            return emptyList()
+        }
+        return hubClient.searchFiles(trimmed, limit.coerceIn(1, MAX_SEARCH_RESULTS))
     }
 
     override suspend fun resolveCandidate(
@@ -477,6 +546,59 @@ private fun parseModelInfoResponse(
     )
 }
 
+private fun parseModelSearchResponse(
+    raw: String,
+    limit: Int,
+): List<HuggingFaceSearchFileResult> {
+    val array = runCatching { JSONArray(raw.trim()) }.getOrNull() ?: return emptyList()
+    val results = mutableListOf<HuggingFaceSearchFileResult>()
+    for (index in 0 until array.length()) {
+        val repo = array.optJSONObject(index) ?: continue
+        val repoId = repo.optStringValue("id")
+            ?: repo.optStringValue("modelId")
+            ?: continue
+        val gated = repo.optGated()
+        val private = repo.optBoolean("private", false)
+        val cardData = repo.optJSONObject("cardData")
+        val license = firstNonBlank(
+            cardData?.optStringValue("license"),
+            repo.optStringValue("license"),
+            repo.optJSONArray("tags")?.licenseFromTags(),
+        )
+        val siblings = repo.optJSONArray("siblings") ?: JSONArray()
+        for (siblingIndex in 0 until siblings.length()) {
+            val sibling = siblings.optJSONObject(siblingIndex) ?: continue
+            val filePath = firstNonBlank(
+                sibling.optStringValue("rfilename"),
+                sibling.optStringValue("path"),
+            ) ?: continue
+            val fileName = filePath.substringAfterLast('/')
+            if (!fileName.endsWith(".gguf", ignoreCase = true) || SHARDED_GGUF_REGEX.matches(fileName)) {
+                continue
+            }
+            val reference = HuggingFaceModelReference(
+                repoId = repoId,
+                revision = DEFAULT_SEARCH_REVISION,
+                filePath = filePath,
+            )
+            results += HuggingFaceSearchFileResult(
+                reference = reference,
+                displayName = "$repoId / $fileName",
+                modelCardUrl = buildHuggingFaceRepoUrl(repoId),
+                downloads = repo.optNullableLong("downloads"),
+                likes = repo.optNullableLong("likes"),
+                license = license,
+                gated = gated,
+                private = private,
+            )
+            if (results.size >= limit.coerceIn(1, MAX_SEARCH_RESULTS)) {
+                return results
+            }
+        }
+    }
+    return results
+}
+
 private fun JSONObject.optStringValue(name: String): String? {
     return when (val value = opt(name)) {
         is String -> value.trim().takeIf { it.isNotBlank() }
@@ -486,6 +608,22 @@ private fun JSONObject.optStringValue(name: String): String? {
             .joinToString(", ")
             .takeIf { it.isNotBlank() }
         else -> null
+    }
+}
+
+private fun JSONObject.optNullableLong(name: String): Long? {
+    return when (val value = opt(name)) {
+        is Number -> value.toLong()
+        is String -> value.toLongOrNull()
+        else -> null
+    }?.takeIf { it >= 0L }
+}
+
+private fun JSONObject.optGated(): Boolean {
+    return when (val value = opt("gated")) {
+        is Boolean -> value
+        is String -> value.isNotBlank() && !value.equals("false", ignoreCase = true)
+        else -> false
     }
 }
 
@@ -533,6 +671,9 @@ private fun safeVersionToken(raw: String): String {
 }
 
 private const val DEFAULT_RUNTIME_COMPATIBILITY = "android-arm64-v8a"
+const val DEFAULT_SEARCH_LIMIT = 20
+private const val MAX_SEARCH_RESULTS = 50
+private const val DEFAULT_SEARCH_REVISION = "main"
 private const val HUGGING_FACE_BASE_URL = "https://huggingface.co"
 private val SHA256_REGEX = Regex("^[a-f0-9]{64}$")
 private val SHARDED_GGUF_REGEX = Regex("^.+-\\d{5}-of-\\d{5}\\.gguf$", RegexOption.IGNORE_CASE)

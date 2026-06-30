@@ -60,6 +60,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/health":
             self._write_text(HTTPStatus.OK, "ok\n")
             return
+        if path == "/api/models":
+            self._write_search()
+            return
         if path == f"/api/models/{REPO_ID}/tree/{REVISION}":
             self._write_tree()
             return
@@ -97,6 +100,45 @@ class FixtureHandler(BaseHTTPRequestHandler):
             item["size"] = len(self.state.payload)
         body = [item]
         self._write_json(HTTPStatus.OK, body)
+
+    def _write_search(self) -> None:
+        if self.state.mode == "gated":
+            self._write_json(
+                HTTPStatus.OK,
+                [
+                    {
+                        "id": REPO_ID,
+                        "gated": True,
+                        "private": False,
+                        "downloads": 42,
+                        "likes": 7,
+                        "siblings": [{"rfilename": FILE_PATH}],
+                    }
+                ],
+            )
+            return
+        self._write_json(
+            HTTPStatus.OK,
+            [
+                {
+                    "id": REPO_ID,
+                    "gated": False,
+                    "private": False,
+                    "downloads": 42,
+                    "likes": 7,
+                    "cardData": {
+                        "license": "apache-2.0",
+                        "license_link": "https://huggingface.co/fixture/tiny-gguf/blob/main/LICENSE",
+                    },
+                    "tags": ["license:apache-2.0"],
+                    "siblings": [
+                        {"rfilename": ".gitattributes"},
+                        {"rfilename": FILE_PATH},
+                        {"rfilename": "tiny-00001-of-00002.gguf"},
+                    ],
+                }
+            ],
+        )
 
     def _write_model_info(self) -> None:
         if self.state.mode == "gated":

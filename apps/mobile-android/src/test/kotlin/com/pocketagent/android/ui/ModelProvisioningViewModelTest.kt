@@ -32,6 +32,7 @@ import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModelStore
+import com.pocketagent.android.runtime.huggingface.HuggingFaceSearchFileResult
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.huggingface.toRecentModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
@@ -736,6 +737,10 @@ private class FakeHuggingFaceModelAcquisition(
 ) : HuggingFaceModelAcquisition {
     override fun supportedTargets(): List<HuggingFaceTargetModel> {
         return listOf(HuggingFaceTargetModel(modelId = "qwen3.5-0.8b-q4", displayName = "Qwen"))
+    }
+
+    override suspend fun searchFiles(query: String, limit: Int): List<HuggingFaceSearchFileResult> {
+        return emptyList()
     }
 
     override suspend fun resolveCandidate(input: String, targetModelId: String): HuggingFaceCandidate {

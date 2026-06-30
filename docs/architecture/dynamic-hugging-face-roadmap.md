@@ -54,7 +54,7 @@ Deferred:
 2. Arbitrary runtime model IDs.
 3. Sharded GGUF.
 4. Vision/MMPROJ pairing.
-5. Open HF search.
+5. User-facing open HF search UI.
 
 ### Recent HF Downloads
 
@@ -217,18 +217,23 @@ Next polish:
 
 ### 4. HF Search
 
-Current app does not have PocketPal-style HF search. It has a paste-URL HF view.
+Current app does not have PocketPal-style HF search UI. It has a paste-URL HF view plus acquisition-layer search groundwork that can query public HF model results and flatten `.gguf` siblings into file candidates.
+
+Implemented groundwork:
+
+1. Search endpoint adapter for real HF and fixture routes.
+2. Search file result model with repo, file path, model-card URL, downloads, likes, license, gated, and private status.
+3. Client-side filtering to `.gguf` files and exclusion of sharded GGUF names.
+4. Search results remain candidates only; selected files must still route through candidate validation before queueing.
 
 Recommended search plan:
 
 1. Add an “Explore Hugging Face” subview inside the model sheet or a dedicated sheet route.
-2. Search repos/files through a small HF search client.
-3. Filter to `.gguf` results first.
-4. Group results by repo, then show file cards.
-5. Show file size, quantization-looking filename, repo downloads/likes when available, license, and gated/private status.
-6. Require target-model selection before validation.
-7. Route every chosen file through the existing candidate validation path.
-8. Persist only successfully queued/downloaded entries as recents.
+2. Group search results by repo, then show file cards.
+3. Show quantization-looking filename, repo downloads/likes when available, license, and gated/private status.
+4. Require target-model selection before validation.
+5. Route every chosen file through the existing candidate validation path, where SHA and size are checked.
+6. Persist only successfully queued/downloaded entries as recents.
 
 Search must not introduce a selected/search/bookmarked model truth. A result is only a candidate until validated and queued; an installed model is only active after `Load`.
 
@@ -270,6 +275,6 @@ Implementation shape:
 
 1. Restore a stable local device transport, then rerun the local HF fixture smoke wrapper on the pinned serial.
 2. Run the cloud fixture smoke only after explicit APK-upload approval and with a public fixture URL from one of the documented tunnel/host options.
-3. Design HF search against the existing candidate pipeline.
+3. Build the user-facing HF search subview against the existing search and candidate-validation pipeline.
 4. Decide whether recent HF downloads need a richer user catalog after actual redownload use.
 5. Defer private/gated, arbitrary model IDs, and multimodal until the current proof matrix is stable.

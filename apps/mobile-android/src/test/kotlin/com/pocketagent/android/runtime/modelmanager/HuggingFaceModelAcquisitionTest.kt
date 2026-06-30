@@ -106,6 +106,10 @@ class HuggingFaceModelAcquisitionTest {
             RealHuggingFaceEndpointAdapter.modelInfoApiUrl(reference).toString(),
         )
         assertEquals(
+            "https://huggingface.co/api/models?search=tiny&limit=5&full=true",
+            RealHuggingFaceEndpointAdapter.modelSearchApiUrl(query = "tiny", limit = 5).toString(),
+        )
+        assertEquals(
             "https://huggingface.co/owner/repo/resolve/main/models/model.gguf",
             RealHuggingFaceEndpointAdapter.artifactDownloadUrl(reference),
         )
@@ -116,6 +120,10 @@ class HuggingFaceModelAcquisitionTest {
         assertEquals(
             "http://127.0.0.1:8765/base/api/models/owner/repo/revision/main",
             fixtureAdapter.modelInfoApiUrl(reference).toString(),
+        )
+        assertEquals(
+            "http://127.0.0.1:8765/base/api/models?search=tiny&limit=5&full=true",
+            fixtureAdapter.modelSearchApiUrl(query = "tiny", limit = 5).toString(),
         )
         assertEquals(
             "http://127.0.0.1:8765/base/owner/repo/resolve/main/models/model.gguf",
@@ -197,6 +205,72 @@ class HuggingFaceModelAcquisitionTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun `fixture endpoint searches gguf siblings through real http client`() = runTest {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    [
+                      {
+                        "id": "owner/repo",
+                        "downloads": 42,
+                        "likes": 7,
+                        "gated": false,
+                        "private": false,
+                        "cardData": {
+                          "license": "apache-2.0"
+                        },
+                        "siblings": [
+                          {"rfilename": ".gitattributes"},
+                          {"rfilename": "models/model.gguf"},
+                          {"rfilename": "models/model-00001-of-00002.gguf"}
+                        ]
+                      }
+                    ]
+                    """.trimIndent(),
+                ),
+        )
+        server.start()
+        try {
+            val endpointAdapter = FixtureHuggingFaceEndpointAdapter(server.url("/"))
+            val results = OkHttpHuggingFaceHubClient(endpointAdapter).searchFiles(
+                query = "tiny",
+                limit = 5,
+            )
+
+            val request = server.takeRequest()
+            assertEquals("/api/models?search=tiny&limit=5&full=true", request.path)
+            assertEquals(1, results.size)
+            val result = results.single()
+            assertEquals("owner/repo", result.reference.repoId)
+            assertEquals("main", result.reference.revision)
+            assertEquals("models/model.gguf", result.reference.filePath)
+            assertEquals("owner/repo / model.gguf", result.displayName)
+            assertEquals("https://huggingface.co/owner/repo/resolve/main/models/model.gguf", result.canonicalUrl)
+            assertEquals(42L, result.downloads)
+            assertEquals(7L, result.likes)
+            assertEquals("apache-2.0", result.license)
+            assertFalse(result.gated)
+            assertFalse(result.private)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `blank search query does not call hub client`() = runTest {
+        val acquisition = DefaultHuggingFaceModelAcquisition(
+            hubClient = FakeHuggingFaceHubClient(
+                searchFailure = AssertionError("search should not run"),
+            ),
+        )
+
+        assertEquals(emptyList(), acquisition.searchFiles(query = "   "))
     }
 
     @Test
@@ -339,6 +413,7 @@ private class FakeHuggingFaceHubClient(
     private val repositoryMetadata: HuggingFaceHubRepositoryMetadata? = null,
     private val failure: Throwable? = null,
     private val repositoryFailure: Throwable? = null,
+    private val searchFailure: Throwable? = null,
 ) : HuggingFaceHubClient {
     override suspend fun lookupFile(reference: HuggingFaceModelReference): HuggingFaceHubFileMetadata {
         failure?.let { throw it }
@@ -348,5 +423,10 @@ private class FakeHuggingFaceHubClient(
     override suspend fun lookupRepository(reference: HuggingFaceModelReference): HuggingFaceHubRepositoryMetadata? {
         repositoryFailure?.let { throw it }
         return repositoryMetadata
+    }
+
+    override suspend fun searchFiles(query: String, limit: Int): List<com.pocketagent.android.runtime.huggingface.HuggingFaceSearchFileResult> {
+        searchFailure?.let { throw it }
+        return emptyList()
     }
 }

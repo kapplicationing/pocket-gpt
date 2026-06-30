@@ -23,9 +23,16 @@ import com.pocketagent.android.runtime.errorCodeName
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
+import com.pocketagent.android.runtime.huggingface.DefaultHuggingFaceModelAcquisition
+import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionException
+import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionBlockReason
+import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
+import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
+import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
+import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.ui.state.toModelLoadingState
 import com.pocketagent.runtime.ModelLifecycleErrorCode
@@ -43,6 +50,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Immutable
+sealed interface HuggingFaceAcquisitionUiState {
+    data object Idle : HuggingFaceAcquisitionUiState
+    data object Resolving : HuggingFaceAcquisitionUiState
+    data class Ready(val candidate: HuggingFaceCandidate) : HuggingFaceAcquisitionUiState
+    data class Enqueueing(val candidate: HuggingFaceCandidate) : HuggingFaceAcquisitionUiState
+    data class Blocked(
+        val reason: HuggingFaceAcquisitionBlockReason,
+        val message: String,
+    ) : HuggingFaceAcquisitionUiState
+}
+
+@Immutable
 data class ModelProvisioningUiState(
     val snapshot: RuntimeProvisioningSnapshot? = null,
     val lifecycle: RuntimeModelLifecycleSnapshot = RuntimeModelLifecycleSnapshot.initial(),
@@ -54,6 +73,8 @@ data class ModelProvisioningUiState(
     val isImporting: Boolean = false,
     val statusMessage: String? = null,
     val enqueuingModelIds: Set<String> = emptySet(),
+    val huggingFaceTargets: List<HuggingFaceTargetModel> = emptyList(),
+    val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
 )
 
 @Immutable
@@ -68,6 +89,8 @@ data class ModelLibraryUiState(
     val defaultGetReadyModelId: String?,
     val defaultModelVersion: ModelDistributionVersion?,
     val enqueuingModelIds: Set<String> = emptySet(),
+    val huggingFaceTargets: List<HuggingFaceTargetModel> = emptyList(),
+    val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
 )
 
 @Immutable
@@ -82,6 +105,7 @@ private data class ModelProvisioningLocalUiState(
     val isImporting: Boolean = false,
     val statusMessage: String? = null,
     val enqueuingModelIds: Set<String> = emptySet(),
+    val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
 )
 
 internal fun ModelProvisioningUiState.toModelLibraryUiState(defaultGetReadyModelId: String?): ModelLibraryUiState? {
@@ -100,6 +124,8 @@ internal fun ModelProvisioningUiState.toModelLibraryUiState(defaultGetReadyModel
             defaultModelId = defaultGetReadyModelId,
         ),
         enqueuingModelIds = enqueuingModelIds,
+        huggingFaceTargets = huggingFaceTargets,
+        huggingFaceAcquisitionState = huggingFaceAcquisitionState,
     )
 }
 
@@ -119,11 +145,17 @@ class ModelProvisioningViewModel internal constructor(
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
     private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
     private val ioDispatcher: CoroutineDispatcher = dispatchers.io,
+    private val huggingFaceModelAcquisition: HuggingFaceModelAcquisition = DefaultHuggingFaceModelAcquisition(),
 ) : ViewModel(), ModelOperationHandler {
     private val aggregateState = MutableStateFlow(gateway.observeProvisioningAggregateState().value)
     private val localUiState = MutableStateFlow(ModelProvisioningLocalUiState())
     private val _modelLoadingState = MutableStateFlow(aggregateState.value.lifecycle.toModelLoadingState())
-    private val _uiState = MutableStateFlow(aggregateState.value.toModelProvisioningUiState(localUiState.value))
+    private val _uiState = MutableStateFlow(
+        aggregateState.value.toModelProvisioningUiState(
+            local = localUiState.value,
+            huggingFaceTargets = huggingFaceModelAcquisition.supportedTargets(),
+        ),
+    )
     val uiState = _uiState.asStateFlow()
     val modelLoadingState = _modelLoadingState.asStateFlow()
     val provisioningSnapshotFlow = _uiState
@@ -170,6 +202,45 @@ class ModelProvisioningViewModel internal constructor(
 
     fun setStatusMessage(message: String?) {
         updateLocalUiState { state -> state.copy(statusMessage = message) }
+    }
+
+    suspend fun resolveHuggingFaceCandidate(
+        input: String,
+        targetModelId: String,
+    ) {
+        updateLocalUiState { state ->
+            state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Resolving)
+        }
+        val nextState = runCatching {
+            withContext(ioDispatcher) {
+                huggingFaceModelAcquisition.resolveCandidate(
+                    input = input,
+                    targetModelId = targetModelId,
+                )
+            }
+        }.fold(
+            onSuccess = { candidate -> HuggingFaceAcquisitionUiState.Ready(candidate) },
+            onFailure = { error ->
+                if (error is HuggingFaceAcquisitionException) {
+                    HuggingFaceAcquisitionUiState.Blocked(
+                        reason = error.reason,
+                        message = error.userMessage,
+                    )
+                } else {
+                    HuggingFaceAcquisitionUiState.Blocked(
+                        reason = HuggingFaceAcquisitionBlockReason.NETWORK_ERROR,
+                        message = error.message ?: "Could not check the Hugging Face file.",
+                    )
+                }
+            },
+        )
+        updateLocalUiState { state -> state.copy(huggingFaceAcquisitionState = nextState) }
+    }
+
+    fun clearHuggingFaceCandidate() {
+        updateLocalUiState { state ->
+            state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Idle)
+        }
     }
 
     suspend fun importModelFromUri(modelId: String, sourceUri: Uri): Result<RuntimeModelImportResult> {
@@ -345,13 +416,38 @@ class ModelProvisioningViewModel internal constructor(
         options: DownloadRequestOptions = DownloadRequestOptions(),
     ): String {
         val key = "${version.modelId}::${version.version}"
+        val hfCandidate = (localUiState.value.huggingFaceAcquisitionState as? HuggingFaceAcquisitionUiState.Ready)
+            ?.candidate
+            ?.takeIf { candidate ->
+                version.sourceKind == ModelSourceKind.HUGGING_FACE &&
+                    candidate.version.modelId == version.modelId &&
+                    candidate.version.version == version.version
+            }
         updateLocalUiState { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds + key) }
+        if (hfCandidate != null) {
+            updateLocalUiState { state ->
+                state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Enqueueing(hfCandidate))
+            }
+        }
         return try {
             withContext(ioDispatcher) {
                 gateway.enqueueDownload(version = version, options = options)
             }
         } finally {
-            updateLocalUiState { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds - key) }
+            updateLocalUiState { state ->
+                val restoredHfState = if (
+                    hfCandidate != null &&
+                    state.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Enqueueing
+                ) {
+                    HuggingFaceAcquisitionUiState.Ready(hfCandidate)
+                } else {
+                    state.huggingFaceAcquisitionState
+                }
+                state.copy(
+                    enqueuingModelIds = state.enqueuingModelIds - key,
+                    huggingFaceAcquisitionState = restoredHfState,
+                )
+            }
         }
     }
 
@@ -478,7 +574,10 @@ class ModelProvisioningViewModel internal constructor(
     }
 
     private fun buildUiState(): ModelProvisioningUiState {
-        return aggregateState.value.toModelProvisioningUiState(localUiState.value).withEligibility(
+        return aggregateState.value.toModelProvisioningUiState(
+            local = localUiState.value,
+            huggingFaceTargets = huggingFaceModelAcquisition.supportedTargets(),
+        ).withEligibility(
             evaluator = eligibilityEvaluator,
             signalsProvider = eligibilitySignalsProvider,
         )
@@ -487,7 +586,10 @@ class ModelProvisioningViewModel internal constructor(
     private fun buildUiStateWithoutEligibility(
         eligibility: ModelCatalogEligibilitySnapshot = ModelCatalogEligibilitySnapshot(),
     ): ModelProvisioningUiState {
-        return aggregateState.value.toModelProvisioningUiState(localUiState.value).copy(
+        return aggregateState.value.toModelProvisioningUiState(
+            local = localUiState.value,
+            huggingFaceTargets = huggingFaceModelAcquisition.supportedTargets(),
+        ).copy(
             eligibility = eligibility,
         )
     }
@@ -558,6 +660,7 @@ class ModelProvisioningViewModelFactory internal constructor(
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
     private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
+    private val huggingFaceModelAcquisition: HuggingFaceModelAcquisition = DefaultHuggingFaceModelAcquisition(),
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -567,6 +670,7 @@ class ModelProvisioningViewModelFactory internal constructor(
                 eligibilityEvaluator = eligibilityEvaluator,
                 eligibilitySignalsProvider = eligibilitySignalsProvider,
                 dispatchers = dispatchers,
+                huggingFaceModelAcquisition = huggingFaceModelAcquisition,
             ) as T
         }
         throw IllegalArgumentException("Unsupported ViewModel class: ${modelClass.name}")
@@ -588,6 +692,7 @@ private fun ModelProvisioningUiState.withEligibility(
 
 private fun ProvisioningAggregateState.toModelProvisioningUiState(
     local: ModelProvisioningLocalUiState,
+    huggingFaceTargets: List<HuggingFaceTargetModel>,
 ): ModelProvisioningUiState {
     return ModelProvisioningUiState(
         snapshot = snapshot,
@@ -599,6 +704,8 @@ private fun ProvisioningAggregateState.toModelProvisioningUiState(
         isImporting = local.isImporting,
         statusMessage = local.statusMessage,
         enqueuingModelIds = local.enqueuingModelIds,
+        huggingFaceTargets = huggingFaceTargets,
+        huggingFaceAcquisitionState = local.huggingFaceAcquisitionState,
     )
 }
 

@@ -4,6 +4,8 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 
 sealed interface ModelSheetEvent {
     data class ImportModel(val modelId: String) : ModelSheetEvent
+    data class ResolveHuggingFaceCandidate(val input: String, val targetModelId: String) : ModelSheetEvent
+    data object ClearHuggingFaceCandidate : ModelSheetEvent
     data class DownloadVersion(val version: ModelDistributionVersion) : ModelSheetEvent
     data class PauseDownload(val taskId: String) : ModelSheetEvent
     data class ResumeDownload(val taskId: String) : ModelSheetEvent

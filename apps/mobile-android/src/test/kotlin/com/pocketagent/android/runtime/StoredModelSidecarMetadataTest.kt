@@ -3,6 +3,8 @@ package com.pocketagent.android.runtime
 import com.pocketagent.android.runtime.modelmanager.InstalledArtifactDescriptor
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
+import com.pocketagent.core.model.SourceTrustPolicy
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,7 +22,17 @@ class StoredModelSidecarMetadataTest {
                 metadata = StoredModelSidecarMetadata(
                     modelId = "qwen3.5-0.8b-q4",
                     version = "q4_0",
+                    displayName = "unsloth/Qwen3.5-0.8B-GGUF / qwen.gguf",
                     sourceKind = ModelSourceKind.HUGGING_FACE,
+                    sourceRef = ModelSourceRef(
+                        kind = ModelSourceKind.HUGGING_FACE,
+                        originId = "qwen3.5-0.8b-q4",
+                        publisher = "unsloth",
+                        repository = "unsloth/Qwen3.5-0.8B-GGUF",
+                        trustPolicy = SourceTrustPolicy.INTEGRITY_ONLY,
+                        revision = "main",
+                        originUrl = "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/qwen.gguf",
+                    ),
                     promptProfileId = "chatml-default",
                     artifacts = listOf(
                         InstalledArtifactDescriptor(
@@ -36,16 +48,31 @@ class StoredModelSidecarMetadataTest {
                             absolutePath = "/tmp/qwen-mmproj.gguf",
                         ),
                     ),
+                    parameters = StoredModelParameterSnapshot(
+                        architecture = "qwen3",
+                        quantization = "Q4_K_M",
+                        contextLength = 32768,
+                        layerCount = 28,
+                    ),
                 ),
             )
 
             val decoded = StoredModelSidecarMetadataStore.read(file)
 
             assertNotNull(decoded)
+            assertEquals("unsloth/Qwen3.5-0.8B-GGUF / qwen.gguf", decoded.displayName)
             assertEquals(ModelSourceKind.HUGGING_FACE, decoded.sourceKind)
+            assertEquals("unsloth/Qwen3.5-0.8B-GGUF", decoded.sourceRef?.repository)
+            assertEquals(SourceTrustPolicy.INTEGRITY_ONLY, decoded.sourceRef?.trustPolicy)
+            assertEquals("main", decoded.sourceRef?.revision)
+            assertEquals("https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/qwen.gguf", decoded.sourceRef?.originUrl)
             assertEquals("chatml-default", decoded.promptProfileId)
             assertEquals(2, decoded.artifacts.size)
             assertEquals(ModelArtifactRole.MMPROJ, decoded.artifacts.last().role)
+            assertEquals("qwen3", decoded.parameters.architecture)
+            assertEquals("Q4_K_M", decoded.parameters.quantization)
+            assertEquals(32768, decoded.parameters.contextLength)
+            assertEquals(28, decoded.parameters.layerCount)
         } finally {
             file.delete()
         }

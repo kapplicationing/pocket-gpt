@@ -244,19 +244,25 @@ class LocalImportSourceAdapter {
                 runtimeCompatibilityTags = installed.mapTo(linkedSetOf()) { descriptor -> descriptor.runtimeCompatibility },
             ),
             productPolicy = builtIn?.productPolicy ?: com.pocketagent.core.model.ProductPolicyProfile(),
-            variants = installed.map { version ->
-                ModelVariantSpec(
-                    variantId = version.version,
-                    displayName = version.displayName,
-                    artifactBundle = ArtifactBundleSpec(
-                        artifacts = version.artifacts.map { artifact -> artifact.toCoreArtifact() },
-                    ),
-                    source = ModelSourceRef(
-                        kind = version.sourceKind,
-                        originId = version.version,
-                    ),
-                )
-            },
+                variants = installed.map { version ->
+                    ModelVariantSpec(
+                        variantId = version.version,
+                        displayName = version.displayName,
+                        artifactBundle = ArtifactBundleSpec(
+                            artifacts = version.artifacts.map { artifact -> artifact.toCoreArtifact() },
+                        ),
+                        parameters = version.parameters,
+                        source = ModelSourceRef(
+                            kind = version.sourceKind,
+                            originId = version.version,
+                            publisher = version.sourceRef?.publisher,
+                            repository = version.sourceRef?.repository,
+                            trustPolicy = version.sourceRef?.trustPolicy ?: SourceTrustPolicy.UNKNOWN,
+                            revision = version.sourceRef?.revision,
+                            originUrl = version.sourceRef?.originUrl,
+                        ),
+                    )
+                },
             source = builtIn?.source ?: ModelSourceRef(
                 kind = ModelSourceKind.LOCAL_IMPORT,
                 originId = modelId,

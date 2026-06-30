@@ -285,7 +285,7 @@
     <string name="ui_model_installed_active">Verified and active</string>
     <string name="ui_model_installed_inactive">Verified, activation pending</string>
     <string name="ui_model_installed_added_at">Added: %1$s</string>
-    <string name="ui_model_activate_version">Set active</string>
+    <string name="ui_model_activate_version">Load</string>
     <string name="ui_model_current_active_badge">Current active version</string>
     <string name="ui_model_remove_version">Remove</string>
     <string name="ui_model_version_activated">%1$s (%2$s) verified and active.</string>
@@ -418,6 +418,7 @@
 
     <!-- Chat message actions -->
     <string name="ui_copy">Copy</string>
+    <string name="ui_clear">Clear</string>
     <string name="ui_edit">Edit</string>
     <string name="ui_regenerate">Regenerate</string>
     <string name="ui_retry">Retry</string>
@@ -452,7 +453,7 @@
     <string name="ui_update_button">Update</string>
 
     <!-- Model sheet -->
-    <string name="ui_model_sheet_subtitle">Load, set defaults, import local files, and manage downloads from one place.</string>
+    <string name="ui_model_sheet_subtitle">Load downloaded models, import local files, and manage downloads from one place.</string>
     <string name="ui_search_models">Search models</string>
     <string name="ui_active_model">Active model</string>
     <string name="ui_nothing_loaded">Nothing is loaded</string>
@@ -462,13 +463,29 @@
     <string name="ui_load_last_used">Load last used</string>
     <string name="ui_loaded">Loaded</string>
     <string name="ui_switching">Switching</string>
-    <string name="ui_active">Active</string>
-    <string name="ui_default">Default</string>
+    <string name="ui_active">Loaded</string>
+    <string name="ui_default">Last used</string>
     <string name="ui_ready">Ready</string>
-    <string name="ui_set_active">Set active</string>
+    <string name="ui_set_active">Load</string>
     <string name="ui_replace_file">Replace file</string>
+    <string name="ui_hf_add_title">Add from Hugging Face</string>
+    <string name="ui_hf_add_subtitle">Paste a public GGUF file URL. The file will be checked before it enters the download queue.</string>
+    <string name="ui_hf_url_placeholder">https://huggingface.co/owner/repo/resolve/main/model.gguf</string>
+    <string name="ui_hf_target_model_label">Runtime target</string>
+    <string name="ui_hf_disabled_missing_url">Paste a Hugging Face URL first</string>
+    <string name="ui_hf_disabled_missing_target">Choose a runtime target first</string>
+    <string name="ui_hf_check_url">Check file</string>
+    <string name="ui_hf_checking">Checking…</string>
+    <string name="ui_hf_candidate_target">Runtime target: %1$s</string>
+    <string name="ui_hf_candidate_source">Source: %1$s @ %2$s</string>
+    <string name="ui_hf_candidate_prompt_profile">Prompt profile: %1$s</string>
+    <string name="ui_hf_candidate_sha">SHA-256: %1$s…</string>
+    <string name="ui_hf_candidate_compatibility">Compatibility: public text-only GGUF with Hugging Face LFS checksum</string>
+    <string name="ui_hf_queue_download">Queue download</string>
+    <string name="ui_model_download_queue">Download queue</string>
+    <string name="ui_model_download_queue_subtitle">Downloads from sources outside the catalog stay visible here until installed.</string>
     <string name="ui_downloaded_models">Downloaded models</string>
-    <string name="ui_downloaded_models_subtitle">Choose which version is active, load a model into memory, or remove versions you no longer need.</string>
+    <string name="ui_downloaded_models_subtitle">Load a downloaded model into memory, replace local files, or remove versions you no longer need.</string>
     <string name="ui_no_downloaded_models_title">No downloaded models yet</string>
     <string name="ui_no_downloaded_models_body">Import a local GGUF or download one from the catalog below.</string>
     <string name="ui_available_models">Available models</string>

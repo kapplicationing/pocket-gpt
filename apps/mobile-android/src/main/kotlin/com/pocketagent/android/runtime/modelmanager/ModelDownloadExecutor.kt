@@ -470,6 +470,8 @@ internal class ModelDownloadExecutor(
                     fileSizeBytes = primaryArtifact.fileSizeBytes ?: 0L,
                     makeActive = primaryVerified.state.verificationPolicy.enforcesProvenance,
                     sourceKind = task.sourceKind,
+                    sourceRef = task.sourceRef,
+                    displayName = task.displayName,
                     promptProfileId = task.promptProfileId,
                     installedArtifacts = installedArtifacts,
                 )

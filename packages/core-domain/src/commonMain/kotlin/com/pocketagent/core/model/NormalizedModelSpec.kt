@@ -93,6 +93,7 @@ data class ModelSourceRef(
     val repository: String? = null,
     val trustPolicy: SourceTrustPolicy = SourceTrustPolicy.UNKNOWN,
     val revision: String? = null,
+    val originUrl: String? = null,
 )
 
 data class ArtifactLocator(

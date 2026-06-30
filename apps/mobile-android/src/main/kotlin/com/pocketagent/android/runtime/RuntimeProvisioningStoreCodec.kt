@@ -2,8 +2,10 @@ package com.pocketagent.android.runtime
 
 import com.pocketagent.android.runtime.modelmanager.InstalledArtifactDescriptor
 import com.pocketagent.android.runtime.modelmanager.GgufMetadataExtractor
+import com.pocketagent.core.model.ModelParameterProfile
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
 import com.pocketagent.inference.ModelCatalog
 import java.io.File
 import org.json.JSONArray
@@ -51,7 +53,9 @@ internal fun AndroidRuntimeProvisioningStore.encodeStoredVersions(entries: List<
 internal fun AndroidRuntimeProvisioningStore.writeManagedMetadataIfApplicable(
     modelId: String,
     entry: StoredVersionEntry,
+    displayName: String? = null,
     sourceKind: ModelSourceKind? = null,
+    sourceRef: ModelSourceRef? = null,
     promptProfileId: String? = null,
     installedArtifacts: List<InstalledArtifactDescriptor>? = null,
 ) {
@@ -98,10 +102,12 @@ internal fun AndroidRuntimeProvisioningStore.writeManagedMetadataIfApplicable(
             metadata = StoredModelSidecarMetadata(
                 modelId = modelId,
                 version = entry.version,
+                displayName = displayName,
                 sourceKind = sourceKind ?: when (normalizedSpec?.source?.kind) {
                     null -> ModelSourceKind.LOCAL_IMPORT
                     else -> normalizedSpec.source.kind
                 },
+                sourceRef = sourceRef,
                 promptProfileId = promptProfileId ?: normalizedSpec?.promptProfile?.profileId,
                 artifacts = resolvedArtifacts,
             ),
@@ -115,6 +121,20 @@ internal fun AndroidRuntimeProvisioningStore.writeManagedMetadataIfApplicable(
 
 internal fun AndroidRuntimeProvisioningStore.readSidecarMetadata(absolutePath: String): StoredModelSidecarMetadata? {
     return StoredModelSidecarMetadataStore.read(metadataFileFor(absolutePath))
+}
+
+internal fun StoredModelParameterSnapshot.toModelParameterProfile(): ModelParameterProfile {
+    return ModelParameterProfile(
+        architecture = architecture,
+        quantization = quantization,
+        quantizationVersion = quantizationVersion,
+        contextLength = contextLength,
+        layerCount = layerCount,
+        embeddingSize = embeddingSize,
+        headCount = headCount,
+        headCountKv = headCountKv,
+        vocabularySize = vocabularySize,
+    )
 }
 
 internal fun AndroidRuntimeProvisioningStore.metadataFileFor(absolutePath: String): File {

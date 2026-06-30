@@ -25,11 +25,18 @@ import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.DownloadVerificationPolicy
+import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionBlockReason
+import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionException
+import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
+import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
+import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
+import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
+import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.testutil.fakeUri
 import com.pocketagent.nativebridge.ModelLifecycleErrorCode
@@ -311,6 +318,69 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `hugging face candidate resolve exposes ready state and enqueue reuses gateway`() = runTest(dispatcher) {
+        val version = sampleDownloadVersion().copy(
+            sourceKind = ModelSourceKind.HUGGING_FACE,
+            displayName = "owner/repo / model.gguf",
+        )
+        val acquisition = FakeHuggingFaceModelAcquisition(candidate = sampleHuggingFaceCandidate(version))
+        val gateway = FakeProvisioningGateway()
+        val viewModel = ModelProvisioningViewModel(
+            gateway = gateway,
+            huggingFaceModelAcquisition = acquisition,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.resolveHuggingFaceCandidate(
+            input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+            targetModelId = "qwen3.5-0.8b-q4",
+        )
+        advanceUntilIdle()
+
+        val ready = viewModel.uiState.value.huggingFaceAcquisitionState
+        assertTrue(ready is HuggingFaceAcquisitionUiState.Ready)
+        assertEquals(version, ready.candidate.version)
+
+        assertEquals("task-1", viewModel.enqueueDownload(version))
+        advanceUntilIdle()
+
+        assertEquals(version, gateway.lastEnqueuedVersion)
+        assertTrue(viewModel.uiState.value.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Ready)
+    }
+
+    @Test
+    fun `hugging face candidate failures and clear update acquisition state`() = runTest(dispatcher) {
+        val acquisition = FakeHuggingFaceModelAcquisition(
+            failure = HuggingFaceAcquisitionException(
+                reason = HuggingFaceAcquisitionBlockReason.MISSING_SHA,
+                userMessage = "Missing checksum",
+            ),
+        )
+        val viewModel = ModelProvisioningViewModel(
+            gateway = FakeProvisioningGateway(),
+            huggingFaceModelAcquisition = acquisition,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.resolveHuggingFaceCandidate(
+            input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+            targetModelId = "qwen3.5-0.8b-q4",
+        )
+        advanceUntilIdle()
+
+        val blocked = viewModel.uiState.value.huggingFaceAcquisitionState
+        assertTrue(blocked is HuggingFaceAcquisitionUiState.Blocked)
+        assertEquals(HuggingFaceAcquisitionBlockReason.MISSING_SHA, blocked.reason)
+        assertEquals("Missing checksum", blocked.message)
+
+        viewModel.clearHuggingFaceCandidate()
+
+        assertTrue(viewModel.uiState.value.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Idle)
+    }
+
+    @Test
     fun `load and manual offload clears loaded model but preserves last used restore target`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
@@ -567,6 +637,20 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     }
 }
 
+private class FakeHuggingFaceModelAcquisition(
+    private val candidate: HuggingFaceCandidate? = null,
+    private val failure: HuggingFaceAcquisitionException? = null,
+) : HuggingFaceModelAcquisition {
+    override fun supportedTargets(): List<HuggingFaceTargetModel> {
+        return listOf(HuggingFaceTargetModel(modelId = "qwen3.5-0.8b-q4", displayName = "Qwen"))
+    }
+
+    override suspend fun resolveCandidate(input: String, targetModelId: String): HuggingFaceCandidate {
+        failure?.let { throw it }
+        return requireNotNull(candidate)
+    }
+}
+
 private fun sampleSnapshot(
     modelId: String = "qwen3.5-0.8b-q4",
     installedVersion: String = "1",
@@ -673,5 +757,23 @@ private fun sampleDownloadVersion(): ModelDistributionVersion {
         provenanceSignature = "sig",
         runtimeCompatibility = "android-arm64-v8a",
         fileSizeBytes = 2L * 1024L * 1024L * 1024L,
+    )
+}
+
+private fun sampleHuggingFaceCandidate(version: ModelDistributionVersion): HuggingFaceCandidate {
+    return HuggingFaceCandidate(
+        reference = HuggingFaceModelReference(
+            repoId = "owner/repo",
+            revision = "main",
+            filePath = "model.gguf",
+        ),
+        target = HuggingFaceTargetModel(
+            modelId = version.modelId,
+            displayName = "Qwen",
+        ),
+        displayName = "owner/repo / model.gguf",
+        sha256 = version.expectedSha256,
+        sizeBytes = version.fileSizeBytes,
+        version = version,
     )
 }

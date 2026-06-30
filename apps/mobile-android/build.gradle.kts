@@ -77,6 +77,10 @@ val modelManifestUrl = providers.gradleProperty("pocketgpt.modelManifestUrl")
     .orElse("")
     .get()
     .replace("\"", "\\\"")
+val hfFixtureBaseUrl = providers.gradleProperty("pocketgpt.hfFixtureBaseUrl")
+    .orElse("")
+    .get()
+    .replace("\"", "\\\"")
 
 android {
     namespace = "com.pocketagent.android"
@@ -93,6 +97,7 @@ android {
 
         buildConfigField("boolean", "NATIVE_RUNTIME_LIBRARY_PACKAGED", nativeBuildEnabled.toString())
         buildConfigField("String", "MODEL_MANIFEST_URL", "\"$modelManifestUrl\"")
+        buildConfigField("String", "HF_FIXTURE_BASE_URL", "\"$hfFixtureBaseUrl\"")
     }
 
     if (nativeBuildEnabled) {
@@ -236,6 +241,7 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.02.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")

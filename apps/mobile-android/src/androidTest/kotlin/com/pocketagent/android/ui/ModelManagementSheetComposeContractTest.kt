@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.Modifier
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.pocketagent.android.runtime.ModelPathOrigin
@@ -29,6 +31,9 @@ import com.pocketagent.android.runtime.modelmanager.DownloadProcessingStage
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.DownloadVerificationPolicy
+import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
+import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
+import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ManifestSource
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionModel
@@ -36,6 +41,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
 import com.pocketagent.core.RoutingMode
+import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.nativebridge.ModelLifecycleState
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.runtime.RuntimeLoadedModel
@@ -69,9 +75,13 @@ class ModelManagementSheetComposeContractTest {
         }
 
         composeRule.onNodeWithTag("unified_model_sheet").assertIsDisplayed()
-        composeRule.onNodeWithText("Downloaded models").assertIsDisplayed()
-        composeRule.onNodeWithText("Available models").assertIsDisplayed()
         composeRule.onNodeWithText("Refresh").performClick()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Downloaded models"))
+        composeRule.onNodeWithText("Downloaded models").assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Available models"))
+        composeRule.onNodeWithText("Available models").assertIsDisplayed()
         composeRule.runOnIdle {
             assertTrue(events.contains(ModelSheetEvent.RefreshAll))
         }
@@ -374,6 +384,120 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
+    fun huggingFaceSectionDispatchesResolveAndQueueEvents() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val candidate = sampleHuggingFaceCandidate()
+        val libraryState = sampleLibraryState(
+            downloads = emptyList(),
+        ).copy(
+            huggingFaceTargets = listOf(candidate.target),
+            huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Ready(candidate),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("model_library_add_hugging_face").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_url_input")
+            .performTextInput("https://huggingface.co/owner/repo/resolve/main/model.gguf")
+        composeRule.onNodeWithTag("model_library_hf_check_url").performClick()
+        composeRule.onNodeWithTag("model_library_hf_candidate_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_queue_download").performClick()
+
+        composeRule.runOnIdle {
+            assertTrue(
+                events.contains(
+                    ModelSheetEvent.ResolveHuggingFaceCandidate(
+                        input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+                        targetModelId = "qwen3-0.6b-q4_k_m",
+                    ),
+                ),
+            )
+            assertTrue(events.contains(ModelSheetEvent.DownloadVersion(candidate.version)))
+        }
+    }
+
+    @Test
+    fun downloadQueueRendersDynamicDownloadsBeforeInstalledRows() {
+        val state = sampleLibraryState(
+            downloads = listOf(sampleHuggingFaceDownload()),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = state,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue"))
+        composeRule.onNodeWithText("Download queue").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_download_queue").assertIsDisplayed()
+        composeRule.onNodeWithText("owner/repo / model.gguf").assertIsDisplayed()
+    }
+
+    @Test
+    fun downloadQueueDispatchesPauseResumeCancelAndRetryEvents() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val downloadStatus = mutableStateOf(DownloadTaskStatus.DOWNLOADING)
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = sampleLibraryState(
+                        downloads = listOf(sampleHuggingFaceDownload(status = downloadStatus.value)),
+                    ),
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue"))
+        composeRule.onNodeWithTag("model_library_download_queue_pause").performClick()
+        composeRule.onNodeWithTag("model_library_download_queue_cancel").performClick()
+
+        composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.PAUSED }
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue"))
+        composeRule.onNodeWithTag("model_library_download_queue_resume").performClick()
+        composeRule.onNodeWithTag("model_library_download_queue_cancel").performClick()
+
+        composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.CANCELLED }
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue"))
+        composeRule.onNodeWithTag("model_library_download_queue_retry").performClick()
+
+        composeRule.runOnIdle {
+            assertTrue(events.contains(ModelSheetEvent.PauseDownload("hf-task-1")))
+            assertTrue(events.contains(ModelSheetEvent.CancelDownload("hf-task-1")))
+            assertTrue(events.contains(ModelSheetEvent.ResumeDownload("hf-task-1")))
+            assertTrue(events.contains(ModelSheetEvent.RetryDownload("hf-task-1")))
+        }
+    }
+
+    @Test
     fun hiddenVersionKeysFilterOutModelsFromList() {
         val hiddenKeys = setOf("qwen3.5-0.8b-q4::q4_0")
 
@@ -410,10 +534,11 @@ class ModelManagementSheetComposeContractTest {
         }
 
         val stateDescMatcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.StateDescription)
+        val loadTag = modelLibraryLoadButtonTag("qwen3.5-0.8b-q4", "q4_0")
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasText("Loaded"))
-        val loadedNodes = composeRule.onAllNodes(hasText("Loaded").and(stateDescMatcher))
-        assertTrue(loadedNodes.fetchSemanticsNodes().isNotEmpty())
+            .performScrollToNode(hasTestTag(loadTag))
+        composeRule.onNode(hasTestTag(loadTag).and(stateDescMatcher))
+            .assertIsDisplayed()
     }
 
     @Test
@@ -641,6 +766,61 @@ private fun sampleDownload(): DownloadTaskState {
         progressBytes = 512L,
         totalBytes = 1024L,
         updatedAtEpochMs = 1L,
+        message = "Downloading",
+    )
+}
+
+private fun sampleHuggingFaceCandidate(): HuggingFaceCandidate {
+    val version = ModelDistributionVersion(
+        modelId = "qwen3-0.6b-q4_k_m",
+        version = "hf-model-aaaaaaaaaaaa",
+        downloadUrl = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+        expectedSha256 = "a".repeat(64),
+        provenanceIssuer = "huggingface:owner/repo",
+        provenanceSignature = "",
+        runtimeCompatibility = "android-arm64-v8a",
+        fileSizeBytes = 1024L,
+        sourceKind = ModelSourceKind.HUGGING_FACE,
+        displayName = "owner/repo / model.gguf",
+        verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
+    )
+    return HuggingFaceCandidate(
+        reference = HuggingFaceModelReference(
+            repoId = "owner/repo",
+            revision = "main",
+            filePath = "model.gguf",
+        ),
+        target = HuggingFaceTargetModel(
+            modelId = "qwen3-0.6b-q4_k_m",
+            displayName = "Qwen 3 0.6B",
+        ),
+        displayName = "owner/repo / model.gguf",
+        sha256 = "a".repeat(64),
+        sizeBytes = 1024L,
+        version = version,
+    )
+}
+
+private fun sampleHuggingFaceDownload(
+    status: DownloadTaskStatus = DownloadTaskStatus.DOWNLOADING,
+): DownloadTaskState {
+    return DownloadTaskState(
+        taskId = "hf-task-1",
+        modelId = "qwen3-0.6b-q4_k_m",
+        version = "hf-model-aaaaaaaaaaaa",
+        displayName = "owner/repo / model.gguf",
+        sourceKind = ModelSourceKind.HUGGING_FACE,
+        downloadUrl = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+        expectedSha256 = "a".repeat(64),
+        provenanceIssuer = "huggingface:owner/repo",
+        provenanceSignature = "",
+        verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
+        runtimeCompatibility = "android-arm64-v8a",
+        processingStage = DownloadProcessingStage.DOWNLOADING,
+        status = status,
+        progressBytes = 256L,
+        totalBytes = 1024L,
+        updatedAtEpochMs = 2L,
         message = "Downloading",
     )
 }

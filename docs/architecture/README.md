@@ -14,6 +14,8 @@ Use this section for system boundaries, engineering contracts, and ADR history.
 - Android runtime/performance operating model: `docs/architecture/performance/android-operational-performance-plan.md`
 - Error taxonomy: `docs/architecture/error-code-registry.md`
 - Multi-model platform direction: `docs/architecture/multi-model-platform.md`
+- Dynamic Hugging Face model pre-investigation: `docs/architecture/dynamic-hugging-face-models-preinvestigation.md`
+- Dynamic Hugging Face roadmap: `docs/architecture/dynamic-hugging-face-roadmap.md`
 - Android UI shell cleanup notes: `docs/architecture/android-ui-shell-cleanup.md`
 
 ## Research and Decisions

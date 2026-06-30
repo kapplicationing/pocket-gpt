@@ -65,6 +65,12 @@ internal fun ModelLibrarySheetHost(
                     is ModelSheetEvent.ImportModel -> {
                         actions.importModel(event.modelId)
                     }
+                    is ModelSheetEvent.ResolveHuggingFaceCandidate -> scope.launch {
+                        actions.resolveHuggingFaceCandidate(event.input, event.targetModelId)
+                    }
+                    ModelSheetEvent.ClearHuggingFaceCandidate -> {
+                        actions.clearHuggingFaceCandidate()
+                    }
                     is ModelSheetEvent.DownloadVersion -> actions.downloadVersion(event.version)
                     is ModelSheetEvent.PauseDownload -> scope.launch {
                         actions.pauseDownload(event.taskId)

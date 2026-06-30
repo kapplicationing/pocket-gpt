@@ -139,6 +139,18 @@ For specialized runtimes or quantizations such as Bonsai-style 1-bit GGUFs, cata
 - Runtime and Android surfaces consume merged normalized specs through `ModelSpecProvider` and `CompositeModelSpecProvider`.
 - `PromptProfileRegistry.kt` is the canonical prompt-profile data registry for `PromptTemplateFamily`.
 - `NormalizedModelCatalogRegistry.kt` merges bundled, manifest-backed, and local-imported variants; standard built-in model additions do not require manual registry wiring.
+- Dynamic Hugging Face URL downloads do not add a second catalog or selected-model state. In v1, the Android model library validates a public `/resolve/{revision}/{file}.gguf` URL, maps it to an existing bridge-supported `modelId`, materializes a managed `ModelDistributionVersion` with `sourceKind = HUGGING_FACE`, and enqueues the normal download/install path. The installed row is selected only when the user taps `Load`.
+
+## Dynamic Hugging Face URL Rules
+
+Use the paste-URL flow only for already supported text GGUF targets:
+
+- Public `https://huggingface.co/{owner}/{repo}/resolve/{revision}/{path}.gguf` or `/blob/` URLs only.
+- Single-file `.gguf` only; sharded GGUF and arbitrary MMPROJ pairing are deferred.
+- Hugging Face LFS `oid` must be a 64-hex SHA-256 and size must be positive.
+- The target `modelId` must already be bridge-supported in `ModelCatalog`; the URL does not create a new runtime identity.
+- Private/gated repositories and bearer-token downloads are deferred.
+- Redownload after delete requires pasting the URL again until a durable user HF catalog exists.
 
 ## Files touched (typical new model with existing template)
 

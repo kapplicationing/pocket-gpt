@@ -14,6 +14,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.ModelRuntimeProfile
 import com.pocketagent.runtime.ModelRegistry
@@ -265,6 +266,8 @@ class AndroidRuntimeProvisioningStore(
         fileSizeBytes: Long,
         makeActive: Boolean = false,
         sourceKind: ModelSourceKind? = null,
+        sourceRef: ModelSourceRef? = null,
+        displayName: String? = null,
         promptProfileId: String? = null,
         installedArtifacts: List<InstalledArtifactDescriptor>? = null,
     ): RuntimeModelImportResult {
@@ -284,6 +287,8 @@ class AndroidRuntimeProvisioningStore(
                 fileSizeBytes = fileSizeBytes.coerceAtLeast(0L),
                 makeActive = makeActive,
                 sourceKind = sourceKind,
+                sourceRef = sourceRef,
+                displayName = displayName,
                 promptProfileId = promptProfileId,
                 installedArtifacts = installedArtifacts,
             )
@@ -646,6 +651,8 @@ class AndroidRuntimeProvisioningStore(
         fileSizeBytes: Long,
         makeActive: Boolean,
         sourceKind: ModelSourceKind? = null,
+        sourceRef: ModelSourceRef? = null,
+        displayName: String? = null,
         promptProfileId: String? = null,
         installedArtifacts: List<InstalledArtifactDescriptor>? = null,
     ): RuntimeModelImportResult {
@@ -670,7 +677,9 @@ class AndroidRuntimeProvisioningStore(
         writeManagedMetadataIfApplicable(
             modelId = spec.modelId,
             entry = entry,
+            displayName = displayName,
             sourceKind = sourceKind,
+            sourceRef = sourceRef,
             promptProfileId = promptProfileId,
             installedArtifacts = installedArtifacts,
         )
@@ -737,7 +746,7 @@ class AndroidRuntimeProvisioningStore(
                     ModelVersionDescriptor(
                         modelId = spec.modelId,
                         version = entry.version,
-                        displayName = spec.displayName,
+                        displayName = sidecar?.displayName ?: spec.displayName,
                         absolutePath = entry.absolutePath,
                         sha256 = entry.sha256,
                         provenanceIssuer = entry.provenanceIssuer,
@@ -747,8 +756,11 @@ class AndroidRuntimeProvisioningStore(
                         importedAtEpochMs = entry.importedAtEpochMs,
                         isActive = entry.version == prefs.readOptional(activeVersionKey(spec)),
                         sourceKind = sourceKind,
+                        sourceRef = sidecar?.sourceRef,
                         artifacts = installedArtifacts,
                         promptProfileId = sidecar?.promptProfileId,
+                        parameters = sidecar?.parameters?.toModelParameterProfile()
+                            ?: com.pocketagent.core.model.ModelParameterProfile(),
                     )
                 },
             signal = reconciled.signal,

@@ -116,6 +116,8 @@ class ModelDownloadManager(
             modelId = version.modelId,
             version = version.version,
             sourceKind = version.sourceKind,
+            displayName = version.displayName,
+            sourceRef = version.sourceRef,
             downloadUrl = version.downloadUrl,
             expectedSha256 = version.expectedSha256,
             provenanceIssuer = version.provenanceIssuer,

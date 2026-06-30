@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.pocketagent.android.runtime.ModelSourceRefJsonCodec
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
 import org.json.JSONArray
@@ -12,7 +13,7 @@ import org.json.JSONObject
 
 internal object ModelDownloadTaskStateStore {
     private const val DB_NAME = "pocketagent_model_downloads.db"
-    private const val DB_VERSION = 5
+    private const val DB_VERSION = 6
     private const val TABLE = "download_tasks"
 
     private const val LEGACY_PREFS_NAME = "pocketagent_model_downloads"
@@ -22,6 +23,13 @@ internal object ModelDownloadTaskStateStore {
 
     @Volatile
     private var helper: StoreDbHelper? = null
+
+    fun resetForTests() {
+        synchronized(lock) {
+            helper?.close()
+            helper = null
+        }
+    }
 
     fun list(context: Context): List<DownloadTaskState> {
         synchronized(lock) {
@@ -104,6 +112,8 @@ internal object ModelDownloadTaskStateStore {
             put("model_id", task.modelId)
             put("version", task.version)
             put("source_kind", task.sourceKind.name)
+            put("display_name", task.displayName)
+            put("source_ref_json", task.sourceRef?.let(ModelSourceRefJsonCodec::encode)?.toString())
             put("download_url", task.downloadUrl)
             put("expected_sha256", task.expectedSha256)
             put("provenance_issuer", task.provenanceIssuer)
@@ -137,6 +147,8 @@ internal object ModelDownloadTaskStateStore {
             modelId = json.optString("modelId", "").trim(),
             version = json.optString("version", "").trim(),
             sourceKindRaw = json.optString("sourceKind", "").trim(),
+            displayName = json.optString("displayName", "").trim().ifEmpty { null },
+            sourceRefJson = json.optJSONObject("sourceRef")?.toString(),
             downloadUrl = json.optString("downloadUrl", "").trim(),
             expectedSha256 = json.optString("expectedSha256", "").trim(),
             provenanceIssuer = json.optString("provenanceIssuer", "").trim(),
@@ -178,6 +190,8 @@ internal object ModelDownloadTaskStateStore {
             modelId = cursor.stringOrEmpty("model_id"),
             version = cursor.stringOrEmpty("version"),
             sourceKindRaw = cursor.stringOrEmpty("source_kind"),
+            displayName = cursor.stringOrEmpty("display_name").ifBlank { null },
+            sourceRefJson = cursor.stringOrEmpty("source_ref_json").ifBlank { null },
             downloadUrl = cursor.stringOrEmpty("download_url"),
             expectedSha256 = cursor.stringOrEmpty("expected_sha256"),
             provenanceIssuer = cursor.stringOrEmpty("provenance_issuer"),
@@ -209,6 +223,8 @@ internal object ModelDownloadTaskStateStore {
         modelId: String,
         version: String,
         sourceKindRaw: String,
+        displayName: String?,
+        sourceRefJson: String?,
         downloadUrl: String,
         expectedSha256: String,
         provenanceIssuer: String,
@@ -249,6 +265,7 @@ internal object ModelDownloadTaskStateStore {
                 ModelSourceKind.valueOf(sourceKindRaw)
             }
         }.getOrNull()
+        val sourceRef = ModelSourceRefJsonCodec.decode(sourceRefJson)
         val processingStage = runCatching { DownloadProcessingStage.valueOf(processingStageRaw) }.getOrNull()
         val networkPreference = runCatching {
             if (networkPreferenceRaw.isBlank()) {
@@ -321,6 +338,8 @@ internal object ModelDownloadTaskStateStore {
             modelId = modelId,
             version = version,
             sourceKind = sourceKind ?: ModelSourceKind.BUILT_IN,
+            displayName = displayName,
+            sourceRef = sourceRef,
             downloadUrl = downloadUrl,
             expectedSha256 = expectedSha256,
             provenanceIssuer = provenanceIssuer,
@@ -394,6 +413,8 @@ internal object ModelDownloadTaskStateStore {
                     model_id TEXT NOT NULL,
                     version TEXT NOT NULL,
                     source_kind TEXT NOT NULL DEFAULT '${ModelSourceKind.BUILT_IN.name}',
+                    display_name TEXT,
+                    source_ref_json TEXT,
                     download_url TEXT NOT NULL,
                     expected_sha256 TEXT NOT NULL,
                     provenance_issuer TEXT NOT NULL,
@@ -444,6 +465,10 @@ internal object ModelDownloadTaskStateStore {
             }
             if (oldVersion < 5) {
                 db.execSQL("ALTER TABLE $TABLE ADD COLUMN prompt_profile_id TEXT")
+            }
+            if (oldVersion < 6) {
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN display_name TEXT")
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN source_ref_json TEXT")
             }
         }
     }
@@ -530,6 +555,7 @@ internal object ModelDownloadTaskStateStore {
             }
         }
     }
+
 }
 
 private fun Cursor.stringOrEmpty(columnName: String): String {

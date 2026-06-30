@@ -1,7 +1,9 @@
 package com.pocketagent.android.runtime.modelmanager
 
 import com.pocketagent.core.model.ModelArtifactRole
+import com.pocketagent.core.model.ModelParameterProfile
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
 
 data class ModelDistributionManifest(
     val models: List<ModelDistributionModel>,
@@ -48,6 +50,8 @@ data class ModelDistributionVersion(
     val verificationPolicy: DownloadVerificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
     val sourceKind: ModelSourceKind = ModelSourceKind.BUILT_IN,
     val promptProfileId: String? = null,
+    val displayName: String? = null,
+    val sourceRef: ModelSourceRef? = null,
     val artifacts: List<ModelDistributionArtifact> = listOf(
         ModelDistributionArtifact(
             artifactId = "$modelId::$version::primary",
@@ -92,6 +96,7 @@ data class ModelVersionDescriptor(
     val importedAtEpochMs: Long,
     val isActive: Boolean,
     val sourceKind: ModelSourceKind = ModelSourceKind.LOCAL_IMPORT,
+    val sourceRef: ModelSourceRef? = null,
     val artifacts: List<InstalledArtifactDescriptor> = listOf(
         InstalledArtifactDescriptor(
             artifactId = "$modelId::$version::primary",
@@ -104,6 +109,7 @@ data class ModelVersionDescriptor(
         ),
     ),
     val promptProfileId: String? = null,
+    val parameters: ModelParameterProfile = ModelParameterProfile(),
 )
 
 data class InstalledArtifactDescriptor(
@@ -192,6 +198,8 @@ data class DownloadTaskState(
     val modelId: String,
     val version: String,
     val sourceKind: ModelSourceKind = ModelSourceKind.BUILT_IN,
+    val displayName: String? = null,
+    val sourceRef: ModelSourceRef? = null,
     val downloadUrl: String,
     val expectedSha256: String,
     val provenanceIssuer: String,

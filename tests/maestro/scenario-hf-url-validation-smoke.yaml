@@ -1,0 +1,38 @@
+appId: com.pocketagent.android
+tags:
+  - smoke
+  - model-management
+  - hf-validation
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    when:
+      visible:
+        id: "provisioning_bootstrap_loading"
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- runFlow: shared/bootstrap-clean-start.yaml
+- runFlow: shared/open-model-library.yaml
+
+- assertVisible: "Model library"
+- assertVisible:
+    id: "model_library_add_hugging_face"
+- tapOn:
+    id: "model_library_hf_url_input"
+- eraseText
+- inputText: "https://example.test/owner/repo/resolve/main/model.gguf"
+- hideKeyboard
+- tapOn:
+    id: "model_library_hf_check_url"
+- extendedWaitUntil:
+    visible:
+      id: "model_library_hf_error"
+    timeout: 10000
+- assertVisible: "Use a public https://huggingface.co model file URL."
+- assertNotVisible:
+    id: "model_library_hf_candidate_card"
+- takeScreenshot: "hf-url-validation-blocked"

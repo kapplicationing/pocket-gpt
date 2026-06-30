@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
+@file:OptIn(ExperimentalLayoutApi::class, ExperimentalAnimationApi::class, ExperimentalComposeUiApi::class)
 
 package com.pocketagent.android.ui
 
@@ -56,7 +56,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -68,6 +70,8 @@ import com.pocketagent.android.runtime.ModelEligibilityReason
 import com.pocketagent.android.runtime.ModelSupportLevel
 import com.pocketagent.android.runtime.ModelVersionEligibility
 import com.pocketagent.android.runtime.ProvisionedModelState
+import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
+import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
@@ -97,8 +101,13 @@ internal fun ModelSheet(
     onEvent: (ModelSheetEvent) -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var huggingFaceInput by remember { mutableStateOf("") }
+    var selectedHuggingFaceTargetId by remember { mutableStateOf("") }
     val activeModel = modelLoadingState.activeOrRequestedModel()
     val busy = modelLoadingState is ModelLoadingState.Loading || modelLoadingState is ModelLoadingState.Offloading
+    val resolvedHuggingFaceTargetId = selectedHuggingFaceTargetId
+        .takeIf { selected -> libraryState.huggingFaceTargets.any { it.modelId == selected } }
+        ?: libraryState.huggingFaceTargets.firstOrNull()?.modelId.orEmpty()
     val installedVersions by remember(libraryState, searchQuery, hiddenVersionKeys) {
         derivedStateOf {
             libraryState.snapshot.models.flatMap { model ->
@@ -143,6 +152,25 @@ internal fun ModelSheet(
             }
         }
     }
+    val availableVersionKeys by remember(availableVersions) {
+        derivedStateOf {
+            availableVersions.mapTo(linkedSetOf()) { entry ->
+                versionIdentityKey(entry.version.modelId, entry.version.version)
+            }
+        }
+    }
+    val downloadQueueTasks by remember(libraryState.downloads, availableVersionKeys) {
+        derivedStateOf {
+            libraryState.downloads
+                .filter { task ->
+                    versionIdentityKey(task.modelId, task.version) !in availableVersionKeys &&
+                        (!task.terminal ||
+                            task.status == DownloadTaskStatus.FAILED ||
+                            task.status == DownloadTaskStatus.CANCELLED)
+                }
+                .sortedByDescending { task -> task.updatedAtEpochMs }
+        }
+    }
     val downloadTasksByKey by remember(libraryState) {
         derivedStateOf {
             libraryState.downloads.associateBy { task ->
@@ -158,7 +186,8 @@ internal fun ModelSheet(
         modifier = Modifier
             .fillMaxWidth()
             .padding(PocketAgentDimensions.sheetHorizontalPadding)
-            .testTag("unified_model_sheet"),
+            .testTag("unified_model_sheet")
+            .semantics { testTagsAsResourceId = true },
         verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
     ) {
         item {
@@ -185,6 +214,26 @@ internal fun ModelSheet(
             item {
                 StatusMessageCard(message = message)
             }
+        }
+        item {
+            HuggingFaceAcquisitionSection(
+                input = huggingFaceInput,
+                selectedTargetId = resolvedHuggingFaceTargetId,
+                targets = libraryState.huggingFaceTargets,
+                state = libraryState.huggingFaceAcquisitionState,
+                onInputChange = { value -> huggingFaceInput = value },
+                onSelectTarget = { targetId -> selectedHuggingFaceTargetId = targetId },
+                onCheck = {
+                    onEvent(
+                        ModelSheetEvent.ResolveHuggingFaceCandidate(
+                            input = huggingFaceInput,
+                            targetModelId = resolvedHuggingFaceTargetId,
+                        ),
+                    )
+                },
+                onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
+                onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
+            )
         }
         item {
             ActiveModelSection(
@@ -217,6 +266,27 @@ internal fun ModelSheet(
             )
         }
         item { HorizontalDivider() }
+        if (downloadQueueTasks.isNotEmpty()) {
+            item {
+                SectionHeader(
+                    title = stringResource(id = R.string.ui_model_download_queue),
+                    subtitle = stringResource(id = R.string.ui_model_download_queue_subtitle),
+                )
+            }
+            items(
+                downloadQueueTasks,
+                key = { task -> "download_queue:${task.taskId}" },
+            ) { task ->
+                DownloadQueueTaskCard(
+                    task = task,
+                    onPauseDownload = { taskId -> onEvent(ModelSheetEvent.PauseDownload(taskId)) },
+                    onResumeDownload = { taskId -> onEvent(ModelSheetEvent.ResumeDownload(taskId)) },
+                    onRetryDownload = { taskId -> onEvent(ModelSheetEvent.RetryDownload(taskId)) },
+                    onCancelDownload = { taskId -> onEvent(ModelSheetEvent.CancelDownload(taskId)) },
+                )
+            }
+            item { HorizontalDivider() }
+        }
         item(key = DOWNLOADED_SECTION_KEY) {
             SectionHeader(
                 title = stringResource(id = R.string.ui_downloaded_models),
@@ -299,6 +369,208 @@ internal fun ModelSheet(
 }
 
 internal const val DOWNLOADED_SECTION_KEY = "downloaded_section_header"
+
+@Composable
+private fun HuggingFaceAcquisitionSection(
+    input: String,
+    selectedTargetId: String,
+    targets: List<HuggingFaceTargetModel>,
+    state: HuggingFaceAcquisitionUiState,
+    onInputChange: (String) -> Unit,
+    onSelectTarget: (String) -> Unit,
+    onCheck: () -> Unit,
+    onClear: () -> Unit,
+    onDownloadVersion: (ModelDistributionVersion) -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_add_hugging_face"),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        ) {
+            Text(
+                text = stringResource(id = R.string.ui_hf_add_title),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_add_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = input,
+                onValueChange = onInputChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("model_library_hf_url_input"),
+                singleLine = true,
+                placeholder = { Text(stringResource(id = R.string.ui_hf_url_placeholder)) },
+            )
+            if (targets.isNotEmpty()) {
+                Text(
+                    text = stringResource(id = R.string.ui_hf_target_model_label),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(
+                    modifier = Modifier.testTag("model_library_hf_target_model"),
+                    horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+                    verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+                ) {
+                    targets.forEach { target ->
+                        val selected = target.modelId == selectedTargetId
+                        if (selected) {
+                            Button(onClick = { onSelectTarget(target.modelId) }) {
+                                Text(target.displayName)
+                            }
+                        } else {
+                            OutlinedButton(onClick = { onSelectTarget(target.modelId) }) {
+                                Text(target.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            val resolving = state is HuggingFaceAcquisitionUiState.Resolving
+            val checkDisabledReason = when {
+                input.isBlank() -> stringResource(id = R.string.ui_hf_disabled_missing_url)
+                selectedTargetId.isBlank() -> stringResource(id = R.string.ui_hf_disabled_missing_target)
+                resolving -> stringResource(id = R.string.ui_hf_checking)
+                else -> null
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+                verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+            ) {
+                Button(
+                    onClick = onCheck,
+                    enabled = checkDisabledReason == null,
+                    modifier = Modifier
+                        .testTag("model_library_hf_check_url")
+                        .then(
+                            if (checkDisabledReason != null) {
+                                Modifier.semantics { stateDescription = checkDisabledReason }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
+                    Text(stringResource(id = if (resolving) R.string.ui_hf_checking else R.string.ui_hf_check_url))
+                }
+                if (state !is HuggingFaceAcquisitionUiState.Idle) {
+                    TextButton(onClick = onClear) {
+                        Text(stringResource(id = R.string.ui_clear))
+                    }
+                }
+            }
+            when (state) {
+                HuggingFaceAcquisitionUiState.Idle -> Unit
+                HuggingFaceAcquisitionUiState.Resolving -> {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                is HuggingFaceAcquisitionUiState.Blocked -> {
+                    Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .testTag("model_library_hf_error")
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                is HuggingFaceAcquisitionUiState.Ready -> {
+                    HuggingFaceCandidateCard(
+                        candidate = state.candidate,
+                        queueing = false,
+                        onDownloadVersion = onDownloadVersion,
+                    )
+                }
+                is HuggingFaceAcquisitionUiState.Enqueueing -> {
+                    HuggingFaceCandidateCard(
+                        candidate = state.candidate,
+                        queueing = true,
+                        onDownloadVersion = onDownloadVersion,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HuggingFaceCandidateCard(
+    candidate: HuggingFaceCandidate,
+    queueing: Boolean,
+    onDownloadVersion: (ModelDistributionVersion) -> Unit,
+) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_hf_candidate_card"),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
+        ) {
+            Text(candidate.displayName, style = MaterialTheme.typography.labelLarge)
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_target, candidate.target.displayName),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(
+                    id = R.string.ui_hf_candidate_source,
+                    candidate.reference.repoId,
+                    candidate.reference.revision,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            candidate.version.promptProfileId?.let { promptProfileId ->
+                Text(
+                    text = stringResource(id = R.string.ui_hf_candidate_prompt_profile, promptProfileId),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = stringResource(
+                    id = R.string.ui_model_download_expected_size,
+                    Formatter.formatShortFileSize(context, candidate.sizeBytes),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_sha, candidate.sha256.take(12)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_compatibility),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = { onDownloadVersion(candidate.version) },
+                enabled = !queueing,
+                modifier = Modifier.testTag("model_library_hf_queue_download"),
+            ) {
+                Text(stringResource(id = if (queueing) R.string.ui_model_download_queuing else R.string.ui_hf_queue_download))
+            }
+        }
+    }
+}
 
 @Composable
 private fun StatusMessageCard(message: String) {
@@ -810,6 +1082,150 @@ private fun AvailableModelCard(
                     ) {
                         Text(stringResource(id = R.string.ui_import))
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadQueueTaskCard(
+    task: DownloadTaskState,
+    onPauseDownload: (String) -> Unit,
+    onResumeDownload: (String) -> Unit,
+    onRetryDownload: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
+) {
+    val reducedMotion = LocalReduceMotion.current
+    val haptic = rememberHaptic()
+    val hapticConfirm = rememberLongPressHaptic()
+    val rawProgress = (task.progressPercent / 100f).coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = rawProgress,
+        animationSpec = if (reducedMotion) snap() else tween(PocketAgentDimensions.animNormal),
+        label = "download_queue_progress_${task.taskId}",
+    )
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_download_queue"),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
+                ) {
+                    Text(
+                        text = task.displayName ?: task.modelId,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.ui_model_download_version_label, task.modelId, task.version),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                StatusRow(
+                    color = when (task.status) {
+                        DownloadTaskStatus.FAILED,
+                        DownloadTaskStatus.CANCELLED,
+                        -> MaterialTheme.colorScheme.error
+                        DownloadTaskStatus.PAUSED -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                    label = task.readableStateNameLocalized(),
+                    pulsing = task.status == DownloadTaskStatus.DOWNLOADING ||
+                        task.status == DownloadTaskStatus.QUEUED ||
+                        task.status == DownloadTaskStatus.VERIFYING,
+                )
+            }
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Text(
+                text = stringResource(
+                    id = R.string.ui_model_download_state,
+                    task.readableStateNameLocalized(),
+                    task.progressPercent,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            task.transferSummary()?.let { summary ->
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            task.stageWarningChips()
+            if (task.status == DownloadTaskStatus.FAILED || task.status == DownloadTaskStatus.CANCELLED) {
+                Text(
+                    text = task.message ?: stringResource(id = R.string.ui_model_download_failed_unknown, task.modelId, task.version),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+                verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+            ) {
+                when (task.status) {
+                    DownloadTaskStatus.DOWNLOADING,
+                    DownloadTaskStatus.QUEUED,
+                    DownloadTaskStatus.VERIFYING,
+                    -> {
+                        OutlinedButton(
+                            onClick = { haptic(); onPauseDownload(task.taskId) },
+                            modifier = Modifier.testTag("model_library_download_queue_pause"),
+                        ) {
+                            Text(stringResource(id = R.string.ui_pause))
+                        }
+                        OutlinedButton(
+                            onClick = { hapticConfirm(); onCancelDownload(task.taskId) },
+                            modifier = Modifier.testTag("model_library_download_queue_cancel"),
+                        ) {
+                            Text(stringResource(id = R.string.ui_cancel_button))
+                        }
+                    }
+                    DownloadTaskStatus.PAUSED -> {
+                        Button(
+                            onClick = { haptic(); onResumeDownload(task.taskId) },
+                            modifier = Modifier.testTag("model_library_download_queue_resume"),
+                        ) {
+                            Text(stringResource(id = R.string.ui_resume))
+                        }
+                        OutlinedButton(
+                            onClick = { hapticConfirm(); onCancelDownload(task.taskId) },
+                            modifier = Modifier.testTag("model_library_download_queue_cancel"),
+                        ) {
+                            Text(stringResource(id = R.string.ui_cancel_button))
+                        }
+                    }
+                    DownloadTaskStatus.FAILED,
+                    DownloadTaskStatus.CANCELLED,
+                    -> {
+                        Button(
+                            onClick = { haptic(); onRetryDownload(task.taskId) },
+                            modifier = Modifier.testTag("model_library_download_queue_retry"),
+                        ) {
+                            Text(stringResource(id = R.string.ui_retry))
+                        }
+                    }
+                    DownloadTaskStatus.COMPLETED,
+                    DownloadTaskStatus.INSTALLED_INACTIVE,
+                    -> Unit
                 }
             }
         }

@@ -28,6 +28,14 @@ internal class ModelLibraryActions(
         chatAppLaunchers.launchModelImportPicker()
     }
 
+    suspend fun resolveHuggingFaceCandidate(input: String, targetModelId: String) {
+        provisioningViewModel.resolveHuggingFaceCandidate(input = input, targetModelId = targetModelId)
+    }
+
+    fun clearHuggingFaceCandidate() {
+        provisioningViewModel.clearHuggingFaceCandidate()
+    }
+
     fun downloadVersion(version: ModelDistributionVersion) {
         chatAppLaunchers.launchDownloadFlow(version)
     }

@@ -385,6 +385,14 @@ Full hosted smoke suite on Maestro Cloud:
 bash scripts/dev/maestro-cloud-smoke.sh --api-key-env MAESTRO_CLOUD_API_KEY
 ```
 
+Dynamic Hugging Face fixture smoke on a pinned local device:
+
+```bash
+bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
+```
+
+This starts `scripts/dev/hf-fixture-server.py`, builds the debug APK with `-Ppocketgpt.hfFixtureBaseUrl=http://127.0.0.1:<port>/`, reverses the fixture port through `adb`, and runs `tests/maestro/scenario-hf-fixture-download-smoke.yaml`. The pasted URL in the UI remains a canonical `https://huggingface.co/...` URL; only network calls are rewritten.
+
 Focused model-management split smoke on Maestro Cloud:
 
 ```bash

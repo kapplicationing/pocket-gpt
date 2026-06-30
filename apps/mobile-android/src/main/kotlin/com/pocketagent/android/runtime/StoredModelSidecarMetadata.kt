@@ -3,6 +3,7 @@ package com.pocketagent.android.runtime
 import com.pocketagent.android.runtime.modelmanager.InstalledArtifactDescriptor
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
@@ -23,7 +24,9 @@ data class StoredModelParameterSnapshot(
 data class StoredModelSidecarMetadata(
     val modelId: String,
     val version: String,
+    val displayName: String? = null,
     val sourceKind: ModelSourceKind = ModelSourceKind.LOCAL_IMPORT,
+    val sourceRef: ModelSourceRef? = null,
     val promptProfileId: String? = null,
     val artifacts: List<InstalledArtifactDescriptor> = emptyList(),
     val parameters: StoredModelParameterSnapshot = StoredModelParameterSnapshot(),
@@ -61,7 +64,9 @@ internal object StoredModelSidecarMetadataStore {
             StoredModelSidecarMetadata(
                 modelId = json.optString("modelId", "").trim(),
                 version = json.optString("version", "").trim(),
+                displayName = json.optionalString("displayName"),
                 sourceKind = parseSourceKind(json.optString("sourceKind", "").trim()) ?: ModelSourceKind.LOCAL_IMPORT,
+                sourceRef = json.optJSONObject("sourceRef")?.let(ModelSourceRefJsonCodec::decode),
                 promptProfileId = json.optString("promptProfileId", "").trim().ifEmpty { null },
                 artifacts = artifacts,
                 parameters = parameters,
@@ -82,7 +87,9 @@ internal object StoredModelSidecarMetadataStore {
         val json = JSONObject()
             .put("modelId", metadata.modelId)
             .put("version", metadata.version)
+            .put("displayName", metadata.displayName ?: JSONObject.NULL)
             .put("sourceKind", metadata.sourceKind.name)
+            .put("sourceRef", metadata.sourceRef?.let(ModelSourceRefJsonCodec::encode) ?: JSONObject.NULL)
             .put("promptProfileId", metadata.promptProfileId ?: JSONObject.NULL)
             .put("artifacts", encodeArtifacts(metadata.artifacts))
             .put("parameters", encodeParameters(metadata.parameters))
@@ -193,4 +200,11 @@ internal object StoredModelSidecarMetadataStore {
         }
         return runCatching { ModelSourceKind.valueOf(raw.uppercase()) }.getOrNull()
     }
+}
+
+private fun JSONObject.optionalString(key: String): String? {
+    if (isNull(key)) {
+        return null
+    }
+    return optString(key, "").trim().ifEmpty { null }
 }

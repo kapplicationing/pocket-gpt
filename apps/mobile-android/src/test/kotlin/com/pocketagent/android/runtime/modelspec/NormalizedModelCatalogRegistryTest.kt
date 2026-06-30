@@ -5,8 +5,11 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.core.model.CapabilityFlag
+import com.pocketagent.core.model.ModelParameterProfile
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
 import com.pocketagent.core.model.PromptTemplateFamily
+import com.pocketagent.core.model.SourceTrustPolicy
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.runtime.InteractionRole
 import com.pocketagent.runtime.ModelInteractionRegistry
@@ -98,17 +101,71 @@ class NormalizedModelCatalogRegistryTest {
         assertTrue(spec?.capabilities?.supports(CapabilityFlag.SHORT_TEXT) == true)
         assertEquals("local-v1", registry.variantFor("local-phi", "local-v1")?.variantId)
     }
+
+    @Test
+    fun `installed hugging face variants expose sidecar source and parameters`() {
+        val sourceRef = ModelSourceRef(
+            kind = ModelSourceKind.HUGGING_FACE,
+            originId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
+            publisher = "owner",
+            repository = "owner/repo",
+            trustPolicy = SourceTrustPolicy.INTEGRITY_ONLY,
+            revision = "main",
+            originUrl = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+        )
+        val parameters = ModelParameterProfile(
+            architecture = "qwen3",
+            quantization = "Q4_K_M",
+            contextLength = 32768,
+            layerCount = 28,
+            embeddingSize = 1024,
+        )
+        val registry = DefaultNormalizedModelCatalogRegistry(
+            installedVersionsProvider = { modelId ->
+                if (modelId == ModelCatalog.QWEN3_0_6B_Q4_K_M) {
+                    listOf(
+                        installedVersion(
+                            modelId = modelId,
+                            version = "hf-model-aaaaaaaaaaaa",
+                            displayName = "owner/repo / model.gguf",
+                            sourceKind = ModelSourceKind.HUGGING_FACE,
+                            sourceRef = sourceRef,
+                            parameters = parameters,
+                        ),
+                    )
+                } else {
+                    emptyList()
+                }
+            },
+            knownModelIdsProvider = { setOf(ModelCatalog.QWEN3_0_6B_Q4_K_M) },
+        )
+
+        val variant = registry.variantFor(ModelCatalog.QWEN3_0_6B_Q4_K_M, "hf-model-aaaaaaaaaaaa")
+
+        assertNotNull(variant)
+        assertEquals("owner/repo / model.gguf", variant.displayName)
+        assertEquals(ModelSourceKind.HUGGING_FACE, variant.source.kind)
+        assertEquals("owner/repo", variant.source.repository)
+        assertEquals("https://huggingface.co/owner/repo/resolve/main/model.gguf", variant.source.originUrl)
+        assertEquals("qwen3", variant.parameters.architecture)
+        assertEquals("Q4_K_M", variant.parameters.quantization)
+        assertEquals(32768, variant.parameters.contextLength)
+    }
 }
 
 private fun installedVersion(
     modelId: String,
     version: String,
+    displayName: String = "$modelId $version",
     promptProfileId: String? = PromptTemplateFamily.CHATML.name,
+    sourceKind: ModelSourceKind = ModelSourceKind.LOCAL_IMPORT,
+    sourceRef: ModelSourceRef? = null,
+    parameters: ModelParameterProfile = ModelParameterProfile(),
 ): ModelVersionDescriptor {
     return ModelVersionDescriptor(
         modelId = modelId,
         version = version,
-        displayName = "$modelId $version",
+        displayName = displayName,
         absolutePath = "/tmp/$modelId-$version.gguf",
         sha256 = "b".repeat(64),
         provenanceIssuer = "issuer",
@@ -117,7 +174,9 @@ private fun installedVersion(
         fileSizeBytes = 2048L,
         importedAtEpochMs = 1L,
         isActive = false,
-        sourceKind = ModelSourceKind.LOCAL_IMPORT,
+        sourceKind = sourceKind,
+        sourceRef = sourceRef,
         promptProfileId = promptProfileId,
+        parameters = parameters,
     )
 }

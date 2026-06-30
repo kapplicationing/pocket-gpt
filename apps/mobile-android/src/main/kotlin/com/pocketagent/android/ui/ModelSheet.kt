@@ -92,6 +92,7 @@ import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelDisplayNames
 import com.pocketagent.inference.PresetRoutingResolver
 import java.text.NumberFormat
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 @Composable
@@ -695,16 +696,50 @@ private fun HuggingFaceSearchSection(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    state.results.take(HF_SEARCH_VISIBLE_RESULT_LIMIT).forEach { result ->
-                        HuggingFaceSearchResultRow(
-                            result = result,
-                            selectedTargetId = selectedTargetId,
-                            onUseResult = onUseResult,
-                            onOpenExternalUrl = onOpenExternalUrl,
-                        )
-                    }
+                    state.results
+                        .take(HF_SEARCH_VISIBLE_RESULT_LIMIT)
+                        .groupBy { result -> result.reference.repoId }
+                        .forEach { (repoId, repoResults) ->
+                            HuggingFaceSearchRepoGroup(
+                                repoId = repoId,
+                                results = repoResults,
+                                selectedTargetId = selectedTargetId,
+                                onUseResult = onUseResult,
+                                onOpenExternalUrl = onOpenExternalUrl,
+                            )
+                        }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HuggingFaceSearchRepoGroup(
+    repoId: String,
+    results: List<HuggingFaceSearchFileResult>,
+    selectedTargetId: String,
+    onUseResult: (HuggingFaceSearchFileResult) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_hf_search_repo_group"),
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+    ) {
+        Text(
+            text = stringResource(id = R.string.ui_hf_search_repo_group, repoId),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        results.forEach { result ->
+            HuggingFaceSearchResultRow(
+                result = result,
+                selectedTargetId = selectedTargetId,
+                onUseResult = onUseResult,
+                onOpenExternalUrl = onOpenExternalUrl,
+            )
         }
     }
 }
@@ -717,6 +752,8 @@ private fun HuggingFaceSearchResultRow(
     onOpenExternalUrl: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val fileName = result.reference.filePath.substringAfterLast('/')
+    val quantization = quantizationHintFor(fileName)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -728,6 +765,19 @@ private fun HuggingFaceSearchResultRow(
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
         )
+        Text(
+            text = stringResource(id = R.string.ui_hf_search_file_path, result.reference.filePath),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        quantization?.let { label ->
+            Text(
+                text = stringResource(id = R.string.ui_hf_search_quantization, label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("model_library_hf_search_quantization"),
+            )
+        }
         Text(
             text = result.canonicalUrl,
             style = MaterialTheme.typography.bodySmall,
@@ -795,6 +845,12 @@ private fun HuggingFaceSearchResultRow(
                 modifier = Modifier.testTag("model_library_hf_search_open_model_card"),
             ) {
                 Text(stringResource(id = R.string.ui_hf_open_model_card))
+            }
+            TextButton(
+                onClick = { onOpenExternalUrl(result.canonicalUrl) },
+                modifier = Modifier.testTag("model_library_hf_search_open_file"),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_open_file))
             }
         }
     }
@@ -955,6 +1011,14 @@ private fun Long.formatCount(): String {
     return NumberFormat.getIntegerInstance().format(this)
 }
 
+private fun quantizationHintFor(fileName: String): String? {
+    return HF_SEARCH_QUANTIZATION_REGEX
+        .find(fileName)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.uppercase(Locale.ROOT)
+}
+
 @Composable
 private fun HuggingFaceCandidateCard(
     candidate: HuggingFaceCandidate,
@@ -1065,6 +1129,11 @@ private fun HuggingFaceCandidateCard(
         }
     }
 }
+
+private val HF_SEARCH_QUANTIZATION_REGEX = Regex(
+    pattern = "(?:^|[-_.])((?:IQ\\d_[A-Z0-9_]+)|(?:Q\\d(?:_[A-Z0-9]+)+)|F16|F32)(?:[-_.]|$)",
+    option = RegexOption.IGNORE_CASE,
+)
 
 @Composable
 private fun HuggingFaceCandidateStorageLine(

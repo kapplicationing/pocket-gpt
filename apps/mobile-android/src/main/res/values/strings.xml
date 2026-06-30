@@ -484,6 +484,9 @@
     <string name="ui_hf_searching">Searching…</string>
     <string name="ui_hf_search_empty">No GGUF files found for %1$s.</string>
     <string name="ui_hf_search_results_title">%1$d GGUF file candidates</string>
+    <string name="ui_hf_search_repo_group">Repo: %1$s</string>
+    <string name="ui_hf_search_file_path">File: %1$s</string>
+    <string name="ui_hf_search_quantization">Quantization: %1$s</string>
     <string name="ui_hf_search_downloads">Downloads: %1$s</string>
     <string name="ui_hf_search_likes">Likes: %1$s</string>
     <string name="ui_hf_search_gated_unsupported">Gated Hugging Face repos are not supported in this version.</string>
@@ -492,6 +495,7 @@
     <string name="ui_hf_candidate_target">Runtime target mapping: %1$s</string>
     <string name="ui_hf_candidate_model_card">Model card: %1$s</string>
     <string name="ui_hf_open_model_card">Open model card</string>
+    <string name="ui_hf_open_file">Open file</string>
     <string name="ui_hf_candidate_source">Source: %1$s @ %2$s</string>
     <string name="ui_hf_candidate_prompt_profile">Prompt profile: %1$s</string>
     <string name="ui_hf_candidate_sha">SHA-256: %1$s…</string>

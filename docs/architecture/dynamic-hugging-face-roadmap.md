@@ -226,14 +226,13 @@ Implemented:
 3. Client-side filtering to `.gguf` files and exclusion of sharded GGUF names.
 4. Search results remain candidates only; selected files must still route through candidate validation before queueing.
 5. Model sheet search UI with query input, result rows, model-card actions, and disabled gated/private result handling.
-6. Fixture Maestro flows now exercise search before candidate validation.
+6. Repo-grouped search result display with file path, filename-derived quantization hints, model-card links, and file URL links.
+7. Fixture Maestro flows now exercise search before candidate validation.
 
 Next search polish:
 
-1. Group larger result sets by repo if the current flat list becomes noisy.
-2. Add quantization-specific chips from filename parsing.
-3. Add optional "open on Hugging Face" context for individual file URLs when needed.
-4. Keep persisting only successfully queued/downloaded entries as recents.
+1. Add richer file metadata if Hugging Face search starts returning reliable size/LFS fields directly.
+2. Keep persisting only successfully queued/downloaded entries as recents.
 
 Search must not introduce a selected/search/bookmarked model truth. A result is only a candidate until validated and queued; an installed model is only active after `Load`.
 

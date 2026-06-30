@@ -468,19 +468,24 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithTag("model_library_hf_search_input").performTextInput("qwen")
         composeRule.onNodeWithTag("model_library_hf_search_button").performClick()
         composeRule.onNodeWithTag("model_library_hf_search_results").assertIsDisplayed()
-        composeRule.onNodeWithText("owner/repo / model.gguf").assertIsDisplayed()
+        composeRule.onNodeWithText("Repo: owner/repo").assertIsDisplayed()
+        composeRule.onNodeWithText("owner/repo / model-Q4_K_M.gguf").assertIsDisplayed()
+        composeRule.onNodeWithText("File: model-Q4_K_M.gguf").assertIsDisplayed()
+        composeRule.onNodeWithText("Quantization: Q4_K_M").assertIsDisplayed()
         composeRule.onNodeWithText("Downloads: 42 | Likes: 7 | License: apache-2.0").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_search_open_model_card").performClick()
+        composeRule.onNodeWithTag("model_library_hf_search_open_file").performClick()
         composeRule.onNodeWithTag("model_library_hf_search_use_file").performClick()
         composeRule.onNodeWithTag("model_library_hf_search_clear").performClick()
 
         composeRule.runOnIdle {
             assertTrue(events.contains(ModelSheetEvent.SearchHuggingFaceFiles("qwen")))
             assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/resolve/main/model-Q4_K_M.gguf")))
             assertTrue(
                 events.contains(
                     ModelSheetEvent.ResolveHuggingFaceCandidate(
-                        input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+                        input = "https://huggingface.co/owner/repo/resolve/main/model-Q4_K_M.gguf",
                         targetModelId = "qwen3-0.6b-q4_k_m",
                     ),
                 ),
@@ -936,9 +941,9 @@ private fun sampleHuggingFaceSearchResult(): HuggingFaceSearchFileResult {
         reference = HuggingFaceModelReference(
             repoId = "owner/repo",
             revision = "main",
-            filePath = "model.gguf",
+            filePath = "model-Q4_K_M.gguf",
         ),
-        displayName = "owner/repo / model.gguf",
+        displayName = "owner/repo / model-Q4_K_M.gguf",
         modelCardUrl = "https://huggingface.co/owner/repo",
         downloads = 42L,
         likes = 7L,

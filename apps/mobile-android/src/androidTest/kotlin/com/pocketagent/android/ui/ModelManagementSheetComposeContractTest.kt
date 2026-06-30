@@ -418,6 +418,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_license").assertIsDisplayed()
         composeRule.onNodeWithText("License: apache-2.0").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_open_license").performClick()
         composeRule.onNodeWithTag("model_library_hf_storage_impact").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_queue_download").performClick()
 
@@ -431,6 +432,7 @@ class ModelManagementSheetComposeContractTest {
                 ),
             )
             assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")))
             assertTrue(events.contains(ModelSheetEvent.DownloadVersion(candidate.version)))
         }
     }
@@ -462,6 +464,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithTag("model_library_hf_recent_license").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_open_model_card").performClick()
+        composeRule.onNodeWithTag("model_library_hf_recent_open_license").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_remove").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_clear").performClick()
 
@@ -475,6 +478,7 @@ class ModelManagementSheetComposeContractTest {
                 ),
             )
             assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")))
             assertTrue(events.contains(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)))
             assertTrue(events.contains(ModelSheetEvent.ClearRecentHuggingFaceModels))
         }
@@ -852,6 +856,7 @@ private fun sampleHuggingFaceCandidate(): HuggingFaceCandidate {
             sizeBytes = 1024L,
             version = version,
             license = "apache-2.0",
+            licenseUrl = "https://huggingface.co/owner/repo/blob/main/LICENSE",
         )
 }
 
@@ -870,6 +875,7 @@ private fun sampleHuggingFaceRecentModel(): HuggingFaceRecentModel {
         validatedAtEpochMs = 1L,
         lastDownloadEnqueuedAtEpochMs = 2L,
         license = "apache-2.0",
+        licenseUrl = "https://huggingface.co/owner/repo/blob/main/LICENSE",
     )
 }
 

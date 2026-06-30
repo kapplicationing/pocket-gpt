@@ -238,7 +238,7 @@ internal fun ModelSheet(
                 },
                 onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
-                onOpenModelCard = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
+                onOpenExternalUrl = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
                 onRemoveRecent = { recent -> onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)) },
                 onClearRecent = { onEvent(ModelSheetEvent.ClearRecentHuggingFaceModels) },
                 onRecheckRecent = { recent ->
@@ -405,7 +405,7 @@ private fun HuggingFaceAcquisitionSection(
     onCheck: () -> Unit,
     onClear: () -> Unit,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
-    onOpenModelCard: (String) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onClearRecent: () -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
@@ -520,7 +520,7 @@ private fun HuggingFaceAcquisitionSection(
                         availableStorageBytes = availableStorageBytes,
                         queueing = false,
                         onDownloadVersion = onDownloadVersion,
-                        onOpenModelCard = onOpenModelCard,
+                        onOpenExternalUrl = onOpenExternalUrl,
                     )
                 }
                 is HuggingFaceAcquisitionUiState.Enqueueing -> {
@@ -529,7 +529,7 @@ private fun HuggingFaceAcquisitionSection(
                         availableStorageBytes = availableStorageBytes,
                         queueing = true,
                         onDownloadVersion = onDownloadVersion,
-                        onOpenModelCard = onOpenModelCard,
+                        onOpenExternalUrl = onOpenExternalUrl,
                     )
                 }
             }
@@ -540,7 +540,7 @@ private fun HuggingFaceAcquisitionSection(
                     onRemoveRecent = onRemoveRecent,
                     onClearRecent = onClearRecent,
                     onRecheckRecent = onRecheckRecent,
-                    onOpenModelCard = onOpenModelCard,
+                    onOpenExternalUrl = onOpenExternalUrl,
                 )
             }
         }
@@ -553,7 +553,7 @@ private fun HuggingFaceRecentModelsSection(
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onClearRecent: () -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
-    onOpenModelCard: (String) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -582,7 +582,7 @@ private fun HuggingFaceRecentModelsSection(
                 recent = recent,
                 onRemoveRecent = onRemoveRecent,
                 onRecheckRecent = onRecheckRecent,
-                onOpenModelCard = onOpenModelCard,
+                onOpenExternalUrl = onOpenExternalUrl,
             )
         }
     }
@@ -593,7 +593,7 @@ private fun HuggingFaceRecentModelRow(
     recent: HuggingFaceRecentModel,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
-    onOpenModelCard: (String) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val modelCardUrl = "https://huggingface.co/${recent.repoId}"
@@ -637,6 +637,14 @@ private fun HuggingFaceRecentModelRow(
                     modifier = Modifier.testTag("model_library_hf_recent_license"),
                 )
             }
+            recent.licenseUrl?.takeIf { url -> url.isNotBlank() }?.let { licenseUrl ->
+                TextButton(
+                    onClick = { onOpenExternalUrl(licenseUrl) },
+                    modifier = Modifier.testTag("model_library_hf_recent_open_license"),
+                ) {
+                    Text(stringResource(id = R.string.ui_hf_open_license))
+                }
+            }
             Text(
                 text = stringResource(
                     id = R.string.ui_hf_recent_checked,
@@ -665,7 +673,7 @@ private fun HuggingFaceRecentModelRow(
                 Text(stringResource(id = R.string.ui_hf_recent_recheck))
             }
             TextButton(
-                onClick = { onOpenModelCard(modelCardUrl) },
+                onClick = { onOpenExternalUrl(modelCardUrl) },
                 modifier = Modifier.testTag("model_library_hf_recent_open_model_card"),
             ) {
                 Text(stringResource(id = R.string.ui_hf_open_model_card))
@@ -696,7 +704,7 @@ private fun HuggingFaceCandidateCard(
     availableStorageBytes: Long?,
     queueing: Boolean,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
-    onOpenModelCard: (String) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val modelCardUrl = "https://huggingface.co/${candidate.reference.repoId}"
@@ -721,7 +729,7 @@ private fun HuggingFaceCandidateCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             TextButton(
-                onClick = { onOpenModelCard(modelCardUrl) },
+                onClick = { onOpenExternalUrl(modelCardUrl) },
                 modifier = Modifier.testTag("model_library_hf_open_model_card"),
             ) {
                 Text(stringResource(id = R.string.ui_hf_open_model_card))
@@ -766,6 +774,14 @@ private fun HuggingFaceCandidateCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag("model_library_hf_license"),
                 )
+            }
+            candidate.licenseUrl?.takeIf { url -> url.isNotBlank() }?.let { licenseUrl ->
+                TextButton(
+                    onClick = { onOpenExternalUrl(licenseUrl) },
+                    modifier = Modifier.testTag("model_library_hf_open_license"),
+                ) {
+                    Text(stringResource(id = R.string.ui_hf_open_license))
+                }
             }
             Text(
                 text = stringResource(id = R.string.ui_hf_candidate_compatibility),

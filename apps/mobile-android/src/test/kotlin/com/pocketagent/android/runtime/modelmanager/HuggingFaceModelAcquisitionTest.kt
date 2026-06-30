@@ -153,7 +153,8 @@ class HuggingFaceModelAcquisitionTest {
                     {
                       "id": "owner/repo",
                       "cardData": {
-                        "license": "apache-2.0"
+                        "license": "apache-2.0",
+                        "license_link": "https://huggingface.co/owner/repo/blob/main/LICENSE"
                       },
                       "tags": ["license:apache-2.0"]
                     }
@@ -192,6 +193,7 @@ class HuggingFaceModelAcquisitionTest {
             assertEquals(candidate.version.downloadUrl, candidate.version.artifacts.single().downloadUrl)
             assertEquals("https://huggingface.co/owner/repo", candidate.modelCardUrl)
             assertEquals("apache-2.0", candidate.license)
+            assertEquals("https://huggingface.co/owner/repo/blob/main/LICENSE", candidate.licenseUrl)
         } finally {
             server.shutdown()
         }
@@ -209,6 +211,7 @@ class HuggingFaceModelAcquisitionTest {
                 repositoryMetadata = HuggingFaceHubRepositoryMetadata(
                     modelCardUrl = "https://huggingface.co/owner/repo",
                     license = "mit",
+                    licenseUrl = "https://huggingface.co/owner/repo/blob/main/LICENSE",
                 ),
             ),
         )
@@ -230,6 +233,7 @@ class HuggingFaceModelAcquisitionTest {
         assertEquals(1, candidate.version.artifacts.size)
         assertEquals("https://huggingface.co/owner/repo", candidate.modelCardUrl)
         assertEquals("mit", candidate.license)
+        assertEquals("https://huggingface.co/owner/repo/blob/main/LICENSE", candidate.licenseUrl)
     }
 
     @Test
@@ -252,6 +256,7 @@ class HuggingFaceModelAcquisitionTest {
 
         assertEquals("https://huggingface.co/owner/repo", candidate.modelCardUrl)
         assertEquals(null, candidate.license)
+        assertEquals(null, candidate.licenseUrl)
     }
 
     @Test

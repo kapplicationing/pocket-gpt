@@ -19,6 +19,7 @@ class HuggingFaceRecentModelStoreTest {
             decoded.single().originUrl,
         )
         assertEquals("apache-2.0", decoded.single().license)
+        assertEquals("https://huggingface.co/owner/repo/blob/main/LICENSE", decoded.single().licenseUrl)
     }
 
     @Test
@@ -86,6 +87,7 @@ class HuggingFaceRecentModelStoreTest {
             sizeBytes = 1024L,
             version = version,
             license = "apache-2.0",
+            licenseUrl = "https://huggingface.co/owner/repo/blob/main/LICENSE",
         )
     }
 }

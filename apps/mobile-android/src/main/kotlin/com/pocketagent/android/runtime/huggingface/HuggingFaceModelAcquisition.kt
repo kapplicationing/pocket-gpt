@@ -111,6 +111,7 @@ data class HuggingFaceHubFileMetadata(
 data class HuggingFaceHubRepositoryMetadata(
     val modelCardUrl: String,
     val license: String?,
+    val licenseUrl: String?,
 )
 
 data class HuggingFaceCandidate(
@@ -122,6 +123,7 @@ data class HuggingFaceCandidate(
     val version: ModelDistributionVersion,
     val modelCardUrl: String = reference.modelCardUrl,
     val license: String? = null,
+    val licenseUrl: String? = null,
 )
 
 enum class HuggingFaceAcquisitionBlockReason {
@@ -388,6 +390,7 @@ class DefaultHuggingFaceModelAcquisition(
             version = version,
             modelCardUrl = repositoryMetadata?.modelCardUrl ?: reference.modelCardUrl,
             license = repositoryMetadata?.license,
+            licenseUrl = repositoryMetadata?.licenseUrl,
         )
     }
 
@@ -457,9 +460,20 @@ private fun parseModelInfoResponse(
         json?.optStringValue("license"),
         json?.optJSONArray("tags")?.licenseFromTags(),
     )
+    val licenseUrl = firstNonBlank(
+        cardData?.optStringValue("license_link"),
+        cardData?.optStringValue("licenseLink"),
+        cardData?.optStringValue("license_url"),
+        cardData?.optStringValue("licenseUrl"),
+        json?.optStringValue("license_link"),
+        json?.optStringValue("licenseLink"),
+        json?.optStringValue("license_url"),
+        json?.optStringValue("licenseUrl"),
+    )
     return HuggingFaceHubRepositoryMetadata(
         modelCardUrl = json?.optStringValue("cardUrl") ?: reference.modelCardUrl,
         license = license,
+        licenseUrl = licenseUrl,
     )
 }
 

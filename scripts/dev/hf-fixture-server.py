@@ -111,6 +111,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 "id": REPO_ID,
                 "cardData": {
                     "license": "apache-2.0",
+                    "license_link": "https://huggingface.co/fixture/tiny-gguf/blob/main/LICENSE",
                 },
                 "tags": [
                     "license:apache-2.0",
@@ -234,6 +235,7 @@ def main() -> int:
         "revision": REVISION,
         "file_path": FILE_PATH,
         "license": "apache-2.0",
+        "license_url": f"https://huggingface.co/{REPO_ID}/blob/{REVISION}/LICENSE",
         "sha256": state.sha256,
         "reported_sha256": state.reported_sha256,
         "size_bytes": len(payload),

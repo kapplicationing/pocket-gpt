@@ -484,6 +484,7 @@
     <string name="ui_hf_candidate_sha">SHA-256: %1$s…</string>
     <string name="ui_hf_candidate_checksum_status">Checksum: Hugging Face LFS SHA-256 %1$s…</string>
     <string name="ui_hf_candidate_license">License: %1$s</string>
+    <string name="ui_hf_open_license">Open license</string>
     <string name="ui_hf_candidate_storage_after">Storage after download: %1$s free</string>
     <string name="ui_hf_candidate_storage_warning">Storage warning: needs %1$s, only %2$s free</string>
     <string name="ui_hf_candidate_compatibility">Compatibility: public text-only GGUF with Hugging Face LFS checksum</string>

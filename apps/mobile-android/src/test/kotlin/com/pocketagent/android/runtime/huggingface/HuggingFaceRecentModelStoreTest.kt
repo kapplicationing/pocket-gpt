@@ -18,6 +18,7 @@ class HuggingFaceRecentModelStoreTest {
             "https://huggingface.co/owner/repo/resolve/main/model.gguf",
             decoded.single().originUrl,
         )
+        assertEquals("apache-2.0", decoded.single().license)
     }
 
     @Test
@@ -84,6 +85,7 @@ class HuggingFaceRecentModelStoreTest {
             sha256 = "a".repeat(64),
             sizeBytes = 1024L,
             version = version,
+            license = "apache-2.0",
         )
     }
 }

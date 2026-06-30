@@ -39,6 +39,9 @@ data class HuggingFaceModelReference(
             marker = "resolve",
         )
 
+    val modelCardUrl: String
+        get() = buildHuggingFaceRepoUrl(repoId)
+
     companion object {
         fun parse(input: String): HuggingFaceModelReference {
             val trimmed = input.trim()
@@ -105,6 +108,11 @@ data class HuggingFaceHubFileMetadata(
     val lfsOid: String?,
 )
 
+data class HuggingFaceHubRepositoryMetadata(
+    val modelCardUrl: String,
+    val license: String?,
+)
+
 data class HuggingFaceCandidate(
     val reference: HuggingFaceModelReference,
     val target: HuggingFaceTargetModel,
@@ -112,6 +120,8 @@ data class HuggingFaceCandidate(
     val sha256: String,
     val sizeBytes: Long,
     val version: ModelDistributionVersion,
+    val modelCardUrl: String = reference.modelCardUrl,
+    val license: String? = null,
 )
 
 enum class HuggingFaceAcquisitionBlockReason {
@@ -135,10 +145,14 @@ class HuggingFaceAcquisitionException(
 
 interface HuggingFaceHubClient {
     suspend fun lookupFile(reference: HuggingFaceModelReference): HuggingFaceHubFileMetadata
+
+    suspend fun lookupRepository(reference: HuggingFaceModelReference): HuggingFaceHubRepositoryMetadata? = null
 }
 
 interface HuggingFaceEndpointAdapter {
     fun treeApiUrl(reference: HuggingFaceModelReference): HttpUrl
+
+    fun modelInfoApiUrl(reference: HuggingFaceModelReference): HttpUrl
 
     fun artifactDownloadUrl(reference: HuggingFaceModelReference): String
 }
@@ -156,6 +170,17 @@ object RealHuggingFaceEndpointAdapter : HuggingFaceEndpointAdapter {
             .split('/')
             .filter { segment -> segment.isNotBlank() }
             .forEach(builder::addPathSegment)
+        return builder.build()
+    }
+
+    override fun modelInfoApiUrl(reference: HuggingFaceModelReference): HttpUrl {
+        val builder = HUGGING_FACE_BASE_URL.toHttpUrl().newBuilder()
+            .addPathSegment("api")
+            .addPathSegment("models")
+        reference.repoId.split('/').forEach(builder::addPathSegment)
+        builder
+            .addPathSegment("revision")
+            .addPathSegment(reference.revision)
         return builder.build()
     }
 
@@ -179,6 +204,17 @@ class FixtureHuggingFaceEndpointAdapter(
             .split('/')
             .filter { segment -> segment.isNotBlank() }
             .forEach(builder::addPathSegment)
+        return builder.build()
+    }
+
+    override fun modelInfoApiUrl(reference: HuggingFaceModelReference): HttpUrl {
+        val builder = baseUrl.newBuilder()
+            .addPathSegment("api")
+            .addPathSegment("models")
+        reference.repoId.split('/').forEach(builder::addPathSegment)
+        builder
+            .addPathSegment("revision")
+            .addPathSegment(reference.revision)
         return builder.build()
     }
 
@@ -240,6 +276,24 @@ class OkHttpHuggingFaceHubClient(
             )
         }
     }
+
+    override suspend fun lookupRepository(
+        reference: HuggingFaceModelReference,
+    ): HuggingFaceHubRepositoryMetadata? {
+        val request = Request.Builder()
+            .get()
+            .url(endpointAdapter.modelInfoApiUrl(reference))
+            .build()
+        return runCatching {
+            DownloadHttpClient.base().newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    parseModelInfoResponse(reference, response.body?.string().orEmpty())
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+    }
 }
 
 interface HuggingFaceModelAcquisition {
@@ -282,6 +336,7 @@ class DefaultHuggingFaceModelAcquisition(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SIZE,
                 userMessage = "This Hugging Face file does not expose a usable file size.",
             )
+        val repositoryMetadata = runCatching { hubClient.lookupRepository(reference) }.getOrNull()
         val spec = ModelCatalog.normalizedSpecFor(target.modelId)
         val promptProfileId = spec?.promptProfile?.profileId
         val versionId = "hf-${safeVersionToken(reference.fileName.substringBeforeLast('.'))}-${sha.take(12)}"
@@ -331,6 +386,8 @@ class DefaultHuggingFaceModelAcquisition(
             sha256 = sha,
             sizeBytes = sizeBytes,
             version = version,
+            modelCardUrl = repositoryMetadata?.modelCardUrl ?: reference.modelCardUrl,
+            license = repositoryMetadata?.license,
         )
     }
 
@@ -389,6 +446,49 @@ private fun parseTreeResponse(
     )
 }
 
+private fun parseModelInfoResponse(
+    reference: HuggingFaceModelReference,
+    raw: String,
+): HuggingFaceHubRepositoryMetadata {
+    val json = runCatching { JSONObject(raw.trim()) }.getOrNull()
+    val cardData = json?.optJSONObject("cardData")
+    val license = firstNonBlank(
+        cardData?.optStringValue("license"),
+        json?.optStringValue("license"),
+        json?.optJSONArray("tags")?.licenseFromTags(),
+    )
+    return HuggingFaceHubRepositoryMetadata(
+        modelCardUrl = json?.optStringValue("cardUrl") ?: reference.modelCardUrl,
+        license = license,
+    )
+}
+
+private fun JSONObject.optStringValue(name: String): String? {
+    return when (val value = opt(name)) {
+        is String -> value.trim().takeIf { it.isNotBlank() }
+        is JSONArray -> (0 until value.length())
+            .asSequence()
+            .mapNotNull { index -> value.optString(index).trim().takeIf { it.isNotBlank() } }
+            .joinToString(", ")
+            .takeIf { it.isNotBlank() }
+        else -> null
+    }
+}
+
+private fun JSONArray.licenseFromTags(): String? {
+    return (0 until length())
+        .asSequence()
+        .mapNotNull { index -> optString(index).trim().takeIf { it.isNotBlank() } }
+        .firstOrNull { tag -> tag.startsWith("license:", ignoreCase = true) }
+        ?.substringAfter(':')
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+}
+
+private fun firstNonBlank(vararg values: String?): String? {
+    return values.firstOrNull { value -> !value.isNullOrBlank() }
+}
+
 private fun buildHuggingFaceUrl(
     repoId: String,
     revision: String,
@@ -401,6 +501,12 @@ private fun buildHuggingFaceUrl(
         .addPathSegment(marker)
         .addPathSegment(revision)
     filePath.split('/').forEach(builder::addPathSegment)
+    return builder.build().toString()
+}
+
+private fun buildHuggingFaceRepoUrl(repoId: String): String {
+    val builder = HUGGING_FACE_BASE_URL.toHttpUrl().newBuilder()
+    repoId.split('/').forEach(builder::addPathSegment)
     return builder.build().toString()
 }
 

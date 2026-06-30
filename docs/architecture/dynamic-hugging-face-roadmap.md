@@ -198,10 +198,11 @@ Already present:
 8. Model-card URL with an open action handled by the sheet host.
 9. Explicit target-mapping copy.
 10. Queueing disabled-state semantics.
+11. License when the Hugging Face model-info response exposes it.
 
 Next polish:
 
-1. License link when Hub metadata exposes it.
+1. License link when Hub metadata exposes a dedicated URL.
 2. Add richer compatibility detail once GGUF metadata extraction is available before install.
 
 ### 3. Recent HF Downloads
@@ -269,7 +270,7 @@ Implementation shape:
 
 1. Restore a stable local device transport, then rerun the local HF fixture smoke wrapper on the pinned serial.
 2. Run the cloud fixture smoke only after explicit APK-upload approval and with a public fixture URL from one of the documented tunnel/host options.
-3. Add license/model-card metadata from Hub responses when the acquisition client exposes it.
+3. Add a license-link field if Hub metadata exposes a dedicated URL.
 4. Design HF search against the existing candidate pipeline.
 5. Decide whether recent HF downloads need a richer user catalog after actual redownload use.
 6. Defer private/gated, arbitrary model IDs, and multimodal until the current proof matrix is stable.

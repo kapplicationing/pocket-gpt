@@ -6,6 +6,7 @@ import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionBlockRe
 import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionException
 import com.pocketagent.android.runtime.huggingface.HuggingFaceHubClient
 import com.pocketagent.android.runtime.huggingface.HuggingFaceHubFileMetadata
+import com.pocketagent.android.runtime.huggingface.HuggingFaceHubRepositoryMetadata
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
 import com.pocketagent.android.runtime.huggingface.OkHttpHuggingFaceHubClient
 import com.pocketagent.android.runtime.huggingface.RealHuggingFaceEndpointAdapter
@@ -101,12 +102,20 @@ class HuggingFaceModelAcquisitionTest {
             RealHuggingFaceEndpointAdapter.treeApiUrl(reference).toString(),
         )
         assertEquals(
+            "https://huggingface.co/api/models/owner/repo/revision/main",
+            RealHuggingFaceEndpointAdapter.modelInfoApiUrl(reference).toString(),
+        )
+        assertEquals(
             "https://huggingface.co/owner/repo/resolve/main/models/model.gguf",
             RealHuggingFaceEndpointAdapter.artifactDownloadUrl(reference),
         )
         assertEquals(
             "http://127.0.0.1:8765/base/api/models/owner/repo/tree/main/models",
             fixtureAdapter.treeApiUrl(reference).toString(),
+        )
+        assertEquals(
+            "http://127.0.0.1:8765/base/api/models/owner/repo/revision/main",
+            fixtureAdapter.modelInfoApiUrl(reference).toString(),
         )
         assertEquals(
             "http://127.0.0.1:8765/base/owner/repo/resolve/main/models/model.gguf",
@@ -136,6 +145,21 @@ class HuggingFaceModelAcquisitionTest {
                     """.trimIndent(),
                 ),
         )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "id": "owner/repo",
+                      "cardData": {
+                        "license": "apache-2.0"
+                      },
+                      "tags": ["license:apache-2.0"]
+                    }
+                    """.trimIndent(),
+                ),
+        )
         server.start()
         try {
             val endpointAdapter = FixtureHuggingFaceEndpointAdapter(server.url("/"))
@@ -154,6 +178,10 @@ class HuggingFaceModelAcquisitionTest {
                 server.takeRequest().path,
             )
             assertEquals(
+                "/api/models/owner/repo/revision/main",
+                server.takeRequest().path,
+            )
+            assertEquals(
                 "https://huggingface.co/owner/repo/resolve/main/models/model.gguf",
                 candidate.version.sourceRef?.originUrl,
             )
@@ -162,6 +190,8 @@ class HuggingFaceModelAcquisitionTest {
                 candidate.version.downloadUrl,
             )
             assertEquals(candidate.version.downloadUrl, candidate.version.artifacts.single().downloadUrl)
+            assertEquals("https://huggingface.co/owner/repo", candidate.modelCardUrl)
+            assertEquals("apache-2.0", candidate.license)
         } finally {
             server.shutdown()
         }
@@ -175,6 +205,10 @@ class HuggingFaceModelAcquisitionTest {
                     path = "model.gguf",
                     sizeBytes = 1234L,
                     lfsOid = "a".repeat(64),
+                ),
+                repositoryMetadata = HuggingFaceHubRepositoryMetadata(
+                    modelCardUrl = "https://huggingface.co/owner/repo",
+                    license = "mit",
                 ),
             ),
         )
@@ -194,6 +228,30 @@ class HuggingFaceModelAcquisitionTest {
         assertEquals("a".repeat(64), candidate.version.expectedSha256)
         assertEquals(1234L, candidate.version.fileSizeBytes)
         assertEquals(1, candidate.version.artifacts.size)
+        assertEquals("https://huggingface.co/owner/repo", candidate.modelCardUrl)
+        assertEquals("mit", candidate.license)
+    }
+
+    @Test
+    fun `repository metadata lookup failure does not block candidate materialization`() = runTest {
+        val acquisition = DefaultHuggingFaceModelAcquisition(
+            hubClient = FakeHuggingFaceHubClient(
+                metadata = HuggingFaceHubFileMetadata(
+                    path = "model.gguf",
+                    sizeBytes = 1234L,
+                    lfsOid = "a".repeat(64),
+                ),
+                repositoryFailure = IllegalStateException("metadata unavailable"),
+            ),
+        )
+
+        val candidate = acquisition.resolveCandidate(
+            input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+            targetModelId = ModelCatalog.QWEN3_0_6B_Q4_K_M,
+        )
+
+        assertEquals("https://huggingface.co/owner/repo", candidate.modelCardUrl)
+        assertEquals(null, candidate.license)
     }
 
     @Test
@@ -273,10 +331,17 @@ class HuggingFaceModelAcquisitionTest {
 
 private class FakeHuggingFaceHubClient(
     private val metadata: HuggingFaceHubFileMetadata? = null,
+    private val repositoryMetadata: HuggingFaceHubRepositoryMetadata? = null,
     private val failure: Throwable? = null,
+    private val repositoryFailure: Throwable? = null,
 ) : HuggingFaceHubClient {
     override suspend fun lookupFile(reference: HuggingFaceModelReference): HuggingFaceHubFileMetadata {
         failure?.let { throw it }
         return requireNotNull(metadata)
+    }
+
+    override suspend fun lookupRepository(reference: HuggingFaceModelReference): HuggingFaceHubRepositoryMetadata? {
+        repositoryFailure?.let { throw it }
+        return repositoryMetadata
     }
 }

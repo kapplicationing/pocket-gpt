@@ -63,6 +63,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == f"/api/models/{REPO_ID}/tree/{REVISION}":
             self._write_tree()
             return
+        if path in {
+            f"/api/models/{REPO_ID}",
+            f"/api/models/{REPO_ID}/revision/{REVISION}",
+        }:
+            self._write_model_info()
+            return
         if path == f"/{REPO_ID}/resolve/{REVISION}/{FILE_PATH}":
             self._write_artifact()
             return
@@ -91,6 +97,26 @@ class FixtureHandler(BaseHTTPRequestHandler):
             item["size"] = len(self.state.payload)
         body = [item]
         self._write_json(HTTPStatus.OK, body)
+
+    def _write_model_info(self) -> None:
+        if self.state.mode == "gated":
+            self._write_text(HTTPStatus.FORBIDDEN, "gated\n")
+            return
+        if self.state.mode == "not-found":
+            self._write_text(HTTPStatus.NOT_FOUND, "missing\n")
+            return
+        self._write_json(
+            HTTPStatus.OK,
+            {
+                "id": REPO_ID,
+                "cardData": {
+                    "license": "apache-2.0",
+                },
+                "tags": [
+                    "license:apache-2.0",
+                ],
+            },
+        )
 
     def _write_artifact(self) -> None:
         if self.state.mode == "not-found":
@@ -207,6 +233,7 @@ def main() -> int:
         "repo_id": REPO_ID,
         "revision": REVISION,
         "file_path": FILE_PATH,
+        "license": "apache-2.0",
         "sha256": state.sha256,
         "reported_sha256": state.reported_sha256,
         "size_bytes": len(payload),

@@ -416,6 +416,8 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithText("Model card: https://huggingface.co/owner/repo").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_open_model_card").performClick()
         composeRule.onNodeWithText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_license").assertIsDisplayed()
+        composeRule.onNodeWithText("License: apache-2.0").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_storage_impact").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_queue_download").performClick()
 
@@ -457,6 +459,7 @@ class ModelManagementSheetComposeContractTest {
         }
 
         composeRule.onNodeWithTag("model_library_hf_recent").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_recent_license").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_open_model_card").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_remove").performClick()
@@ -843,10 +846,11 @@ private fun sampleHuggingFaceCandidate(): HuggingFaceCandidate {
             displayName = "Qwen 3 0.6B",
         ),
         displayName = "owner/repo / model.gguf",
-        sha256 = "a".repeat(64),
-        sizeBytes = 1024L,
-        version = version,
-    )
+            sha256 = "a".repeat(64),
+            sizeBytes = 1024L,
+            version = version,
+            license = "apache-2.0",
+        )
 }
 
 private fun sampleHuggingFaceRecentModel(): HuggingFaceRecentModel {
@@ -863,6 +867,7 @@ private fun sampleHuggingFaceRecentModel(): HuggingFaceRecentModel {
         sizeBytes = 1024L,
         validatedAtEpochMs = 1L,
         lastDownloadEnqueuedAtEpochMs = 2L,
+        license = "apache-2.0",
     )
 }
 

@@ -17,6 +17,7 @@ data class HuggingFaceRecentModel(
     val sizeBytes: Long,
     val validatedAtEpochMs: Long,
     val lastDownloadEnqueuedAtEpochMs: Long,
+    val license: String? = null,
 ) {
     val originUrl: String
         get() = HuggingFaceModelReference(
@@ -97,6 +98,7 @@ fun HuggingFaceCandidate.toRecentModel(enqueuedAtEpochMs: Long): HuggingFaceRece
         sizeBytes = sizeBytes,
         validatedAtEpochMs = enqueuedAtEpochMs,
         lastDownloadEnqueuedAtEpochMs = enqueuedAtEpochMs,
+        license = license,
     )
 }
 
@@ -116,7 +118,8 @@ internal fun encodeRecentModels(models: List<HuggingFaceRecentModel>): String {
                 .put("sha256", model.sha256)
                 .put("sizeBytes", model.sizeBytes)
                 .put("validatedAtEpochMs", model.validatedAtEpochMs)
-                .put("lastDownloadEnqueuedAtEpochMs", model.lastDownloadEnqueuedAtEpochMs),
+                .put("lastDownloadEnqueuedAtEpochMs", model.lastDownloadEnqueuedAtEpochMs)
+                .put("license", model.license),
         )
     }
     return array.toString()
@@ -153,6 +156,7 @@ internal fun decodeRecentModels(raw: String): List<HuggingFaceRecentModel> {
             sizeBytes = sizeBytes,
             validatedAtEpochMs = json.optLong("validatedAtEpochMs", enqueuedAt).takeIf { it > 0L } ?: enqueuedAt,
             lastDownloadEnqueuedAtEpochMs = enqueuedAt,
+            license = json.optString("license").takeIf { it.isNotBlank() },
         )
     }
 }

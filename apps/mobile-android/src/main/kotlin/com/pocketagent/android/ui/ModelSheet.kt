@@ -614,6 +614,14 @@ private fun HuggingFaceRecentModelRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            recent.license?.takeIf { license -> license.isNotBlank() }?.let { license ->
+                Text(
+                    text = stringResource(id = R.string.ui_hf_candidate_license, license),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("model_library_hf_recent_license"),
+                )
+            }
             Text(
                 text = stringResource(
                     id = R.string.ui_hf_recent_checked,
@@ -736,6 +744,14 @@ private fun HuggingFaceCandidateCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            candidate.license?.takeIf { license -> license.isNotBlank() }?.let { license ->
+                Text(
+                    text = stringResource(id = R.string.ui_hf_candidate_license, license),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("model_library_hf_license"),
+                )
+            }
             Text(
                 text = stringResource(id = R.string.ui_hf_candidate_compatibility),
                 style = MaterialTheme.typography.labelSmall,

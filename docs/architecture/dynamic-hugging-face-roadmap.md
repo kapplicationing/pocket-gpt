@@ -1,184 +1,260 @@
 # Dynamic Hugging Face Roadmap
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 Owner: Runtime + Android + Product
-Status: Post-tracer-bullet hardening plan
+Status: V1 paste-URL flow implemented, fixture proof hardened, product expansion staged
 
-## Current Proof Position
+## Current Position
 
-The public-HF URL tracer bullet now uses the managed model pipeline: validate URL metadata, materialize a `ModelDistributionVersion`, enqueue the normal download path, install sidecar metadata, and expose the installed artifact through `Load`.
+The dynamic Hugging Face flow uses the managed model pipeline. A public HF URL is parsed, validated, converted into a `ModelDistributionVersion`, queued through the normal download manager, installed with sidecar/source metadata, and exposed through the existing `Downloaded models` -> `Load` flow.
 
-Current repeatable coverage:
+The model-selection invariant still holds:
 
-1. Unit tests cover HF URL parsing, Hub metadata validation, unsupported targets, sidecar metadata, task persistence, admission, and provisioning state.
-2. Acquisition now uses an endpoint adapter: production keeps strict `huggingface.co` parsing, while debug/test builds may rewrite Hub API and artifact download calls through `-Ppocketgpt.hfFixtureBaseUrl`.
-3. Compose contract tests cover the HF acquisition section, candidate queue event, dynamic download queue rendering, and queue pause/resume/cancel/retry dispatch.
-4. Local Maestro covers deterministic invalid-HF blocked-state UX and is included in the default `devctl lane maestro` flow list.
-5. Local fixture Maestro can prove paste URL -> check -> queue -> download controls -> installed row without live Hugging Face by running `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>`.
-6. Maestro Cloud covers deterministic blocked-state UX through `tests/maestro-cloud/ --include-tags cloud-smoke`, which is already wired into nightly cloud validation.
+1. A Hugging Face URL creates a managed model version.
+2. `Load` is the only user-facing selection action.
+3. `modelLoadingState.loadedModel` remains the only visible active model truth.
+4. Recent HF entries are redownload affordances, not selected/default/bookmarked model state.
 
-The live Hugging Face download flow remains a manual probe, not a release contract. Use the fixture server for queue/install confidence, and use live Hub only to confirm external compatibility on an explicit device run.
+## Current Proof
+
+Green proof from 2026-06-30:
+
+1. `./gradlew :apps:mobile-android:testDebugUnitTest --tests '*HuggingFace*' --tests '*ModelProvisioningViewModelTest'`
+2. `./gradlew :apps:mobile-android:testDebugUnitTest`
+3. `./gradlew :apps:mobile-android:compileDebugAndroidTestKotlin`
+4. Connected device `ModelManagementSheetComposeContractTest`: 19/19 passed on SM-A515F, serial `192.168.246.27:40781`.
+5. `maestro-android lint`: 50 flows, 0 errors, 1 existing warning for the GPU benchmark `runScript` command.
+6. Shell syntax checks for the touched Maestro wrappers.
+7. Local fixture wrapper install plus bootstrap probe passed on SM-A515F after installing the debug APK.
+
+Blocked or pending proof:
+
+1. Local fixture Maestro is not fully green yet. The standalone probe failures were caused by probing before the app was installed; the wrapper-installed probe passed. The first full fixture flow then failed because it anchored on the `Download queue` header while the tiny fixture completed. The flow now targets the queue card id instead. The rerun was interrupted by wireless ADB going `offline` before the flow could reach the fake server beyond `/health`. Latest interrupted run: `tmp/hf-fixture-smoke/20260630T074038Z`.
+2. Maestro Cloud execution requires uploading the private debug APK to Maestro Cloud. The repo has a wrapper and flow, but an agent should not run it without explicit approval for that external upload.
+3. Live HF download remains a manual long-running compatibility probe, not a default CI gate.
+
+## Implemented V1 Surfaces
+
+### Paste URL Acquisition
+
+Implemented:
+
+1. Strict user input parsing for `https://huggingface.co/.../resolve|blob/.../*.gguf`.
+2. Public-only V1 policy.
+3. Single-file text-only GGUF policy.
+4. Supported PocketGPT runtime target picker.
+5. HF metadata lookup for file size and LFS SHA.
+6. Candidate materialization into `ModelDistributionVersion`.
+7. Existing download/install/load path reuse.
+
+Deferred:
+
+1. Private/gated tokens.
+2. Arbitrary runtime model IDs.
+3. Sharded GGUF.
+4. Vision/MMPROJ pairing.
+5. Open HF search.
+
+### Recent HF Downloads
+
+Implemented:
+
+1. A durable recent-HF store backed by Android `SharedPreferences`.
+2. Storage of repo, revision, file path, target model, display name, version, SHA-256, size, and enqueue timestamps.
+3. Recent rows in the HF section.
+4. Recheck action that reuses the canonical HF URL and target, then routes through the same validation path before queueing.
+
+Intentional boundaries:
+
+1. Recents are not active models.
+2. Recents do not auto-queue.
+3. Recents do not bypass SHA/size validation.
+4. Recents do not store bearer tokens, redirected CDN URLs, or private access state.
+
+### Fixture And Cloud Harness
+
+Implemented:
+
+1. Local fake HF server with metadata and artifact endpoints.
+2. Debug/test endpoint adapter through `-Ppocketgpt.hfFixtureBaseUrl`.
+3. Local fixture smoke wrapper: `scripts/dev/maestro-hf-fixture-smoke.sh`.
+4. Local wrapper bootstrap probe gate, so harness failures fail early.
+5. Cloud fixture flow: `tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml`.
+6. Cloud fixture wrapper: `scripts/dev/maestro-cloud-hf-fixture-smoke.sh`.
+7. Documentation for public fixture exposure through `cloudflared`, `ngrok`, `localhost.run`, Tailscale Funnel, or a tiny hosted VM.
 
 ## Tech Roadmap
 
-### 1. Device And Hosted Proof
+### 1. Close The Local Maestro Harness Gap
 
-Keep the proof matrix explicit:
+Goal: make local fixture smoke repeatable on one pinned device or emulator.
 
-1. Run Android unit and architecture checks on every dynamic-HF change.
-2. Run focused connected instrumentation for `ModelManagementSheetComposeContractTest` and task-store migration tests on a pinned device.
-3. Run local Maestro `scenario-hf-url-validation-smoke.yaml` on a pinned physical device.
-4. Run local fixture Maestro with `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` before treating queue/install as proven.
-5. Run Maestro Cloud `scenario-hf-url-validation-smoke.yaml` through `scripts/dev/maestro-cloud-flow.sh` or `scripts/dev/maestro-cloud-smoke.sh` for hosted confirmation.
+Next checks:
 
-Do not move live-HF download flow into default CI. The fixture lane owns deterministic queue/install evidence; live-HF stays tagged `live-hf,long-running`.
+1. Recover or re-pair wireless ADB for `192.168.246.27:40781`, or use USB for the fixture smoke.
+2. Re-run `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <stable-serial>`.
+3. If the queue id appears and pause/resume/cancel/retry pass, record the run root as local fixture evidence.
+4. If the flow fails again with app UI evidence, inspect the new `maestro-debug` output captured by the wrapper.
+5. If a known-good emulator becomes available, run the same wrapper there to separate device transport from flow logic.
 
-### 2. Fake HF Integration Harness
+Do not keep rerunning on the offline wireless transport. The next useful local proof requires a stable ADB device.
 
-The local fixture harness owns the full happy path:
+### 2. Finish Cloud Fixture Proof With Explicit Approval
 
-1. `scripts/dev/hf-fixture-server.py` returns tree metadata with LFS SHA and size, plus blocked modes for missing SHA, missing size, gated, not found, and checksum mismatch.
-2. The same server supports artifact range requests, `If-Range`, `ETag`, `Last-Modified`, `206`, and full-response fallback.
-3. Android debug/test builds inject the fake base URL with `-Ppocketgpt.hfFixtureBaseUrl=http://127.0.0.1:<port>/`; production validation still accepts only canonical `https://huggingface.co/...` user input.
-4. `tests/maestro/scenario-hf-fixture-download-smoke.yaml` proves paste URL -> check -> candidate -> queue -> pause/resume/cancel/retry -> installed row -> visible `Load`.
+Goal: prove hosted paste/check/queue/pause/resume/cancel/retry/install-row behavior without live Hugging Face.
 
-This is the right place to prove resume/cancel/retry behavior. Live Hub tests remain a small manual compatibility probe.
+Default path:
 
-### 3. HF Naming Boundaries
+1. Start `scripts/dev/hf-fixture-server.py` locally.
+2. Expose it with a public tunnel, preferably `cloudflared tunnel --url http://127.0.0.1:8765`.
+3. Run `scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url <public-url>`.
 
-Clarify or rename the two HF concepts:
+Constraint:
 
-1. Acquisition HF: user-provided Hub URL, metadata lookup, validation, and candidate materialization.
-2. Catalog-source HF: a manifest source kind that records where a managed version came from.
+1. Running Maestro Cloud uploads the debug APK to an external hosted service.
+2. This requires explicit approval in agent sessions.
+3. CI should use this only where the organization already permits APK upload to Maestro Cloud.
 
-Document this in the architecture guide, and rename packages/classes if future code starts to blur acquisition with installed-source provenance.
+### 3. Harden Metadata And Naming
 
-### 4. Metadata Encoding
+Remaining cleanup:
 
-Move repeated `sourceRef` encode/decode into one shared codec used by:
+1. Keep acquisition HF and source-provenance HF names distinct in docs and package boundaries.
+2. Keep the shared `sourceRef` codec as the only JSON mapping for task state and sidecars.
+3. Reuse the same source metadata shape for future recent-HF catalog records if recents move out of `SharedPreferences`.
+4. Add device migration proof for task-store rows with and without `displayName`/`sourceRef`.
 
-1. Download task persistence.
-2. Installed sidecar metadata.
-3. Runtime provisioning snapshot creation.
-4. Future user-HF catalog records.
+### 4. Keep Admission Failures Pre-Enqueue
 
-`ModelSourceRefJsonCodec` now owns the shared JSON mapping for task persistence and installed sidecars. Future user-HF catalog records should use this codec instead of introducing another map-key dialect.
-
-### 5. Migration Proof
-
-Keep task-store migration coverage in both unit and device surfaces:
-
-1. Unit test old rows without `displayName`/`sourceRef`.
-2. Instrumentation test SQLite open/migrate on device.
-3. Nightly instrumentation should keep running this with `connectedDebugAndroidTest`.
-
-### 6. Admission Clarity
-
-All unsupported cases should fail before enqueue:
+All unsupported cases should fail before a task enters the download queue:
 
 1. Unsupported target model ID.
-2. Target requiring companion artifacts in v1.
-3. Sharded GGUF.
-4. Missing LFS SHA or size.
-5. Private/gated responses.
-6. Non-public or non-Hugging Face URLs.
+2. Target requiring companion artifacts in V1.
+3. Non-HF or non-public URLs.
+4. Non-GGUF files.
+5. Sharded GGUF files.
+6. Missing or malformed LFS SHA.
+7. Missing or zero size.
+8. 401/403 gated/private responses.
 
-Keep failure reasons visible in the candidate section and test them without live network.
+The UI should show a concrete blocked reason and never create a partial selected/downloaded state.
 
-### 7. Docs Cleanup
+### 5. CI Shape
 
-Keep one obvious path:
+Keep default CI deterministic:
 
-1. `docs/start-here/adding-a-new-model.md` covers built-in catalog additions.
-2. Dynamic HF docs cover user-managed versions that map to existing runtime identities.
-3. Test docs distinguish deterministic HF validation, fake-HF full-flow automation, and live-HF manual probes.
+1. Unit tests for parsing, policy, recents, task state, sidecars, and provisioning view-model state.
+2. Compose contract/instrumentation for UI intent wiring and queue row rendering.
+3. Maestro lint for selector/schema drift.
+4. Invalid-HF smoke where hosted APK upload is allowed.
+5. Fixture smoke only where a public fixture URL can be controlled.
 
-No release flag is planned right now. The app is not shipped, so the guardrail is an advanced acquisition section plus the proof matrix above.
+Do not put live HF downloads in default CI.
 
 ## Product Roadmap
 
-### 1. V1 Validation Release
+### 1. V1 Paste URL Flow
 
-Ship the advanced paste-URL flow:
+Current recommendation: keep this as the advanced-user entry point.
 
-1. Public Hugging Face `.gguf` resolve/blob URL.
-2. Supported target model picker.
-3. Validate metadata.
-4. Queue download.
-5. Load only from `Downloaded models`.
+User flow:
 
-Keep the mental model simple: URL creates a managed version; `Load` selects it.
+1. Paste public HF GGUF URL.
+2. Choose supported runtime target.
+3. Check file.
+4. Review candidate.
+5. Queue download.
+6. Load only from `Downloaded models`.
 
-### 2. Better Preview
+This is the right V1 because it preserves one active model truth and avoids a second catalog/search state.
 
-Improve the candidate card before broadening acquisition:
+### 2. Candidate Preview Polish
 
-1. File size and storage impact.
-2. SHA/checksum status.
-3. Target model and prompt profile.
-4. Compatibility pass/fail reason.
-5. License/model-card link when available.
-6. Clear blocked reasons with no partial selection state.
+Already present:
+
+1. File size.
+2. SHA prefix.
+3. Target model.
+4. Prompt profile when available.
+5. Compatibility summary.
+6. Blocked reason.
+
+Next polish:
+
+1. Storage impact against current free space.
+2. Full checksum status wording.
+3. Model card link.
+4. License link when Hub metadata exposes it.
+5. Clearer copy for target-model mapping.
+6. Disabled queue state that explains the exact pending/blocked reason.
 
 ### 3. Recent HF Downloads
 
-Persist successfully validated entries after download:
+Implemented V1 exists now.
 
-1. Show recent dynamic entries after delete.
-2. Allow redownload without pasting the URL again.
-3. Revalidate SHA/size before redownload.
-4. Never persist bearer tokens or CDN redirect URLs.
+Next polish:
 
-### 4. Curated Recommendations
+1. Add delete/clear recent entry.
+2. Show last checked and last queued times.
+3. Let a recent row open the candidate preview without scrolling surprises.
+4. Consider promoting successfully installed HF versions to a richer local user catalog if users rely on redownload heavily.
 
-Add known-good recommendations before open search:
+### 4. HF Search
 
-1. Curated HF repos mapped to supported PocketGPT targets.
-2. Compatibility and size precomputed.
-3. Safer copy for users who do not understand model/runtime mapping.
+Current app does not have PocketPal-style HF search. It has a paste-URL HF view.
 
-### 5. HF Search
+Recommended search plan:
 
-Add search only after validation and curated UX are solid:
+1. Add an “Explore Hugging Face” subview inside the model sheet or a dedicated sheet route.
+2. Search repos/files through a small HF search client.
+3. Filter to `.gguf` results first.
+4. Group results by repo, then show file cards.
+5. Show file size, quantization-looking filename, repo downloads/likes when available, license, and gated/private status.
+6. Require target-model selection before validation.
+7. Route every chosen file through the existing candidate validation path.
+8. Persist only successfully queued/downloaded entries as recents.
 
-1. Search GGUF repos/files.
-2. Filter sharded/unsupported files.
-3. Show disabled unsupported results with concrete reasons.
-4. Route every successful result through the same validation/download path.
+Search must not introduce a selected/search/bookmarked model truth. A result is only a candidate until validated and queued; an installed model is only active after `Load`.
 
-### 6. Private And Gated Models
+### 5. Curated Recommendations
 
-Defer until the security model is real:
+Out of current scope per product direction.
 
-1. Keystore-backed token storage.
-2. Token alias in task state, not token material.
-3. Auth-aware downloads and redaction.
-4. Terms/access state.
-5. Clear 401/403 recovery copy.
+If revived later, recommendations should be managed versions with known SHA/size and target model mappings, not a separate model selection system.
 
-### 7. Arbitrary Model Support
+### 6. Private/Gated And Arbitrary Model IDs
 
-Do not let arbitrary HF IDs load until runtime gates are ready:
+Keep out of scope.
 
-1. Runtime bridge can load explicit paths safely.
-2. Prompt profile or chat-template selection exists.
-3. GGUF metadata extraction drives admission.
-4. Memory/context/architecture checks are explicit.
+Reasons:
 
-### 8. Vision And Multimodal
+1. Token storage and redaction are a separate security project.
+2. Auth-aware download retries add new task-state risk.
+3. Arbitrary model IDs require prompt, runtime, memory, architecture, and GGUF metadata admission work.
 
-Support primary GGUF + MMPROJ only as an explicit bundle flow:
+### 7. Vision And Multimodal
 
-1. Pairing policy.
-2. Artifact roles in preview.
-3. Atomic download/install/delete.
-4. Load admission that requires all companion artifacts.
+Recommended product shape:
 
-## Recommended Order
+1. Show vision as an explicit bundle flow, not a hidden extra file.
+2. The user chooses a primary GGUF and a matching MMPROJ file.
+3. The preview shows both artifact roles, sizes, SHA status, and target model capability.
+4. Download/install/delete are atomic across the bundle.
+5. `Load` is disabled unless all required artifacts are installed and sidecar metadata matches.
+6. Image attachment capability derives from the loaded runtime model only.
 
-1. Finish the fake-HF integration harness.
-2. Make the live-HF Maestro probe deterministic enough to be useful, but keep it outside CI.
-3. Polish candidate preview and blocked reasons.
-4. Add recent HF downloads/redownload.
-5. Add curated recommendations.
-6. Add search, private/gated auth, arbitrary runtime IDs, and multimodal in separate slices.
+Implementation shape:
+
+1. Reuse existing artifact roles: `PRIMARY_GGUF` and `MMPROJ`.
+2. Extend HF candidate validation from one artifact to a bundle candidate.
+3. Add pairing policy before arbitrary search results can create a bundle.
+4. Keep companion-artifact failures pre-enqueue until the pairing UI exists.
+
+## Recommended Next Order
+
+1. Prove app launch outside Maestro and classify the Samsung Maestro bootstrap issue.
+2. Run the cloud fixture smoke only after explicit APK-upload approval.
+3. Add candidate preview storage/license/model-card polish.
+4. Add recent-entry delete and timestamp polish.
+5. Design HF search against the existing candidate pipeline.
+6. Defer private/gated, arbitrary model IDs, and multimodal until the current proof matrix is stable.

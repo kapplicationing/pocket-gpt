@@ -75,6 +75,7 @@ SERVER_LOG="${RUN_ROOT}/hf-fixture-server.log"
 SERVER_MANIFEST="${RUN_ROOT}/hf-fixture-manifest.json"
 JUNIT_PATH="${RUN_ROOT}/maestro-junit.xml"
 MAESTRO_LOG="${RUN_ROOT}/maestro-output.log"
+MAESTRO_DEBUG_DIR="${RUN_ROOT}/maestro-debug"
 FIXTURE_BASE_URL="http://127.0.0.1:${PORT}/"
 
 cleanup() {
@@ -152,6 +153,7 @@ cat >"${RUN_ROOT}/run-manifest.json" <<EOF
   "chunk_size": ${CHUNK_SIZE},
   "fixture_base_url": "${FIXTURE_BASE_URL}",
   "flow": "tests/maestro/scenario-hf-fixture-download-smoke.yaml",
+  "maestro_debug_dir": "${MAESTRO_DEBUG_DIR}",
   "junit_path": "${JUNIT_PATH}",
   "maestro_log": "${MAESTRO_LOG}",
   "run_probe": ${RUN_PROBE},
@@ -162,6 +164,7 @@ EOF
 
 set +e
 maestro --device "${SERIAL}" test tests/maestro/scenario-hf-fixture-download-smoke.yaml \
+  --debug-output "${MAESTRO_DEBUG_DIR}" \
   --format junit \
   --output "${JUNIT_PATH}" 2>&1 | tee "${MAESTRO_LOG}"
 MAESTRO_EXIT=${PIPESTATUS[0]}

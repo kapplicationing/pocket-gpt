@@ -47,9 +47,11 @@ tags:
       - tapOn: "Continue download"
 - scrollUntilVisible:
     element:
-      text: "Download queue"
+      id: "model_library_download_queue"
     direction: DOWN
     timeout: 30000
+- assertVisible:
+    id: "model_library_download_queue"
 - scrollUntilVisible:
     element:
       id: "model_library_download_queue_pause"

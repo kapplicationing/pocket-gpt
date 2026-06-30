@@ -68,6 +68,7 @@ Implemented:
 6. Checked/queued relative timestamps in the recent row.
 7. Model-card open action for each recent entry.
 8. Clear-recent action for removing all redownload affordances without affecting installed or loaded models.
+9. Recheck scrolls the sheet back to the HF acquisition section so the candidate preview/checking state is visible.
 
 Intentional boundaries:
 
@@ -212,8 +213,7 @@ Implemented V1 exists now.
 
 Next polish:
 
-1. Let a recent row open the candidate preview without scrolling surprises.
-2. Consider promoting successfully installed HF versions to a richer local user catalog if users rely on redownload heavily.
+1. Consider promoting successfully installed HF versions to a richer local user catalog if users rely on redownload heavily.
 
 ### 4. HF Search
 

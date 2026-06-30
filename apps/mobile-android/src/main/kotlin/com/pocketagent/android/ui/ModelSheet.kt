@@ -182,6 +182,7 @@ internal fun ModelSheet(
     }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val huggingFaceSectionIndex = 2 + if (libraryState.statusMessage?.isNotBlank() == true) 1 else 0
 
     LazyColumn(
         state = listState,
@@ -217,7 +218,7 @@ internal fun ModelSheet(
                 StatusMessageCard(message = message)
             }
         }
-        item {
+        item(key = HUGGING_FACE_SECTION_KEY) {
             HuggingFaceAcquisitionSection(
                 input = huggingFaceInput,
                 selectedTargetId = resolvedHuggingFaceTargetId,
@@ -249,6 +250,9 @@ internal fun ModelSheet(
                             targetModelId = recent.targetModelId,
                         ),
                     )
+                    scope.launch {
+                        listState.animateScrollToItem(huggingFaceSectionIndex)
+                    }
                 },
             )
         }
@@ -386,6 +390,7 @@ internal fun ModelSheet(
 }
 
 internal const val DOWNLOADED_SECTION_KEY = "downloaded_section_header"
+internal const val HUGGING_FACE_SECTION_KEY = "hugging_face_acquisition_section"
 
 @Composable
 private fun HuggingFaceAcquisitionSection(

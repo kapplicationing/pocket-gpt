@@ -2,6 +2,7 @@
 
 package com.pocketagent.android.ui
 
+import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -235,6 +236,7 @@ internal fun ModelSheet(
                 },
                 onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
+                onRemoveRecent = { recent -> onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)) },
                 onRecheckRecent = { recent ->
                     huggingFaceInput = recent.originUrl
                     selectedHuggingFaceTargetId = recent.targetModelId
@@ -394,6 +396,7 @@ private fun HuggingFaceAcquisitionSection(
     onCheck: () -> Unit,
     onClear: () -> Unit,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
+    onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
     Card(
@@ -519,6 +522,7 @@ private fun HuggingFaceAcquisitionSection(
                 HorizontalDivider()
                 HuggingFaceRecentModelsSection(
                     recentModels = recentModels,
+                    onRemoveRecent = onRemoveRecent,
                     onRecheckRecent = onRecheckRecent,
                 )
             }
@@ -529,6 +533,7 @@ private fun HuggingFaceAcquisitionSection(
 @Composable
 private fun HuggingFaceRecentModelsSection(
     recentModels: List<HuggingFaceRecentModel>,
+    onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
     Column(
@@ -550,6 +555,7 @@ private fun HuggingFaceRecentModelsSection(
         recentModels.take(4).forEach { recent ->
             HuggingFaceRecentModelRow(
                 recent = recent,
+                onRemoveRecent = onRemoveRecent,
                 onRecheckRecent = onRecheckRecent,
             )
         }
@@ -559,18 +565,17 @@ private fun HuggingFaceRecentModelsSection(
 @Composable
 private fun HuggingFaceRecentModelRow(
     recent: HuggingFaceRecentModel,
+    onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
     val context = LocalContext.current
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("model_library_hf_recent_row"),
-        horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
     ) {
         Column(
-            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
         ) {
             Text(
@@ -596,14 +601,51 @@ private fun HuggingFaceRecentModelRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                text = stringResource(
+                    id = R.string.ui_hf_recent_checked,
+                    recent.validatedAtEpochMs.relativeTimeLabel(),
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(
+                    id = R.string.ui_hf_recent_queued,
+                    recent.lastDownloadEnqueuedAtEpochMs.relativeTimeLabel(),
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        OutlinedButton(
-            onClick = { onRecheckRecent(recent) },
-            modifier = Modifier.testTag("model_library_hf_recent_recheck"),
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
         ) {
-            Text(stringResource(id = R.string.ui_hf_recent_recheck))
+            OutlinedButton(
+                onClick = { onRecheckRecent(recent) },
+                modifier = Modifier.testTag("model_library_hf_recent_recheck"),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_recent_recheck))
+            }
+            TextButton(
+                onClick = { onRemoveRecent(recent) },
+                modifier = Modifier.testTag("model_library_hf_recent_remove"),
+            ) {
+                Text(stringResource(id = R.string.ui_remove))
+            }
         }
     }
+}
+
+private fun Long.relativeTimeLabel(): String {
+    val now = System.currentTimeMillis()
+    return DateUtils.getRelativeTimeSpanString(
+        this,
+        now,
+        DateUtils.MINUTE_IN_MILLIS,
+        DateUtils.FORMAT_ABBREV_RELATIVE,
+    ).toString()
 }
 
 @Composable

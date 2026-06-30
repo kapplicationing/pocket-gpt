@@ -429,7 +429,7 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
-    fun huggingFaceRecentRowDispatchesResolveForStoredCanonicalUrl() {
+    fun huggingFaceRecentRowDispatchesResolveAndRemoveEvents() {
         val events = mutableListOf<ModelSheetEvent>()
         val candidate = sampleHuggingFaceCandidate()
         val recent = sampleHuggingFaceRecentModel()
@@ -453,6 +453,7 @@ class ModelManagementSheetComposeContractTest {
 
         composeRule.onNodeWithTag("model_library_hf_recent").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
+        composeRule.onNodeWithTag("model_library_hf_recent_remove").performClick()
 
         composeRule.runOnIdle {
             assertTrue(
@@ -463,6 +464,7 @@ class ModelManagementSheetComposeContractTest {
                     ),
                 ),
             )
+            assertTrue(events.contains(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)))
         }
     }
 

@@ -251,6 +251,13 @@ class ModelProvisioningViewModel internal constructor(
         }
     }
 
+    suspend fun removeRecentHuggingFaceModel(id: String) {
+        withContext(ioDispatcher) {
+            huggingFaceRecentModelStore.remove(id)
+        }
+        refreshRecentHuggingFaceModels()
+    }
+
     suspend fun importModelFromUri(modelId: String, sourceUri: Uri): Result<RuntimeModelImportResult> {
         updateLocalUiState { state -> state.copy(isImporting = true) }
         val result = runCatching {

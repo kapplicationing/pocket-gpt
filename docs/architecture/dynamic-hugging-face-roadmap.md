@@ -63,6 +63,8 @@ Implemented:
 2. Storage of repo, revision, file path, target model, display name, version, SHA-256, size, and enqueue timestamps.
 3. Recent rows in the HF section.
 4. Recheck action that reuses the canonical HF URL and target, then routes through the same validation path before queueing.
+5. Remove action for stale recent entries.
+6. Checked/queued relative timestamps in the recent row.
 
 Intentional boundaries:
 
@@ -194,10 +196,9 @@ Implemented V1 exists now.
 
 Next polish:
 
-1. Add delete/clear recent entry.
-2. Show last checked and last queued times.
-3. Let a recent row open the candidate preview without scrolling surprises.
-4. Consider promoting successfully installed HF versions to a richer local user catalog if users rely on redownload heavily.
+1. Let a recent row open the candidate preview without scrolling surprises.
+2. Consider promoting successfully installed HF versions to a richer local user catalog if users rely on redownload heavily.
+3. Add a “clear all recents” action only if the list becomes noisy.
 
 ### 4. HF Search
 

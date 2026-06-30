@@ -387,6 +387,30 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `remove recent hugging face model updates ui state`() = runTest(dispatcher) {
+        val version = sampleDownloadVersion().copy(
+            sourceKind = ModelSourceKind.HUGGING_FACE,
+            displayName = "owner/repo / model.gguf",
+        )
+        val candidate = sampleHuggingFaceCandidate(version)
+        val recentStore = FakeHuggingFaceRecentModelStore().apply {
+            upsert(candidate, enqueuedAtEpochMs = 1234L)
+        }
+        val viewModel = ModelProvisioningViewModel(
+            gateway = FakeProvisioningGateway(),
+            huggingFaceRecentModelStore = recentStore,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        val recent = viewModel.uiState.value.recentHuggingFaceModels.single()
+        viewModel.removeRecentHuggingFaceModel(recent.id)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.recentHuggingFaceModels.isEmpty())
+    }
+
+    @Test
     fun `hugging face candidate failures and clear update acquisition state`() = runTest(dispatcher) {
         val acquisition = FakeHuggingFaceModelAcquisition(
             failure = HuggingFaceAcquisitionException(
@@ -696,6 +720,10 @@ private class FakeHuggingFaceRecentModelStore : HuggingFaceRecentModelStore {
     override fun upsert(candidate: HuggingFaceCandidate, enqueuedAtEpochMs: Long) {
         val recent = candidate.toRecentModel(enqueuedAtEpochMs)
         models = models.filterNot { model -> model.id == recent.id } + recent
+    }
+
+    override fun remove(id: String) {
+        models = models.filterNot { model -> model.id == id }
     }
 }
 

@@ -71,6 +71,9 @@ internal fun ModelLibrarySheetHost(
                     ModelSheetEvent.ClearHuggingFaceCandidate -> {
                         actions.clearHuggingFaceCandidate()
                     }
+                    is ModelSheetEvent.RemoveRecentHuggingFaceModel -> scope.launch {
+                        actions.removeRecentHuggingFaceModel(event.id)
+                    }
                     is ModelSheetEvent.DownloadVersion -> actions.downloadVersion(event.version)
                     is ModelSheetEvent.PauseDownload -> scope.launch {
                         actions.pauseDownload(event.taskId)

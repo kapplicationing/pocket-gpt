@@ -36,6 +36,11 @@ internal class ModelLibraryActions(
         provisioningViewModel.clearHuggingFaceCandidate()
     }
 
+    suspend fun removeRecentHuggingFaceModel(id: String) {
+        provisioningViewModel.removeRecentHuggingFaceModel(id)
+        provisioningViewModel.setStatusMessage(context.getString(R.string.ui_hf_recent_removed))
+    }
+
     fun downloadVersion(version: ModelDistributionVersion) {
         chatAppLaunchers.launchDownloadFlow(version)
     }

@@ -43,6 +43,19 @@ class HuggingFaceRecentModelStoreTest {
         assertEquals("owner/repo / model.gguf", decoded.single().displayName)
     }
 
+    @Test
+    fun `decode preserves checked and queued timestamps`() {
+        val recent = sampleCandidate().toRecentModel(enqueuedAtEpochMs = 1234L).copy(
+            validatedAtEpochMs = 1111L,
+            lastDownloadEnqueuedAtEpochMs = 2222L,
+        )
+
+        val decoded = decodeRecentModels(encodeRecentModels(listOf(recent))).single()
+
+        assertEquals(1111L, decoded.validatedAtEpochMs)
+        assertEquals(2222L, decoded.lastDownloadEnqueuedAtEpochMs)
+    }
+
     private fun sampleCandidate(): HuggingFaceCandidate {
         val version = ModelDistributionVersion(
             modelId = "qwen3.5-0.8b-q4",

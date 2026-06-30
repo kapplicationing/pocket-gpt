@@ -73,6 +73,7 @@ import com.pocketagent.android.runtime.ModelVersionEligibility
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
+import com.pocketagent.android.runtime.huggingface.HuggingFaceSearchFileResult
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
@@ -90,6 +91,7 @@ import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelDisplayNames
 import com.pocketagent.inference.PresetRoutingResolver
+import java.text.NumberFormat
 import kotlinx.coroutines.launch
 
 @Composable
@@ -104,6 +106,7 @@ internal fun ModelSheet(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var huggingFaceInput by remember { mutableStateOf("") }
+    var huggingFaceSearchQuery by remember { mutableStateOf("") }
     var selectedHuggingFaceTargetId by remember { mutableStateOf("") }
     val activeModel = modelLoadingState.activeOrRequestedModel()
     val busy = modelLoadingState is ModelLoadingState.Loading || modelLoadingState is ModelLoadingState.Offloading
@@ -224,9 +227,12 @@ internal fun ModelSheet(
                 selectedTargetId = resolvedHuggingFaceTargetId,
                 targets = libraryState.huggingFaceTargets,
                 state = libraryState.huggingFaceAcquisitionState,
+                searchQuery = huggingFaceSearchQuery,
+                searchState = libraryState.huggingFaceSearchState,
                 recentModels = libraryState.recentHuggingFaceModels,
                 availableStorageBytes = libraryState.snapshot.storageSummary.freeBytes,
                 onInputChange = { value -> huggingFaceInput = value },
+                onSearchQueryChange = { value -> huggingFaceSearchQuery = value },
                 onSelectTarget = { targetId -> selectedHuggingFaceTargetId = targetId },
                 onCheck = {
                     onEvent(
@@ -237,6 +243,19 @@ internal fun ModelSheet(
                     )
                 },
                 onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
+                onSearch = {
+                    onEvent(ModelSheetEvent.SearchHuggingFaceFiles(huggingFaceSearchQuery))
+                },
+                onClearSearch = { onEvent(ModelSheetEvent.ClearHuggingFaceSearch) },
+                onUseSearchResult = { result ->
+                    huggingFaceInput = result.canonicalUrl
+                    onEvent(
+                        ModelSheetEvent.ResolveHuggingFaceCandidate(
+                            input = result.canonicalUrl,
+                            targetModelId = resolvedHuggingFaceTargetId,
+                        ),
+                    )
+                },
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
                 onOpenExternalUrl = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
                 onRemoveRecent = { recent -> onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)) },
@@ -391,6 +410,7 @@ internal fun ModelSheet(
 
 internal const val DOWNLOADED_SECTION_KEY = "downloaded_section_header"
 internal const val HUGGING_FACE_SECTION_KEY = "hugging_face_acquisition_section"
+private const val HF_SEARCH_VISIBLE_RESULT_LIMIT = 5
 
 @Composable
 private fun HuggingFaceAcquisitionSection(
@@ -398,12 +418,18 @@ private fun HuggingFaceAcquisitionSection(
     selectedTargetId: String,
     targets: List<HuggingFaceTargetModel>,
     state: HuggingFaceAcquisitionUiState,
+    searchQuery: String,
+    searchState: HuggingFaceSearchUiState,
     recentModels: List<HuggingFaceRecentModel>,
     availableStorageBytes: Long?,
     onInputChange: (String) -> Unit,
+    onSearchQueryChange: (String) -> Unit,
     onSelectTarget: (String) -> Unit,
     onCheck: () -> Unit,
     onClear: () -> Unit,
+    onSearch: () -> Unit,
+    onClearSearch: () -> Unit,
+    onUseSearchResult: (HuggingFaceSearchFileResult) -> Unit,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
@@ -495,6 +521,17 @@ private fun HuggingFaceAcquisitionSection(
                     }
                 }
             }
+            HorizontalDivider()
+            HuggingFaceSearchSection(
+                query = searchQuery,
+                selectedTargetId = selectedTargetId,
+                state = searchState,
+                onQueryChange = onSearchQueryChange,
+                onSearch = onSearch,
+                onClearSearch = onClearSearch,
+                onUseResult = onUseSearchResult,
+                onOpenExternalUrl = onOpenExternalUrl,
+            )
             when (state) {
                 HuggingFaceAcquisitionUiState.Idle -> Unit
                 HuggingFaceAcquisitionUiState.Resolving -> {
@@ -542,6 +579,222 @@ private fun HuggingFaceAcquisitionSection(
                     onRecheckRecent = onRecheckRecent,
                     onOpenExternalUrl = onOpenExternalUrl,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HuggingFaceSearchSection(
+    query: String,
+    selectedTargetId: String,
+    state: HuggingFaceSearchUiState,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onClearSearch: () -> Unit,
+    onUseResult: (HuggingFaceSearchFileResult) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_hf_search"),
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+    ) {
+        Text(
+            text = stringResource(id = R.string.ui_hf_search_title),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(id = R.string.ui_hf_search_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("model_library_hf_search_input"),
+            singleLine = true,
+            placeholder = { Text(stringResource(id = R.string.ui_hf_search_placeholder)) },
+        )
+        val searching = state is HuggingFaceSearchUiState.Searching
+        val searchDisabledReason = when {
+            query.isBlank() -> stringResource(id = R.string.ui_hf_search_disabled_missing_query)
+            searching -> stringResource(id = R.string.ui_hf_searching)
+            else -> null
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        ) {
+            Button(
+                onClick = onSearch,
+                enabled = searchDisabledReason == null,
+                modifier = Modifier
+                    .testTag("model_library_hf_search_button")
+                    .then(
+                        if (searchDisabledReason != null) {
+                            Modifier.semantics { stateDescription = searchDisabledReason }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                Text(stringResource(id = if (searching) R.string.ui_hf_searching else R.string.ui_hf_search_button))
+            }
+            if (state !is HuggingFaceSearchUiState.Idle) {
+                TextButton(
+                    onClick = onClearSearch,
+                    modifier = Modifier.testTag("model_library_hf_search_clear"),
+                ) {
+                    Text(stringResource(id = R.string.ui_clear))
+                }
+            }
+        }
+        when (state) {
+            HuggingFaceSearchUiState.Idle -> Unit
+            HuggingFaceSearchUiState.Searching -> {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+            is HuggingFaceSearchUiState.Blocked -> {
+                Text(
+                    text = state.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .testTag("model_library_hf_search_error")
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+            is HuggingFaceSearchUiState.Empty -> {
+                Text(
+                    text = stringResource(id = R.string.ui_hf_search_empty, state.query),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .testTag("model_library_hf_search_empty")
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+            is HuggingFaceSearchUiState.Results -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("model_library_hf_search_results"),
+                    verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+                ) {
+                    Text(
+                        text = stringResource(id = R.string.ui_hf_search_results_title, state.results.size),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    state.results.take(HF_SEARCH_VISIBLE_RESULT_LIMIT).forEach { result ->
+                        HuggingFaceSearchResultRow(
+                            result = result,
+                            selectedTargetId = selectedTargetId,
+                            onUseResult = onUseResult,
+                            onOpenExternalUrl = onOpenExternalUrl,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HuggingFaceSearchResultRow(
+    result: HuggingFaceSearchFileResult,
+    selectedTargetId: String,
+    onUseResult: (HuggingFaceSearchFileResult) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_hf_search_result"),
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
+    ) {
+        Text(
+            text = result.displayName,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = result.canonicalUrl,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        val metricParts = listOfNotNull(
+            result.downloads?.let { count ->
+                stringResource(id = R.string.ui_hf_search_downloads, count.formatCount())
+            },
+            result.likes?.let { count ->
+                stringResource(id = R.string.ui_hf_search_likes, count.formatCount())
+            },
+            result.license?.takeIf { license -> license.isNotBlank() }?.let { license ->
+                stringResource(id = R.string.ui_hf_candidate_license, license)
+            },
+        )
+        if (metricParts.isNotEmpty()) {
+            Text(
+                text = metricParts.joinToString(separator = " | "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        val blockedReason = when {
+            result.private -> stringResource(id = R.string.ui_hf_search_private_unsupported)
+            result.gated -> stringResource(id = R.string.ui_hf_search_gated_unsupported)
+            selectedTargetId.isBlank() -> stringResource(id = R.string.ui_hf_disabled_missing_target)
+            else -> null
+        }
+        blockedReason?.let { reason ->
+            Text(
+                text = reason,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (result.private || result.gated) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        ) {
+            OutlinedButton(
+                onClick = { onUseResult(result) },
+                enabled = blockedReason == null,
+                modifier = Modifier
+                    .testTag("model_library_hf_search_use_file")
+                    .then(
+                        if (blockedReason != null) {
+                            Modifier.semantics {
+                                stateDescription = blockedReason
+                                contentDescription = context.getString(R.string.ui_hf_search_use_file)
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_search_use_file))
+            }
+            TextButton(
+                onClick = { onOpenExternalUrl(result.modelCardUrl) },
+                modifier = Modifier.testTag("model_library_hf_search_open_model_card"),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_open_model_card))
             }
         }
     }
@@ -696,6 +949,10 @@ private fun Long.relativeTimeLabel(): String {
         DateUtils.MINUTE_IN_MILLIS,
         DateUtils.FORMAT_ABBREV_RELATIVE,
     ).toString()
+}
+
+private fun Long.formatCount(): String {
+    return NumberFormat.getIntegerInstance().format(this)
 }
 
 @Composable

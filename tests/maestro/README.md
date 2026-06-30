@@ -21,7 +21,7 @@ Source of truth for execution commands and cloud guidance:
 9. `scenario-gpu-probe-status.yaml`: open Advanced controls and drive GPU probe status updates for log-based reason validation
 10. `scenario-session-drawer-smoke.yaml`: onboarding skip -> session drawer delete/replacement smoke
 11. `scenario-hf-url-validation-smoke.yaml` (`smoke`, `model-management`, `hf-validation`): clean start -> model library -> invalid HF URL -> blocked reason contract. This is in the default `devctl lane maestro` list.
-12. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): local fake-HF route for public canonical URL -> check -> queue -> pause/resume/cancel/retry -> install row -> visible `Load`. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
+12. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): local fake-HF route for search -> result -> check -> queue -> pause/resume/cancel/retry -> install row -> visible `Load`. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
 13. `scenario-hf-live-download-smoke.yaml` (`live-hf`, `long-running`): explicit device-only probe for public HF URL -> queue -> pause/resume/cancel/retry -> install -> Load. Keep it out of default lanes because hosted/live network and artifact-size variance are not deterministic.
 
 ## Contract Notes

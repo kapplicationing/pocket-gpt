@@ -475,6 +475,71 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `hugging face search exposes results and clear resets state`() = runTest(dispatcher) {
+        val result = sampleHuggingFaceSearchResult()
+        val acquisition = FakeHuggingFaceModelAcquisition(searchResults = listOf(result))
+        val viewModel = ModelProvisioningViewModel(
+            gateway = FakeProvisioningGateway(),
+            huggingFaceModelAcquisition = acquisition,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.searchHuggingFaceFiles("  qwen gguf  ")
+        advanceUntilIdle()
+
+        val searchState = viewModel.uiState.value.huggingFaceSearchState
+        assertTrue(searchState is HuggingFaceSearchUiState.Results)
+        assertEquals("qwen gguf", searchState.query)
+        assertEquals(listOf(result), searchState.results)
+        assertEquals(listOf("qwen gguf"), acquisition.searchQueries)
+
+        viewModel.clearHuggingFaceSearch()
+
+        assertTrue(viewModel.uiState.value.huggingFaceSearchState is HuggingFaceSearchUiState.Idle)
+    }
+
+    @Test
+    fun `blank hugging face search clears state without calling acquisition`() = runTest(dispatcher) {
+        val acquisition = FakeHuggingFaceModelAcquisition(searchResults = listOf(sampleHuggingFaceSearchResult()))
+        val viewModel = ModelProvisioningViewModel(
+            gateway = FakeProvisioningGateway(),
+            huggingFaceModelAcquisition = acquisition,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.searchHuggingFaceFiles("   ")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.huggingFaceSearchState is HuggingFaceSearchUiState.Idle)
+        assertTrue(acquisition.searchQueries.isEmpty())
+    }
+
+    @Test
+    fun `hugging face search failure exposes blocked state`() = runTest(dispatcher) {
+        val acquisition = FakeHuggingFaceModelAcquisition(
+            searchFailure = HuggingFaceAcquisitionException(
+                reason = HuggingFaceAcquisitionBlockReason.NETWORK_ERROR,
+                userMessage = "Search failed",
+            ),
+        )
+        val viewModel = ModelProvisioningViewModel(
+            gateway = FakeProvisioningGateway(),
+            huggingFaceModelAcquisition = acquisition,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.searchHuggingFaceFiles("qwen")
+        advanceUntilIdle()
+
+        val searchState = viewModel.uiState.value.huggingFaceSearchState
+        assertTrue(searchState is HuggingFaceSearchUiState.Blocked)
+        assertEquals("Search failed", searchState.message)
+    }
+
+    @Test
     fun `load and manual offload clears loaded model but preserves last used restore target`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
@@ -734,13 +799,19 @@ private class FakeProvisioningGateway : ProvisioningGateway {
 private class FakeHuggingFaceModelAcquisition(
     private val candidate: HuggingFaceCandidate? = null,
     private val failure: HuggingFaceAcquisitionException? = null,
+    private val searchResults: List<HuggingFaceSearchFileResult> = emptyList(),
+    private val searchFailure: HuggingFaceAcquisitionException? = null,
 ) : HuggingFaceModelAcquisition {
+    val searchQueries = mutableListOf<String>()
+
     override fun supportedTargets(): List<HuggingFaceTargetModel> {
         return listOf(HuggingFaceTargetModel(modelId = "qwen3.5-0.8b-q4", displayName = "Qwen"))
     }
 
     override suspend fun searchFiles(query: String, limit: Int): List<HuggingFaceSearchFileResult> {
-        return emptyList()
+        searchFailure?.let { throw it }
+        searchQueries += query
+        return searchResults
     }
 
     override suspend fun resolveCandidate(input: String, targetModelId: String): HuggingFaceCandidate {
@@ -892,5 +963,22 @@ private fun sampleHuggingFaceCandidate(version: ModelDistributionVersion): Huggi
         sha256 = version.expectedSha256,
         sizeBytes = version.fileSizeBytes,
         version = version,
+    )
+}
+
+private fun sampleHuggingFaceSearchResult(): HuggingFaceSearchFileResult {
+    return HuggingFaceSearchFileResult(
+        reference = HuggingFaceModelReference(
+            repoId = "owner/repo",
+            revision = "main",
+            filePath = "model.gguf",
+        ),
+        displayName = "owner/repo / model.gguf",
+        modelCardUrl = "https://huggingface.co/owner/repo",
+        downloads = 42L,
+        likes = 7L,
+        license = "apache-2.0",
+        gated = false,
+        private = false,
     )
 }

@@ -30,6 +30,7 @@ import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModelStore
+import com.pocketagent.android.runtime.huggingface.HuggingFaceSearchFileResult
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
@@ -64,6 +65,18 @@ sealed interface HuggingFaceAcquisitionUiState {
 }
 
 @Immutable
+sealed interface HuggingFaceSearchUiState {
+    data object Idle : HuggingFaceSearchUiState
+    data object Searching : HuggingFaceSearchUiState
+    data class Results(
+        val query: String,
+        val results: List<HuggingFaceSearchFileResult>,
+    ) : HuggingFaceSearchUiState
+    data class Empty(val query: String) : HuggingFaceSearchUiState
+    data class Blocked(val message: String) : HuggingFaceSearchUiState
+}
+
+@Immutable
 data class ModelProvisioningUiState(
     val snapshot: RuntimeProvisioningSnapshot? = null,
     val lifecycle: RuntimeModelLifecycleSnapshot = RuntimeModelLifecycleSnapshot.initial(),
@@ -77,6 +90,7 @@ data class ModelProvisioningUiState(
     val enqueuingModelIds: Set<String> = emptySet(),
     val huggingFaceTargets: List<HuggingFaceTargetModel> = emptyList(),
     val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    val huggingFaceSearchState: HuggingFaceSearchUiState = HuggingFaceSearchUiState.Idle,
     val recentHuggingFaceModels: List<HuggingFaceRecentModel> = emptyList(),
 )
 
@@ -94,6 +108,7 @@ data class ModelLibraryUiState(
     val enqueuingModelIds: Set<String> = emptySet(),
     val huggingFaceTargets: List<HuggingFaceTargetModel> = emptyList(),
     val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    val huggingFaceSearchState: HuggingFaceSearchUiState = HuggingFaceSearchUiState.Idle,
     val recentHuggingFaceModels: List<HuggingFaceRecentModel> = emptyList(),
 )
 
@@ -110,6 +125,7 @@ private data class ModelProvisioningLocalUiState(
     val statusMessage: String? = null,
     val enqueuingModelIds: Set<String> = emptySet(),
     val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    val huggingFaceSearchState: HuggingFaceSearchUiState = HuggingFaceSearchUiState.Idle,
     val recentHuggingFaceModels: List<HuggingFaceRecentModel> = emptyList(),
 )
 
@@ -131,6 +147,7 @@ internal fun ModelProvisioningUiState.toModelLibraryUiState(defaultGetReadyModel
         enqueuingModelIds = enqueuingModelIds,
         huggingFaceTargets = huggingFaceTargets,
         huggingFaceAcquisitionState = huggingFaceAcquisitionState,
+        huggingFaceSearchState = huggingFaceSearchState,
         recentHuggingFaceModels = recentHuggingFaceModels,
     )
 }
@@ -248,6 +265,50 @@ class ModelProvisioningViewModel internal constructor(
     fun clearHuggingFaceCandidate() {
         updateLocalUiState { state ->
             state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Idle)
+        }
+    }
+
+    suspend fun searchHuggingFaceFiles(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            updateLocalUiState { state ->
+                state.copy(huggingFaceSearchState = HuggingFaceSearchUiState.Idle)
+            }
+            return
+        }
+        updateLocalUiState { state ->
+            state.copy(huggingFaceSearchState = HuggingFaceSearchUiState.Searching)
+        }
+        val nextState = runCatching {
+            withContext(ioDispatcher) {
+                huggingFaceModelAcquisition.searchFiles(query = trimmed)
+            }
+        }.fold(
+            onSuccess = { results ->
+                if (results.isEmpty()) {
+                    HuggingFaceSearchUiState.Empty(query = trimmed)
+                } else {
+                    HuggingFaceSearchUiState.Results(
+                        query = trimmed,
+                        results = results,
+                    )
+                }
+            },
+            onFailure = { error ->
+                val message = if (error is HuggingFaceAcquisitionException) {
+                    error.userMessage
+                } else {
+                    error.message ?: "Could not search Hugging Face. Check the network, then try again."
+                }
+                HuggingFaceSearchUiState.Blocked(message = message)
+            },
+        )
+        updateLocalUiState { state -> state.copy(huggingFaceSearchState = nextState) }
+    }
+
+    fun clearHuggingFaceSearch() {
+        updateLocalUiState { state ->
+            state.copy(huggingFaceSearchState = HuggingFaceSearchUiState.Idle)
         }
     }
 
@@ -746,6 +807,7 @@ private fun ProvisioningAggregateState.toModelProvisioningUiState(
         huggingFaceTargets = huggingFaceTargets,
         huggingFaceAcquisitionState = local.huggingFaceAcquisitionState,
         recentHuggingFaceModels = local.recentHuggingFaceModels,
+        huggingFaceSearchState = local.huggingFaceSearchState,
     )
 }
 

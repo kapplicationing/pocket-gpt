@@ -36,6 +36,14 @@ internal class ModelLibraryActions(
         provisioningViewModel.clearHuggingFaceCandidate()
     }
 
+    suspend fun searchHuggingFaceFiles(query: String) {
+        provisioningViewModel.searchHuggingFaceFiles(query)
+    }
+
+    fun clearHuggingFaceSearch() {
+        provisioningViewModel.clearHuggingFaceSearch()
+    }
+
     suspend fun removeRecentHuggingFaceModel(id: String) {
         provisioningViewModel.removeRecentHuggingFaceModel(id)
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_hf_recent_removed))

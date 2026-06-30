@@ -34,6 +34,7 @@ import com.pocketagent.android.runtime.modelmanager.DownloadVerificationPolicy
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
+import com.pocketagent.android.runtime.huggingface.HuggingFaceSearchFileResult
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ManifestSource
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
@@ -434,6 +435,57 @@ class ModelManagementSheetComposeContractTest {
             assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
             assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")))
             assertTrue(events.contains(ModelSheetEvent.DownloadVersion(candidate.version)))
+        }
+    }
+
+    @Test
+    fun huggingFaceSearchDispatchesSearchAndResolveFromResult() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val candidate = sampleHuggingFaceCandidate()
+        val searchResult = sampleHuggingFaceSearchResult()
+        val libraryState = sampleLibraryState(downloads = emptyList()).copy(
+            huggingFaceTargets = listOf(candidate.target),
+            huggingFaceSearchState = HuggingFaceSearchUiState.Results(
+                query = "qwen",
+                results = listOf(searchResult),
+            ),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("model_library_hf_search").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_search_input").performTextInput("qwen")
+        composeRule.onNodeWithTag("model_library_hf_search_button").performClick()
+        composeRule.onNodeWithTag("model_library_hf_search_results").assertIsDisplayed()
+        composeRule.onNodeWithText("owner/repo / model.gguf").assertIsDisplayed()
+        composeRule.onNodeWithText("Downloads: 42 | Likes: 7 | License: apache-2.0").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_search_open_model_card").performClick()
+        composeRule.onNodeWithTag("model_library_hf_search_use_file").performClick()
+        composeRule.onNodeWithTag("model_library_hf_search_clear").performClick()
+
+        composeRule.runOnIdle {
+            assertTrue(events.contains(ModelSheetEvent.SearchHuggingFaceFiles("qwen")))
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
+            assertTrue(
+                events.contains(
+                    ModelSheetEvent.ResolveHuggingFaceCandidate(
+                        input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+                        targetModelId = "qwen3-0.6b-q4_k_m",
+                    ),
+                ),
+            )
+            assertTrue(events.contains(ModelSheetEvent.ClearHuggingFaceSearch))
         }
     }
 
@@ -876,6 +928,23 @@ private fun sampleHuggingFaceRecentModel(): HuggingFaceRecentModel {
         lastDownloadEnqueuedAtEpochMs = 2L,
         license = "apache-2.0",
         licenseUrl = "https://huggingface.co/owner/repo/blob/main/LICENSE",
+    )
+}
+
+private fun sampleHuggingFaceSearchResult(): HuggingFaceSearchFileResult {
+    return HuggingFaceSearchFileResult(
+        reference = HuggingFaceModelReference(
+            repoId = "owner/repo",
+            revision = "main",
+            filePath = "model.gguf",
+        ),
+        displayName = "owner/repo / model.gguf",
+        modelCardUrl = "https://huggingface.co/owner/repo",
+        downloads = 42L,
+        likes = 7L,
+        license = "apache-2.0",
+        gated = false,
+        private = false,
     )
 }
 

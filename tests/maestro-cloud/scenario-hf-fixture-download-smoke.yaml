@@ -12,12 +12,19 @@ tags:
 - assertVisible:
     id: "model_library_add_hugging_face"
 - tapOn:
-    id: "model_library_hf_url_input"
+    id: "model_library_hf_search_input"
 - eraseText
-- inputText: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
+- inputText: "tiny"
 - hideKeyboard
 - tapOn:
-    id: "model_library_hf_check_url"
+    id: "model_library_hf_search_button"
+- extendedWaitUntil:
+    visible:
+      id: "model_library_hf_search_results"
+    timeout: 30000
+- assertVisible: "fixture/tiny-gguf / tiny.gguf"
+- tapOn:
+    id: "model_library_hf_search_use_file"
 - extendedWaitUntil:
     visible:
       id: "model_library_hf_candidate_card"

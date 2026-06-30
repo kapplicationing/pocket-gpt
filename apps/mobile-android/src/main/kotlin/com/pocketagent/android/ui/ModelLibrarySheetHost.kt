@@ -73,6 +73,12 @@ internal fun ModelLibrarySheetHost(
                     ModelSheetEvent.ClearHuggingFaceCandidate -> {
                         actions.clearHuggingFaceCandidate()
                     }
+                    is ModelSheetEvent.SearchHuggingFaceFiles -> scope.launch {
+                        actions.searchHuggingFaceFiles(event.query)
+                    }
+                    ModelSheetEvent.ClearHuggingFaceSearch -> {
+                        actions.clearHuggingFaceSearch()
+                    }
                     is ModelSheetEvent.RemoveRecentHuggingFaceModel -> scope.launch {
                         actions.removeRecentHuggingFaceModel(event.id)
                     }

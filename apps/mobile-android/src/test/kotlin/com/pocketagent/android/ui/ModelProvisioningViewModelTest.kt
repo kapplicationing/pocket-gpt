@@ -30,7 +30,10 @@ import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionExcepti
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
+import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
+import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModelStore
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
+import com.pocketagent.android.runtime.huggingface.toRecentModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
@@ -350,6 +353,40 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `hugging face enqueue stores recent redownload entry`() = runTest(dispatcher) {
+        val version = sampleDownloadVersion().copy(
+            sourceKind = ModelSourceKind.HUGGING_FACE,
+            displayName = "owner/repo / model.gguf",
+        )
+        val candidate = sampleHuggingFaceCandidate(version)
+        val acquisition = FakeHuggingFaceModelAcquisition(candidate = candidate)
+        val recentStore = FakeHuggingFaceRecentModelStore()
+        val gateway = FakeProvisioningGateway()
+        val viewModel = ModelProvisioningViewModel(
+            gateway = gateway,
+            huggingFaceModelAcquisition = acquisition,
+            huggingFaceRecentModelStore = recentStore,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.resolveHuggingFaceCandidate(
+            input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+            targetModelId = "qwen3.5-0.8b-q4",
+        )
+        advanceUntilIdle()
+
+        assertEquals("task-1", viewModel.enqueueDownload(version))
+        advanceUntilIdle()
+
+        val recent = viewModel.uiState.value.recentHuggingFaceModels.single()
+        assertEquals("owner/repo / model.gguf", recent.displayName)
+        assertEquals("https://huggingface.co/owner/repo/resolve/main/model.gguf", recent.originUrl)
+        assertEquals("qwen3.5-0.8b-q4", recent.targetModelId)
+        assertEquals(candidate.sha256, recent.sha256)
+    }
+
+    @Test
     fun `hugging face candidate failures and clear update acquisition state`() = runTest(dispatcher) {
         val acquisition = FakeHuggingFaceModelAcquisition(
             failure = HuggingFaceAcquisitionException(
@@ -648,6 +685,17 @@ private class FakeHuggingFaceModelAcquisition(
     override suspend fun resolveCandidate(input: String, targetModelId: String): HuggingFaceCandidate {
         failure?.let { throw it }
         return requireNotNull(candidate)
+    }
+}
+
+private class FakeHuggingFaceRecentModelStore : HuggingFaceRecentModelStore {
+    private var models: List<HuggingFaceRecentModel> = emptyList()
+
+    override fun list(): List<HuggingFaceRecentModel> = models
+
+    override fun upsert(candidate: HuggingFaceCandidate, enqueuedAtEpochMs: Long) {
+        val recent = candidate.toRecentModel(enqueuedAtEpochMs)
+        models = models.filterNot { model -> model.id == recent.id } + recent
     }
 }
 

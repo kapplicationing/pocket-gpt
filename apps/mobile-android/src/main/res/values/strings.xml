@@ -482,6 +482,9 @@
     <string name="ui_hf_candidate_sha">SHA-256: %1$s…</string>
     <string name="ui_hf_candidate_compatibility">Compatibility: public text-only GGUF with Hugging Face LFS checksum</string>
     <string name="ui_hf_queue_download">Queue download</string>
+    <string name="ui_hf_recent_title">Recent Hugging Face downloads</string>
+    <string name="ui_hf_recent_subtitle">Recheck a previous file before queueing it again.</string>
+    <string name="ui_hf_recent_recheck">Recheck</string>
     <string name="ui_model_download_queue">Download queue</string>
     <string name="ui_model_download_queue_subtitle">Downloads from sources outside the catalog stay visible here until installed.</string>
     <string name="ui_downloaded_models">Downloaded models</string>

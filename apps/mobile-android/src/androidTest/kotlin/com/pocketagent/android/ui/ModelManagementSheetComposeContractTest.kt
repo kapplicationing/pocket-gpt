@@ -33,6 +33,7 @@ import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.DownloadVerificationPolicy
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
+import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ManifestSource
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
@@ -428,6 +429,44 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
+    fun huggingFaceRecentRowDispatchesResolveForStoredCanonicalUrl() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val candidate = sampleHuggingFaceCandidate()
+        val recent = sampleHuggingFaceRecentModel()
+        val libraryState = sampleLibraryState(downloads = emptyList()).copy(
+            huggingFaceTargets = listOf(candidate.target),
+            recentHuggingFaceModels = listOf(recent),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("model_library_hf_recent").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
+
+        composeRule.runOnIdle {
+            assertTrue(
+                events.contains(
+                    ModelSheetEvent.ResolveHuggingFaceCandidate(
+                        input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+                        targetModelId = "qwen3-0.6b-q4_k_m",
+                    ),
+                ),
+            )
+        }
+    }
+
+    @Test
     fun downloadQueueRendersDynamicDownloadsBeforeInstalledRows() {
         val state = sampleLibraryState(
             downloads = listOf(sampleHuggingFaceDownload()),
@@ -798,6 +837,23 @@ private fun sampleHuggingFaceCandidate(): HuggingFaceCandidate {
         sha256 = "a".repeat(64),
         sizeBytes = 1024L,
         version = version,
+    )
+}
+
+private fun sampleHuggingFaceRecentModel(): HuggingFaceRecentModel {
+    return HuggingFaceRecentModel(
+        id = "qwen3-0.6b-q4_k_m|owner/repo|main|model.gguf",
+        repoId = "owner/repo",
+        revision = "main",
+        filePath = "model.gguf",
+        targetModelId = "qwen3-0.6b-q4_k_m",
+        targetDisplayName = "Qwen 3 0.6B",
+        version = "hf-model-aaaaaaaaaaaa",
+        displayName = "owner/repo / model.gguf",
+        sha256 = "a".repeat(64),
+        sizeBytes = 1024L,
+        validatedAtEpochMs = 1L,
+        lastDownloadEnqueuedAtEpochMs = 2L,
     )
 }
 

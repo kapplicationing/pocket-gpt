@@ -16,7 +16,8 @@ Current flow set:
 3. `scenario-runtime-ready-smoke.yaml` (`cloud-smoke`, `runtime-readiness`): clean-install readiness contract that ends once the runtime is ready and the inline chat gate has cleared.
 4. `scenario-send-after-ready-smoke.yaml` (`cloud-send`, `send`): hosted send contract kept outside the default smoke tag so cloud smoke stays a short startup/runtime proof path instead of replacing strict journey authority. This flow now uses `shared/bootstrap-cloud-startup.yaml` plus `shared/bootstrap-launch-default-model.yaml` so hosted send proof stays pinned to the launch-default `qwen3-0.6b-q4_k_m` path instead of heuristic `Load last used` recovery. Post-send success is assistant completion plus the shell returning to the idle `Send` label; it does not require an enabled send button after the composer has been cleared.
 5. `scenario-hf-url-validation-smoke.yaml` (`cloud-smoke`, `model-management`, `hf-validation`): hosted model-library contract for the HF paste URL surface and deterministic blocked invalid-host reason.
-6. `scenario-gpu-cpu-benchmark.yaml` (`cloud-benchmark`, `benchmark`, `long-running`): clean install, first-run provisioning, GPU-on send benchmark, new-session GPU-off send benchmark, and assertion that GPU completes faster than CPU on the same cloud device.
+6. `scenario-hf-fixture-download-smoke.yaml` (`cloud-fixture`, `model-management`, `hf-fixture`, `downloads`): hosted fixture contract for paste -> check -> queue -> pause/resume/cancel/retry -> installed row. This flow requires a debug APK built with `pocketgpt.hfFixtureBaseUrl` pointing at a public fixture server.
+7. `scenario-gpu-cpu-benchmark.yaml` (`cloud-benchmark`, `benchmark`, `long-running`): clean install, first-run provisioning, GPU-on send benchmark, new-session GPU-off send benchmark, and assertion that GPU completes faster than CPU on the same cloud device.
 
 Recommended command:
 
@@ -24,6 +25,16 @@ Recommended command:
 bash scripts/dev/maestro-cloud-smoke.sh
 bash scripts/dev/maestro-cloud-gpu-benchmark.sh
 ```
+
+Dynamic Hugging Face fixture command:
+
+```bash
+python3 scripts/dev/hf-fixture-server.py --port 8765
+cloudflared tunnel --url http://127.0.0.1:8765
+bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url https://your-tunnel.example
+```
+
+Other simple exposure options are `ngrok http 8765`, `ssh -R 80:127.0.0.1:8765 nokey@localhost.run`, Tailscale Funnel, or a tiny hosted VM running `scripts/dev/hf-fixture-server.py`. The fixture URL must be public because Maestro Cloud cannot use `adb reverse` or the host machine's `localhost`.
 
 Smoke artifact contract:
 

@@ -28,6 +28,8 @@ import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionExcepti
 import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionBlockReason
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
+import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
+import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModelStore
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
@@ -75,6 +77,7 @@ data class ModelProvisioningUiState(
     val enqueuingModelIds: Set<String> = emptySet(),
     val huggingFaceTargets: List<HuggingFaceTargetModel> = emptyList(),
     val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    val recentHuggingFaceModels: List<HuggingFaceRecentModel> = emptyList(),
 )
 
 @Immutable
@@ -91,6 +94,7 @@ data class ModelLibraryUiState(
     val enqueuingModelIds: Set<String> = emptySet(),
     val huggingFaceTargets: List<HuggingFaceTargetModel> = emptyList(),
     val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    val recentHuggingFaceModels: List<HuggingFaceRecentModel> = emptyList(),
 )
 
 @Immutable
@@ -106,6 +110,7 @@ private data class ModelProvisioningLocalUiState(
     val statusMessage: String? = null,
     val enqueuingModelIds: Set<String> = emptySet(),
     val huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    val recentHuggingFaceModels: List<HuggingFaceRecentModel> = emptyList(),
 )
 
 internal fun ModelProvisioningUiState.toModelLibraryUiState(defaultGetReadyModelId: String?): ModelLibraryUiState? {
@@ -126,6 +131,7 @@ internal fun ModelProvisioningUiState.toModelLibraryUiState(defaultGetReadyModel
         enqueuingModelIds = enqueuingModelIds,
         huggingFaceTargets = huggingFaceTargets,
         huggingFaceAcquisitionState = huggingFaceAcquisitionState,
+        recentHuggingFaceModels = recentHuggingFaceModels,
     )
 }
 
@@ -146,6 +152,7 @@ class ModelProvisioningViewModel internal constructor(
     private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
     private val ioDispatcher: CoroutineDispatcher = dispatchers.io,
     private val huggingFaceModelAcquisition: HuggingFaceModelAcquisition = DefaultHuggingFaceModelAcquisition(),
+    private val huggingFaceRecentModelStore: HuggingFaceRecentModelStore = HuggingFaceRecentModelStore.None,
 ) : ViewModel(), ModelOperationHandler {
     private val aggregateState = MutableStateFlow(gateway.observeProvisioningAggregateState().value)
     private val localUiState = MutableStateFlow(ModelProvisioningLocalUiState())
@@ -185,6 +192,7 @@ class ModelProvisioningViewModel internal constructor(
             }
         }
         viewModelScope.launch(ioDispatcher) { refreshManifest() }
+        viewModelScope.launch(ioDispatcher) { refreshRecentHuggingFaceModels() }
     }
 
     fun refreshSnapshot() {
@@ -430,9 +438,19 @@ class ModelProvisioningViewModel internal constructor(
             }
         }
         return try {
-            withContext(ioDispatcher) {
+            val taskId = withContext(ioDispatcher) {
                 gateway.enqueueDownload(version = version, options = options)
             }
+            if (hfCandidate != null) {
+                withContext(ioDispatcher) {
+                    huggingFaceRecentModelStore.upsert(
+                        candidate = hfCandidate,
+                        enqueuedAtEpochMs = System.currentTimeMillis(),
+                    )
+                }
+                refreshRecentHuggingFaceModels()
+            }
+            taskId
         } finally {
             updateLocalUiState { state ->
                 val restoredHfState = if (
@@ -594,6 +612,11 @@ class ModelProvisioningViewModel internal constructor(
         )
     }
 
+    private fun refreshRecentHuggingFaceModels() {
+        val recentModels = huggingFaceRecentModelStore.list()
+        updateLocalUiState { state -> state.copy(recentHuggingFaceModels = recentModels) }
+    }
+
     private fun applyImmediateModelLoadingState(nextState: ModelLoadingState) {
         _modelLoadingState.value = nextState
     }
@@ -661,6 +684,7 @@ class ModelProvisioningViewModelFactory internal constructor(
     private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
     private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
     private val huggingFaceModelAcquisition: HuggingFaceModelAcquisition = DefaultHuggingFaceModelAcquisition(),
+    private val huggingFaceRecentModelStore: HuggingFaceRecentModelStore = HuggingFaceRecentModelStore.None,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -671,6 +695,7 @@ class ModelProvisioningViewModelFactory internal constructor(
                 eligibilitySignalsProvider = eligibilitySignalsProvider,
                 dispatchers = dispatchers,
                 huggingFaceModelAcquisition = huggingFaceModelAcquisition,
+                huggingFaceRecentModelStore = huggingFaceRecentModelStore,
             ) as T
         }
         throw IllegalArgumentException("Unsupported ViewModel class: ${modelClass.name}")
@@ -706,6 +731,7 @@ private fun ProvisioningAggregateState.toModelProvisioningUiState(
         enqueuingModelIds = local.enqueuingModelIds,
         huggingFaceTargets = huggingFaceTargets,
         huggingFaceAcquisitionState = local.huggingFaceAcquisitionState,
+        recentHuggingFaceModels = local.recentHuggingFaceModels,
     )
 }
 

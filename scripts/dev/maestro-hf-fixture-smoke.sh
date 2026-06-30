@@ -10,6 +10,7 @@ SIZE_BYTES="${POCKETGPT_HF_FIXTURE_SIZE_BYTES:-25165824}"
 CHUNK_SIZE="${POCKETGPT_HF_FIXTURE_CHUNK_SIZE:-16384}"
 CHUNK_DELAY_MS="${POCKETGPT_HF_FIXTURE_CHUNK_DELAY_MS:-20}"
 BUILD_APK=1
+RUN_PROBE=1
 RUN_ROOT=""
 
 usage() {
@@ -21,6 +22,7 @@ Options:
   --port <port>          Local fixture server port. Default: 8765.
   --run-root <path>      Artifact directory. Default: tmp/hf-fixture-smoke/<timestamp>.
   --no-build             Reuse the currently installed debug APK.
+  --skip-probe           Skip the maestro-android bootstrap probe before the flow.
   --help                 Show this help text.
 USAGE
 }
@@ -41,6 +43,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-build)
       BUILD_APK=0
+      shift
+      ;;
+    --skip-probe)
+      RUN_PROBE=0
       shift
       ;;
     --help)
@@ -72,6 +78,7 @@ MAESTRO_LOG="${RUN_ROOT}/maestro-output.log"
 FIXTURE_BASE_URL="http://127.0.0.1:${PORT}/"
 
 cleanup() {
+  adb -s "${SERIAL}" reverse --remove "tcp:${PORT}" >/dev/null 2>&1 || true
   if [[ -n "${SERVER_PID:-}" ]]; then
     kill "${SERVER_PID}" 2>/dev/null || true
     wait "${SERVER_PID}" 2>/dev/null || true
@@ -126,6 +133,18 @@ if [[ ${BUILD_APK} -eq 1 ]]; then
   adb -s "${SERIAL}" install -r "${APK_PATH}" >/dev/null
 fi
 
+if [[ ${RUN_PROBE} -eq 1 ]]; then
+  PROBE_LOG="${RUN_ROOT}/maestro-bootstrap-probe.log"
+  set +e
+  maestro-android device --device "${SERIAL}" probe 2>&1 | tee "${PROBE_LOG}"
+  PROBE_EXIT=${PIPESTATUS[0]}
+  set -e
+  if [[ ${PROBE_EXIT} -ne 0 ]]; then
+    echo "Maestro bootstrap probe failed; skipping HF fixture flow. See ${PROBE_LOG}" >&2
+    exit "${PROBE_EXIT}"
+  fi
+fi
+
 cat >"${RUN_ROOT}/run-manifest.json" <<EOF
 {
   "adb_serial": "${SERIAL}",
@@ -135,6 +154,7 @@ cat >"${RUN_ROOT}/run-manifest.json" <<EOF
   "flow": "tests/maestro/scenario-hf-fixture-download-smoke.yaml",
   "junit_path": "${JUNIT_PATH}",
   "maestro_log": "${MAESTRO_LOG}",
+  "run_probe": ${RUN_PROBE},
   "server_manifest": "${SERVER_MANIFEST}",
   "size_bytes": ${SIZE_BYTES}
 }

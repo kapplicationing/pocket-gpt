@@ -71,6 +71,7 @@ import com.pocketagent.android.runtime.ModelSupportLevel
 import com.pocketagent.android.runtime.ModelVersionEligibility
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
+import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
 import com.pocketagent.android.runtime.huggingface.HuggingFaceTargetModel
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
@@ -221,6 +222,7 @@ internal fun ModelSheet(
                 selectedTargetId = resolvedHuggingFaceTargetId,
                 targets = libraryState.huggingFaceTargets,
                 state = libraryState.huggingFaceAcquisitionState,
+                recentModels = libraryState.recentHuggingFaceModels,
                 onInputChange = { value -> huggingFaceInput = value },
                 onSelectTarget = { targetId -> selectedHuggingFaceTargetId = targetId },
                 onCheck = {
@@ -233,6 +235,16 @@ internal fun ModelSheet(
                 },
                 onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
+                onRecheckRecent = { recent ->
+                    huggingFaceInput = recent.originUrl
+                    selectedHuggingFaceTargetId = recent.targetModelId
+                    onEvent(
+                        ModelSheetEvent.ResolveHuggingFaceCandidate(
+                            input = recent.originUrl,
+                            targetModelId = recent.targetModelId,
+                        ),
+                    )
+                },
             )
         }
         item {
@@ -376,11 +388,13 @@ private fun HuggingFaceAcquisitionSection(
     selectedTargetId: String,
     targets: List<HuggingFaceTargetModel>,
     state: HuggingFaceAcquisitionUiState,
+    recentModels: List<HuggingFaceRecentModel>,
     onInputChange: (String) -> Unit,
     onSelectTarget: (String) -> Unit,
     onCheck: () -> Unit,
     onClear: () -> Unit,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
+    onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -501,6 +515,93 @@ private fun HuggingFaceAcquisitionSection(
                     )
                 }
             }
+            if (recentModels.isNotEmpty()) {
+                HorizontalDivider()
+                HuggingFaceRecentModelsSection(
+                    recentModels = recentModels,
+                    onRecheckRecent = onRecheckRecent,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HuggingFaceRecentModelsSection(
+    recentModels: List<HuggingFaceRecentModel>,
+    onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_hf_recent"),
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+    ) {
+        Text(
+            text = stringResource(id = R.string.ui_hf_recent_title),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(id = R.string.ui_hf_recent_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        recentModels.take(4).forEach { recent ->
+            HuggingFaceRecentModelRow(
+                recent = recent,
+                onRecheckRecent = onRecheckRecent,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HuggingFaceRecentModelRow(
+    recent: HuggingFaceRecentModel,
+    onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_hf_recent_row"),
+        horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
+        ) {
+            Text(
+                text = recent.displayName,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_target, recent.targetDisplayName),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(
+                    id = R.string.ui_model_download_expected_size,
+                    Formatter.formatShortFileSize(context, recent.sizeBytes),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_sha, recent.sha256.take(12)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(
+            onClick = { onRecheckRecent(recent) },
+            modifier = Modifier.testTag("model_library_hf_recent_recheck"),
+        ) {
+            Text(stringResource(id = R.string.ui_hf_recent_recheck))
         }
     }
 }

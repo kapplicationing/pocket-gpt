@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.pocketagent.android.runtime.AppOperationTrace
+import com.pocketagent.android.runtime.huggingface.SharedPreferencesHuggingFaceRecentModelStore
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
         ModelProvisioningViewModelFactory(
             gateway = foregroundRuntimeServices.provisioningGateway,
             eligibilitySignalsProvider = foregroundRuntimeServices.eligibilitySignalsProvider,
+            huggingFaceRecentModelStore = SharedPreferencesHuggingFaceRecentModelStore(applicationContext),
         )
     }
 

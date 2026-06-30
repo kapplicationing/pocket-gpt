@@ -7,6 +7,7 @@ sealed interface ModelSheetEvent {
     data class ResolveHuggingFaceCandidate(val input: String, val targetModelId: String) : ModelSheetEvent
     data object ClearHuggingFaceCandidate : ModelSheetEvent
     data class RemoveRecentHuggingFaceModel(val id: String) : ModelSheetEvent
+    data object ClearRecentHuggingFaceModels : ModelSheetEvent
     data class OpenExternalUrl(val url: String) : ModelSheetEvent
     data class DownloadVersion(val version: ModelDistributionVersion) : ModelSheetEvent
     data class PauseDownload(val taskId: String) : ModelSheetEvent

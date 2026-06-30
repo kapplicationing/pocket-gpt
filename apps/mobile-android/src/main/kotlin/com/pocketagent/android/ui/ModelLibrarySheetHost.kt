@@ -76,6 +76,9 @@ internal fun ModelLibrarySheetHost(
                     is ModelSheetEvent.RemoveRecentHuggingFaceModel -> scope.launch {
                         actions.removeRecentHuggingFaceModel(event.id)
                     }
+                    ModelSheetEvent.ClearRecentHuggingFaceModels -> scope.launch {
+                        actions.clearRecentHuggingFaceModels()
+                    }
                     is ModelSheetEvent.OpenExternalUrl -> {
                         uriHandler.openUri(event.url)
                     }

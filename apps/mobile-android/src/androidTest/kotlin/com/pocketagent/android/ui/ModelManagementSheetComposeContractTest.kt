@@ -463,6 +463,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_open_model_card").performClick()
         composeRule.onNodeWithTag("model_library_hf_recent_remove").performClick()
+        composeRule.onNodeWithTag("model_library_hf_recent_clear").performClick()
 
         composeRule.runOnIdle {
             assertTrue(
@@ -475,6 +476,7 @@ class ModelManagementSheetComposeContractTest {
             )
             assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
             assertTrue(events.contains(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)))
+            assertTrue(events.contains(ModelSheetEvent.ClearRecentHuggingFaceModels))
         }
     }
 

@@ -34,12 +34,16 @@ interface HuggingFaceRecentModelStore {
 
     fun remove(id: String)
 
+    fun clear()
+
     object None : HuggingFaceRecentModelStore {
         override fun list(): List<HuggingFaceRecentModel> = emptyList()
 
         override fun upsert(candidate: HuggingFaceCandidate, enqueuedAtEpochMs: Long) = Unit
 
         override fun remove(id: String) = Unit
+
+        override fun clear() = Unit
     }
 }
 
@@ -74,6 +78,12 @@ class SharedPreferencesHuggingFaceRecentModelStore(
         val next = list().filterNot { model -> model.id == id }
         preferences.edit()
             .putString(KEY_RECENT_MODELS, encodeRecentModels(next))
+            .apply()
+    }
+
+    override fun clear() {
+        preferences.edit()
+            .remove(KEY_RECENT_MODELS)
             .apply()
     }
 

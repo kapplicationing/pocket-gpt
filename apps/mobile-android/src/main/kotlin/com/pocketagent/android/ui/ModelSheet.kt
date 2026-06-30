@@ -239,6 +239,7 @@ internal fun ModelSheet(
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
                 onOpenModelCard = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
                 onRemoveRecent = { recent -> onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)) },
+                onClearRecent = { onEvent(ModelSheetEvent.ClearRecentHuggingFaceModels) },
                 onRecheckRecent = { recent ->
                     huggingFaceInput = recent.originUrl
                     selectedHuggingFaceTargetId = recent.targetModelId
@@ -401,6 +402,7 @@ private fun HuggingFaceAcquisitionSection(
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
     onOpenModelCard: (String) -> Unit,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
+    onClearRecent: () -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
     Card(
@@ -531,6 +533,7 @@ private fun HuggingFaceAcquisitionSection(
                 HuggingFaceRecentModelsSection(
                     recentModels = recentModels,
                     onRemoveRecent = onRemoveRecent,
+                    onClearRecent = onClearRecent,
                     onRecheckRecent = onRecheckRecent,
                     onOpenModelCard = onOpenModelCard,
                 )
@@ -543,6 +546,7 @@ private fun HuggingFaceAcquisitionSection(
 private fun HuggingFaceRecentModelsSection(
     recentModels: List<HuggingFaceRecentModel>,
     onRemoveRecent: (HuggingFaceRecentModel) -> Unit,
+    onClearRecent: () -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
     onOpenModelCard: (String) -> Unit,
 ) {
@@ -562,6 +566,12 @@ private fun HuggingFaceRecentModelsSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        TextButton(
+            onClick = onClearRecent,
+            modifier = Modifier.testTag("model_library_hf_recent_clear"),
+        ) {
+            Text(stringResource(id = R.string.ui_hf_recent_clear))
+        }
         recentModels.take(4).forEach { recent ->
             HuggingFaceRecentModelRow(
                 recent = recent,

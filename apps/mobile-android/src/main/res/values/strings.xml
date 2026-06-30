@@ -476,11 +476,16 @@
     <string name="ui_hf_disabled_missing_target">Choose a runtime target first</string>
     <string name="ui_hf_check_url">Check file</string>
     <string name="ui_hf_checking">Checking…</string>
-    <string name="ui_hf_candidate_target">Runtime target: %1$s</string>
+    <string name="ui_hf_candidate_target">Runtime target mapping: %1$s</string>
+    <string name="ui_hf_candidate_model_card">Model card: %1$s</string>
     <string name="ui_hf_candidate_source">Source: %1$s @ %2$s</string>
     <string name="ui_hf_candidate_prompt_profile">Prompt profile: %1$s</string>
     <string name="ui_hf_candidate_sha">SHA-256: %1$s…</string>
+    <string name="ui_hf_candidate_checksum_status">Checksum: Hugging Face LFS SHA-256 %1$s…</string>
+    <string name="ui_hf_candidate_storage_after">Storage after download: %1$s free</string>
+    <string name="ui_hf_candidate_storage_warning">Storage warning: needs %1$s, only %2$s free</string>
     <string name="ui_hf_candidate_compatibility">Compatibility: public text-only GGUF with Hugging Face LFS checksum</string>
+    <string name="ui_hf_candidate_queue_disabled">Queueing download</string>
     <string name="ui_hf_queue_download">Queue download</string>
     <string name="ui_hf_recent_title">Recent Hugging Face downloads</string>
     <string name="ui_hf_recent_subtitle">Recheck a previous file before queueing it again.</string>

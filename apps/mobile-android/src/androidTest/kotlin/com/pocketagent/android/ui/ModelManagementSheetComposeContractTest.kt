@@ -413,6 +413,9 @@ class ModelManagementSheetComposeContractTest {
             .performTextInput("https://huggingface.co/owner/repo/resolve/main/model.gguf")
         composeRule.onNodeWithTag("model_library_hf_check_url").performClick()
         composeRule.onNodeWithTag("model_library_hf_candidate_card").assertIsDisplayed()
+        composeRule.onNodeWithText("Model card: https://huggingface.co/owner/repo").assertIsDisplayed()
+        composeRule.onNodeWithText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_storage_impact").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_queue_download").performClick()
 
         composeRule.runOnIdle {

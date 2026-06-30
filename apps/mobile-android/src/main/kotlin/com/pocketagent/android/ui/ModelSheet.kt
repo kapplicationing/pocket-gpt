@@ -224,6 +224,7 @@ internal fun ModelSheet(
                 targets = libraryState.huggingFaceTargets,
                 state = libraryState.huggingFaceAcquisitionState,
                 recentModels = libraryState.recentHuggingFaceModels,
+                availableStorageBytes = libraryState.snapshot.storageSummary.freeBytes,
                 onInputChange = { value -> huggingFaceInput = value },
                 onSelectTarget = { targetId -> selectedHuggingFaceTargetId = targetId },
                 onCheck = {
@@ -391,6 +392,7 @@ private fun HuggingFaceAcquisitionSection(
     targets: List<HuggingFaceTargetModel>,
     state: HuggingFaceAcquisitionUiState,
     recentModels: List<HuggingFaceRecentModel>,
+    availableStorageBytes: Long?,
     onInputChange: (String) -> Unit,
     onSelectTarget: (String) -> Unit,
     onCheck: () -> Unit,
@@ -506,6 +508,7 @@ private fun HuggingFaceAcquisitionSection(
                 is HuggingFaceAcquisitionUiState.Ready -> {
                     HuggingFaceCandidateCard(
                         candidate = state.candidate,
+                        availableStorageBytes = availableStorageBytes,
                         queueing = false,
                         onDownloadVersion = onDownloadVersion,
                     )
@@ -513,6 +516,7 @@ private fun HuggingFaceAcquisitionSection(
                 is HuggingFaceAcquisitionUiState.Enqueueing -> {
                     HuggingFaceCandidateCard(
                         candidate = state.candidate,
+                        availableStorageBytes = availableStorageBytes,
                         queueing = true,
                         onDownloadVersion = onDownloadVersion,
                     )
@@ -651,10 +655,12 @@ private fun Long.relativeTimeLabel(): String {
 @Composable
 private fun HuggingFaceCandidateCard(
     candidate: HuggingFaceCandidate,
+    availableStorageBytes: Long?,
     queueing: Boolean,
     onDownloadVersion: (ModelDistributionVersion) -> Unit,
 ) {
     val context = LocalContext.current
+    val modelCardUrl = "https://huggingface.co/${candidate.reference.repoId}"
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -667,6 +673,11 @@ private fun HuggingFaceCandidateCard(
             Text(candidate.displayName, style = MaterialTheme.typography.labelLarge)
             Text(
                 text = stringResource(id = R.string.ui_hf_candidate_target, candidate.target.displayName),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_model_card, modelCardUrl),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -694,8 +705,12 @@ private fun HuggingFaceCandidateCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            HuggingFaceCandidateStorageLine(
+                candidateSizeBytes = candidate.sizeBytes,
+                availableStorageBytes = availableStorageBytes,
+            )
             Text(
-                text = stringResource(id = R.string.ui_hf_candidate_sha, candidate.sha256.take(12)),
+                text = stringResource(id = R.string.ui_hf_candidate_checksum_status, candidate.sha256.take(12)),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -707,12 +722,54 @@ private fun HuggingFaceCandidateCard(
             Button(
                 onClick = { onDownloadVersion(candidate.version) },
                 enabled = !queueing,
-                modifier = Modifier.testTag("model_library_hf_queue_download"),
+                modifier = Modifier
+                    .testTag("model_library_hf_queue_download")
+                    .then(
+                        if (queueing) {
+                            Modifier.semantics {
+                                stateDescription = context.getString(R.string.ui_hf_candidate_queue_disabled)
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
             ) {
                 Text(stringResource(id = if (queueing) R.string.ui_model_download_queuing else R.string.ui_hf_queue_download))
             }
         }
     }
+}
+
+@Composable
+private fun HuggingFaceCandidateStorageLine(
+    candidateSizeBytes: Long,
+    availableStorageBytes: Long?,
+) {
+    val context = LocalContext.current
+    val freeBytes = availableStorageBytes?.takeIf { it >= 0L } ?: return
+    val remainingBytes = freeBytes - candidateSizeBytes
+    val storageText = if (remainingBytes >= 0L) {
+        stringResource(
+            id = R.string.ui_hf_candidate_storage_after,
+            Formatter.formatShortFileSize(context, remainingBytes),
+        )
+    } else {
+        stringResource(
+            id = R.string.ui_hf_candidate_storage_warning,
+            Formatter.formatShortFileSize(context, candidateSizeBytes),
+            Formatter.formatShortFileSize(context, freeBytes),
+        )
+    }
+    Text(
+        text = storageText,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (remainingBytes >= 0L) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+        modifier = Modifier.testTag("model_library_hf_storage_impact"),
+    )
 }
 
 @Composable

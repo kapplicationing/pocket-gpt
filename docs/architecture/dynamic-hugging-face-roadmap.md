@@ -175,20 +175,21 @@ This is the right V1 because it preserves one active model truth and avoids a se
 Already present:
 
 1. File size.
-2. SHA prefix.
+2. Full Hugging Face LFS SHA-256 status with checksum prefix.
 3. Target model.
 4. Prompt profile when available.
 5. Compatibility summary.
 6. Blocked reason.
+7. Storage impact against current free space.
+8. Model-card URL.
+9. Explicit target-mapping copy.
+10. Queueing disabled-state semantics.
 
 Next polish:
 
-1. Storage impact against current free space.
-2. Full checksum status wording.
-3. Model card link.
-4. License link when Hub metadata exposes it.
-5. Clearer copy for target-model mapping.
-6. Disabled queue state that explains the exact pending/blocked reason.
+1. License link when Hub metadata exposes it.
+2. Make the model-card URL clickable if the app introduces outbound link handling.
+3. Add richer compatibility detail once GGUF metadata extraction is available before install.
 
 ### 3. Recent HF Downloads
 

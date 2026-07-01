@@ -1,0 +1,39 @@
+schema: v1
+service: pocketgpt-hf-fixture
+
+environments:
+  dev:
+    description: PocketGPT deterministic Hugging Face fixture for Maestro Cloud.
+    spec:
+      resources:
+        requests:
+          memory: 128Mi
+          cpu: 50m
+        limits:
+          memory: 256Mi
+          cpu: 250m
+
+      ports:
+        - number: 8765
+          protocol: http
+
+      ingress:
+        enabled: true
+        port: 8765
+
+      artifact:
+        image:
+          repository: pocketgpt/hf-fixture
+          tag: dev
+          build:
+            type: local
+            context: ../../scripts/dev
+            dockerfile: Dockerfile
+
+      healthCheck:
+        startup:
+          tcpSocket:
+            port: 8765
+        readiness:
+          tcpSocket:
+            port: 8765

@@ -34,6 +34,18 @@ cloudflared tunnel --url http://127.0.0.1:8765
 bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url https://your-tunnel.example
 ```
 
+Devstack-backed fixture command:
+
+```bash
+cd tools/hf-fixture-devstack
+devstack validate
+devstack deploy --wait --build
+devstack perms grant --all
+devstack ps
+cd ../..
+bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url https://your-devstack-endpoint.example
+```
+
 Other simple exposure options are `ngrok http 8765`, `ssh -R 80:127.0.0.1:8765 nokey@localhost.run`, Tailscale Funnel, or a tiny hosted VM running `scripts/dev/hf-fixture-server.py`. The fixture URL must be public because Maestro Cloud cannot use `adb reverse` or the host machine's `localhost`. The cloud wrapper rejects loopback/private fixture URLs by default and probes the fake search, tree, and byte-range artifact endpoints before building the APK.
 
 Smoke artifact contract:

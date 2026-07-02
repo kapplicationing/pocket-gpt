@@ -12,8 +12,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.ui.components.AppBottomSheet
@@ -22,7 +26,7 @@ import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.core.RoutingMode
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun ModelLibrarySheetHost(
     activeSurface: ModalSurface,
@@ -54,6 +58,7 @@ internal fun ModelLibrarySheetHost(
         title = stringResource(id = R.string.ui_model_library_title),
         sheetState = runtimeSheetState,
         onDismiss = actions::dismissSheet,
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
     ) {
         ModelSheet(
             libraryState = modelLibraryState,

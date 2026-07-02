@@ -26,6 +26,11 @@ tags:
 - assertVisible: "fixture/tiny-gguf / tiny.gguf"
 - assertVisible: "File: tiny.gguf"
 - assertVisible: "Downloads: 42 | Likes: 7 | License: apache-2.0"
+- scrollUntilVisible:
+    element:
+      text: "Check this file"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "Check this file"
 - extendedWaitUntil:
     visible:
@@ -46,36 +51,40 @@ tags:
       - tapOn: "Continue download"
 - scrollUntilVisible:
     element:
-      text: "Pause"
+      id: "model_library_download_queue_pause"
     direction: DOWN
     timeout: 60000
-- tapOn: "Pause"
+- tapOn:
+    id: "model_library_download_queue_pause"
 - scrollUntilVisible:
     element:
-      text: "Resume"
+      id: "model_library_download_queue_resume"
     direction: DOWN
     timeout: 60000
-- tapOn: "Resume"
+- tapOn:
+    id: "model_library_download_queue_resume"
 - scrollUntilVisible:
     element:
-      text: "Pause"
+      id: "model_library_download_queue_pause"
     direction: DOWN
     timeout: 60000
-- tapOn: "Cancel"
+- tapOn:
+    id: "model_library_download_queue_cancel"
 - scrollUntilVisible:
     element:
-      text: "Retry"
+      id: "model_library_download_queue_retry"
     direction: DOWN
     timeout: 60000
-- tapOn: "Retry"
+- tapOn:
+    id: "model_library_download_queue_retry"
 - scrollUntilVisible:
     element:
-      text: "Pause"
+      id: "model_library_download_queue_pause"
     direction: DOWN
     timeout: 60000
 - extendedWaitUntil:
     notVisible:
-      text: "Pause"
+      id: "model_library_download_queue_pause"
     timeout: 180000
 - extendedWaitUntil:
     visible:

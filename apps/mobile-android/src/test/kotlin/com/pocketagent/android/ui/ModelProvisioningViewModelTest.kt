@@ -25,11 +25,14 @@ import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.DownloadVerificationPolicy
+import com.pocketagent.android.runtime.huggingface.DefaultHuggingFaceModelAcquisition
+import com.pocketagent.android.runtime.huggingface.FixtureHuggingFaceEndpointAdapter
 import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionBlockReason
 import com.pocketagent.android.runtime.huggingface.HuggingFaceAcquisitionException
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelAcquisition
 import com.pocketagent.android.runtime.huggingface.HuggingFaceModelReference
+import com.pocketagent.android.runtime.huggingface.OkHttpHuggingFaceHubClient
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModel
 import com.pocketagent.android.runtime.huggingface.HuggingFaceRecentModelStore
 import com.pocketagent.android.runtime.huggingface.HuggingFaceSearchFileResult
@@ -41,6 +44,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelmanager.StorageSummary
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.SourceTrustPolicy
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.android.testutil.fakeUri
 import com.pocketagent.nativebridge.ModelLifecycleErrorCode
@@ -56,8 +60,11 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -388,6 +395,169 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `hugging face fixture search resolve and enqueue stays hermetic`() = runTest(dispatcher) {
+        val sha = "b".repeat(64)
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    [
+                      {
+                        "id": "owner/repo",
+                        "downloads": 42,
+                        "likes": 7,
+                        "gated": false,
+                        "private": false,
+                        "cardData": {
+                          "license": "apache-2.0"
+                        },
+                        "siblings": [
+                          {"rfilename": ".gitattributes"},
+                          {"rfilename": "model.gguf"}
+                        ]
+                      }
+                    ]
+                    """.trimIndent(),
+                ),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    [
+                      {
+                        "path": "model.gguf",
+                        "lfs": {
+                          "oid": "$sha",
+                          "size": 4096
+                        }
+                      }
+                    ]
+                    """.trimIndent(),
+                ),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "id": "owner/repo",
+                      "cardData": {
+                        "license": "apache-2.0",
+                        "license_link": "https://huggingface.co/owner/repo/blob/main/LICENSE"
+                      },
+                      "tags": ["license:apache-2.0"]
+                    }
+                    """.trimIndent(),
+                ),
+        )
+        server.start()
+        try {
+            val endpointAdapter = FixtureHuggingFaceEndpointAdapter(server.url("/"))
+            val acquisition = DefaultHuggingFaceModelAcquisition(
+                endpointAdapter = endpointAdapter,
+                hubClient = OkHttpHuggingFaceHubClient(endpointAdapter),
+            )
+            val targetModelId = acquisition.supportedTargets().first().modelId
+            val recentStore = FakeHuggingFaceRecentModelStore()
+            val gateway = FakeProvisioningGateway()
+            val viewModel = ModelProvisioningViewModel(
+                gateway = gateway,
+                huggingFaceModelAcquisition = acquisition,
+                huggingFaceRecentModelStore = recentStore,
+                ioDispatcher = dispatcher,
+            )
+            advanceUntilIdle()
+
+            viewModel.searchHuggingFaceFiles(" tiny ")
+            advanceUntilIdle()
+
+            val searchState = viewModel.uiState.value.huggingFaceSearchState
+            assertTrue(searchState is HuggingFaceSearchUiState.Results)
+            val result = searchState.results.single()
+            assertEquals("owner/repo / model.gguf", result.displayName)
+            assertEquals("https://huggingface.co/owner/repo/resolve/main/model.gguf", result.canonicalUrl)
+
+            viewModel.resolveHuggingFaceCandidate(
+                input = result.canonicalUrl,
+                targetModelId = targetModelId,
+            )
+            advanceUntilIdle()
+
+            val ready = viewModel.uiState.value.huggingFaceAcquisitionState
+            assertTrue(ready is HuggingFaceAcquisitionUiState.Ready)
+            val version = ready.candidate.version
+            assertEquals(targetModelId, version.modelId)
+            assertEquals(ModelSourceKind.HUGGING_FACE, version.sourceKind)
+            assertEquals("owner/repo / model.gguf", version.displayName)
+            assertEquals(sha, version.expectedSha256)
+            assertEquals(4096L, version.fileSizeBytes)
+            assertEquals(server.url("/owner/repo/resolve/main/model.gguf").toString(), version.downloadUrl)
+            assertEquals("https://huggingface.co/owner/repo/resolve/main/model.gguf", version.sourceRef?.originUrl)
+            assertEquals(SourceTrustPolicy.INTEGRITY_ONLY, version.sourceRef?.trustPolicy)
+            assertEquals(version.downloadUrl, version.artifacts.single().downloadUrl)
+
+            assertEquals("task-1", viewModel.enqueueDownload(version))
+            advanceUntilIdle()
+
+            assertEquals(version, gateway.lastEnqueuedVersion)
+            assertEquals("owner/repo / model.gguf", recentStore.list().single().displayName)
+            assertEquals(
+                listOf(
+                    "/api/models?search=tiny&limit=20&full=true",
+                    "/api/models/owner/repo/tree/main",
+                    "/api/models/owner/repo/revision/main",
+                ),
+                listOf(
+                    server.takeRequest().path,
+                    server.takeRequest().path,
+                    server.takeRequest().path,
+                ),
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `hugging face enqueue failure does not store recent model`() = runTest(dispatcher) {
+        val version = sampleDownloadVersion().copy(
+            sourceKind = ModelSourceKind.HUGGING_FACE,
+            displayName = "owner/repo / model.gguf",
+        )
+        val candidate = sampleHuggingFaceCandidate(version)
+        val recentStore = FakeHuggingFaceRecentModelStore()
+        val gateway = FakeProvisioningGateway().apply {
+            enqueueFailure = IllegalStateException("blocked before enqueue")
+        }
+        val viewModel = ModelProvisioningViewModel(
+            gateway = gateway,
+            huggingFaceModelAcquisition = FakeHuggingFaceModelAcquisition(candidate = candidate),
+            huggingFaceRecentModelStore = recentStore,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.resolveHuggingFaceCandidate(
+            input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+            targetModelId = "qwen3.5-0.8b-q4",
+        )
+        advanceUntilIdle()
+
+        assertFailsWith<IllegalStateException> {
+            viewModel.enqueueDownload(version)
+        }
+        advanceUntilIdle()
+
+        assertTrue(recentStore.list().isEmpty())
+        assertTrue(viewModel.uiState.value.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Ready)
+    }
+
+    @Test
     fun `remove recent hugging face model updates ui state`() = runTest(dispatcher) {
         val version = sampleDownloadVersion().copy(
             sourceKind = ModelSourceKind.HUGGING_FACE,
@@ -647,6 +817,7 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     var importFailure: Throwable? = null
     var lastEnqueuedVersion: ModelDistributionVersion? = null
     var lastEnqueuedOptions: DownloadRequestOptions? = null
+    var enqueueFailure: Throwable? = null
     var shouldWarnForMeteredLargeDownloadResult: Boolean = false
     var lastWarnVersion: ModelDistributionVersion? = null
     var removeResult: Boolean = true
@@ -742,6 +913,7 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     }
 
     override suspend fun enqueueDownload(version: ModelDistributionVersion, options: DownloadRequestOptions): String {
+        enqueueFailure?.let { throw it }
         lastEnqueuedVersion = version
         lastEnqueuedOptions = options
         return "task-1"

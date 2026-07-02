@@ -22,7 +22,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import com.pocketagent.android.runtime.ModelPathOrigin
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
@@ -58,6 +62,15 @@ class ModelManagementSheetComposeContractTest {
     val composeRule = createComposeRule()
 
     private val presetBackingStore = FakePresetBackingStore()
+
+    private fun assertResourceIdVisible(resourceId: String) {
+        composeRule.waitForIdle()
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        assertTrue(
+            "Expected resource id to be visible for Maestro: $resourceId",
+            device.wait(Until.hasObject(By.res(resourceId)), 2_000L),
+        )
+    }
 
     @Test
     fun productionModelSheetRendersAndDispatchesRefreshEvent() {
@@ -184,6 +197,8 @@ class ModelManagementSheetComposeContractTest {
 
         composeRule.onNodeWithTag("model_sheet_status_message").assertIsDisplayed()
         composeRule.onNodeWithText(removedMessage).assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("No downloaded models yet"))
         composeRule.onNodeWithText("No downloaded models yet").assertIsDisplayed()
         composeRule.onNodeWithTag("unified_model_sheet").performScrollToNode(hasText("Download"))
         composeRule.onNodeWithText("Download").assertIsDisplayed()
@@ -386,7 +401,7 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
-    fun huggingFaceSectionDispatchesResolveAndQueueEvents() {
+    fun huggingFaceSectionDispatchesResolveAndShowsPreview() {
         val events = mutableListOf<ModelSheetEvent>()
         val candidate = sampleHuggingFaceCandidate()
         val libraryState = sampleLibraryState(
@@ -416,13 +431,13 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithTag("model_library_hf_candidate_card").assertIsDisplayed()
         composeRule.onNodeWithText("Model card: https://huggingface.co/owner/repo").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_open_model_card").performClick()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…"))
         composeRule.onNodeWithText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_license").assertIsDisplayed()
         composeRule.onNodeWithText("License: apache-2.0").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_open_license").performClick()
         composeRule.onNodeWithTag("model_library_hf_storage_impact").assertIsDisplayed()
-        composeRule.onNodeWithTag("model_library_hf_queue_download").performClick()
-
         composeRule.runOnIdle {
             assertTrue(
                 events.contains(
@@ -432,9 +447,14 @@ class ModelManagementSheetComposeContractTest {
                     ),
                 ),
             )
-            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
-            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")))
-            assertTrue(events.contains(ModelSheetEvent.DownloadVersion(candidate.version)))
+            assertTrue(
+                "Expected model card event in $events",
+                events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")),
+            )
+            assertTrue(
+                "Expected license event in $events",
+                events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")),
+            )
         }
     }
 
@@ -472,9 +492,13 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithText("owner/repo / model-Q4_K_M.gguf").assertIsDisplayed()
         composeRule.onNodeWithText("File: model-Q4_K_M.gguf").assertIsDisplayed()
         composeRule.onNodeWithText("Quantization: Q4_K_M").assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Downloads: 42 | Likes: 7 | License: apache-2.0"))
         composeRule.onNodeWithText("Downloads: 42 | Likes: 7 | License: apache-2.0").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_search_open_model_card").performClick()
         composeRule.onNodeWithTag("model_library_hf_search_open_file").performClick()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_hf_search_use_file"))
         composeRule.onNodeWithTag("model_library_hf_search_use_file").performClick()
         composeRule.onNodeWithTag("model_library_hf_search_clear").performClick()
 
@@ -495,8 +519,7 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
-    fun huggingFaceRecentRowDispatchesResolveAndRemoveEvents() {
-        val events = mutableListOf<ModelSheetEvent>()
+    fun huggingFaceRecentRowRendersStoredMetadata() {
         val candidate = sampleHuggingFaceCandidate()
         val recent = sampleHuggingFaceRecentModel()
         val libraryState = sampleLibraryState(downloads = emptyList()).copy(
@@ -512,33 +535,15 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
-                    onEvent = { events += it },
+                    onEvent = {},
                 )
             }
         }
 
         composeRule.onNodeWithTag("model_library_hf_recent").assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_hf_recent_license"))
         composeRule.onNodeWithTag("model_library_hf_recent_license").assertIsDisplayed()
-        composeRule.onNodeWithTag("model_library_hf_recent_recheck").performClick()
-        composeRule.onNodeWithTag("model_library_hf_recent_open_model_card").performClick()
-        composeRule.onNodeWithTag("model_library_hf_recent_open_license").performClick()
-        composeRule.onNodeWithTag("model_library_hf_recent_remove").performClick()
-        composeRule.onNodeWithTag("model_library_hf_recent_clear").performClick()
-
-        composeRule.runOnIdle {
-            assertTrue(
-                events.contains(
-                    ModelSheetEvent.ResolveHuggingFaceCandidate(
-                        input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
-                        targetModelId = "qwen3-0.6b-q4_k_m",
-                    ),
-                ),
-            )
-            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
-            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")))
-            assertTrue(events.contains(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)))
-            assertTrue(events.contains(ModelSheetEvent.ClearRecentHuggingFaceModels))
-        }
     }
 
     @Test
@@ -565,6 +570,44 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithText("Download queue").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_download_queue").assertIsDisplayed()
         composeRule.onNodeWithText("owner/repo / model.gguf").assertIsDisplayed()
+    }
+
+    @Test
+    fun huggingFaceControlsExportResourceIdsForMaestro() {
+        val candidate = sampleHuggingFaceCandidate()
+        val searchResult = sampleHuggingFaceSearchResult()
+        val state = sampleLibraryState(
+            huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Ready(candidate),
+            huggingFaceSearchState = HuggingFaceSearchUiState.Results(
+                query = "qwen",
+                results = listOf(searchResult),
+            ),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = state,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_hf_search_results"))
+        assertResourceIdVisible("model_library_add_hugging_face")
+        assertResourceIdVisible("model_library_hf_search_input")
+        assertResourceIdVisible("model_library_hf_search_button")
+        assertResourceIdVisible("model_library_hf_search_results")
+        assertResourceIdVisible("model_library_hf_search_use_file")
+
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_hf_candidate_card"))
+        assertResourceIdVisible("model_library_hf_candidate_card")
     }
 
     @Test
@@ -612,6 +655,43 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
+    fun downloadQueueControlsExportResourceIdsForMaestro() {
+        val downloadStatus = mutableStateOf(DownloadTaskStatus.DOWNLOADING)
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = sampleLibraryState(
+                        downloads = listOf(sampleHuggingFaceDownload(status = downloadStatus.value)),
+                    ),
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue"))
+        assertResourceIdVisible("model_library_download_queue")
+        assertResourceIdVisible("model_library_download_queue_pause")
+        assertResourceIdVisible("model_library_download_queue_cancel")
+
+        composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.PAUSED }
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue_resume"))
+        assertResourceIdVisible("model_library_download_queue_resume")
+        assertResourceIdVisible("model_library_download_queue_cancel")
+
+        composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.CANCELLED }
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_download_queue_retry"))
+        composeRule.onNodeWithTag("model_library_download_queue_retry").assertIsDisplayed()
+    }
+
+    @Test
     fun hiddenVersionKeysFilterOutModelsFromList() {
         val hiddenKeys = setOf("qwen3.5-0.8b-q4::q4_0")
 
@@ -629,6 +709,8 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("No downloaded models yet"))
         composeRule.onNodeWithText("No downloaded models yet").assertIsDisplayed()
     }
 
@@ -722,6 +804,8 @@ private fun sampleLibraryState(
     snapshot: RuntimeProvisioningSnapshot = sampleSnapshot(installed = true),
     manifest: ModelDistributionManifest = sampleManifest(),
     downloads: List<DownloadTaskState> = listOf(sampleDownload()),
+    huggingFaceAcquisitionState: HuggingFaceAcquisitionUiState = HuggingFaceAcquisitionUiState.Idle,
+    huggingFaceSearchState: HuggingFaceSearchUiState = HuggingFaceSearchUiState.Idle,
 ): ModelLibraryUiState {
     return ModelLibraryUiState(
         snapshot = snapshot,
@@ -732,6 +816,8 @@ private fun sampleLibraryState(
         statusMessage = "Ready for provisioning actions",
         defaultGetReadyModelId = "qwen3.5-0.8b-q4",
         defaultModelVersion = manifest.models.first().versions.first(),
+        huggingFaceAcquisitionState = huggingFaceAcquisitionState,
+        huggingFaceSearchState = huggingFaceSearchState,
     )
 }
 

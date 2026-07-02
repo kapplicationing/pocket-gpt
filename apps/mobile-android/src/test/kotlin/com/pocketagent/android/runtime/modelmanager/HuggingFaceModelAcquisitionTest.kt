@@ -382,7 +382,11 @@ class HuggingFaceModelAcquisitionTest {
                 targetModelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
             )
         }.also { error ->
-            assertEquals(HuggingFaceAcquisitionBlockReason.UNSUPPORTED_MODEL, error.reason)
+            assertEquals(HuggingFaceAcquisitionBlockReason.COMPANION_ARTIFACT_REQUIRED, error.reason)
+            assertEquals(
+                "This model needs extra companion files. PocketGPT only supports single-file text GGUF downloads here.",
+                error.userMessage,
+            )
         }
     }
 

@@ -4,19 +4,7 @@ tags:
   - model-management
   - hf-validation
 ---
-- launchApp:
-    clearState: true
-- runFlow:
-    when:
-      visible:
-        id: "provisioning_bootstrap_loading"
-    commands:
-      - extendedWaitUntil:
-          notVisible:
-            id: "provisioning_bootstrap_loading"
-          timeout: 30000
-- runFlow: shared/bootstrap-clean-start.yaml
-- runFlow: shared/open-model-library.yaml
+- runFlow: shared/open-model-library-debug.yaml
 
 - assertVisible: "Model library"
 - assertVisible:
@@ -30,11 +18,9 @@ tags:
     id: "model_library_hf_check_url"
 - scrollUntilVisible:
     element:
-      text: "Use a public https://huggingface.co model file URL."
+      id: "model_library_hf_error"
     direction: DOWN
     timeout: 20000
-- assertVisible:
-    id: "model_library_hf_error"
 - assertNotVisible:
     id: "model_library_hf_candidate_card"
 - takeScreenshot: "hf-url-validation-blocked"

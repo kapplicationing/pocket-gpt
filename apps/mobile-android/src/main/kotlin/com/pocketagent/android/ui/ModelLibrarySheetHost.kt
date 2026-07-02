@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -37,6 +38,7 @@ internal fun ModelLibrarySheetHost(
     presetBackingStore: PresetBackingStore,
     modelRemoveUndoState: ModelRemoveUndoState,
     actions: ModelLibraryActions,
+    debugModelLibraryReadyTagEnabled: Boolean = false,
 ) {
     if (activeSurface !is ModalSurface.ModelLibrary) {
         return
@@ -54,11 +56,17 @@ internal fun ModelLibrarySheetHost(
     val runtimeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pendingRemoveVersion by remember { mutableStateOf<Pair<String, String>?>(null) }
 
+    val sheetModifier = if (debugModelLibraryReadyTagEnabled) {
+        Modifier.testTag("debug_model_library_ready")
+    } else {
+        Modifier
+    }.semantics { testTagsAsResourceId = true }
+
     AppBottomSheet(
         title = stringResource(id = R.string.ui_model_library_title),
         sheetState = runtimeSheetState,
         onDismiss = actions::dismissSheet,
-        modifier = Modifier.semantics { testTagsAsResourceId = true },
+        modifier = sheetModifier,
     ) {
         ModelSheet(
             libraryState = modelLibraryState,

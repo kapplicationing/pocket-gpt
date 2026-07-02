@@ -20,9 +20,11 @@ Source of truth for execution commands and cloud guidance:
 8. `scenario-first-run-gpu-chat.yaml`: clean install -> first-run setup -> enable GPU acceleration -> send smoke
 9. `scenario-gpu-probe-status.yaml`: open Advanced controls and drive GPU probe status updates for log-based reason validation
 10. `scenario-session-drawer-smoke.yaml`: onboarding skip -> session drawer delete/replacement smoke
-11. `scenario-hf-url-validation-smoke.yaml` (`smoke`, `model-management`, `hf-validation`): clean start -> model library -> invalid HF URL -> blocked reason contract. This is in the default `devctl lane maestro` list.
-12. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): local fake-HF route for search -> result -> check -> queue -> pause/resume/cancel/retry -> install row -> visible `Load`. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
-13. `scenario-hf-live-download-smoke.yaml` (`live-hf`, `long-running`): explicit device-only probe for public HF URL -> queue -> pause/resume/cancel/retry -> install -> Load. Keep it out of default lanes because hosted/live network and artifact-size variance are not deterministic.
+11. `scenario-hf-url-validation-smoke.yaml` (`smoke`, `model-management`, `hf-validation`): debug-open model library -> invalid HF URL -> blocked reason contract. This is in the default `devctl lane maestro` list.
+12. `scenario-hf-search-to-candidate-smoke.yaml` (`smoke`, `model-management`, `hf-search`): debug-open model library -> fixture search -> file result -> candidate preview.
+13. `scenario-hf-download-installed-smoke.yaml` (`smoke`, `model-management`, `hf-download`): debug-open model library -> paste fixture URL -> check -> queue -> installed row -> visible `Load`.
+14. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): optional local fake-HF regression for paste fixture URL -> check -> queue -> pause/resume/cancel/retry -> install row -> visible `Load`. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
+15. `scenario-hf-live-download-smoke.yaml` (`live-hf`, `long-running`): explicit device-only probe for public HF URL -> queue -> pause/resume/cancel/retry -> install -> Load. Keep it out of default lanes because hosted/live network and artifact-size variance are not deterministic.
 
 ## Contract Notes
 
@@ -36,6 +38,7 @@ Source of truth for execution commands and cloud guidance:
 8. Tag every stable flow. `devctl lane maestro` now supports `--include-tags`, `--exclude-tags`, and `--flows` so you can run one risk slice without cloning/renaming files.
 9. Use `python3 tools/devctl/main.py report journey` or `python3 tools/devctl/main.py report screenshot-pack` to inspect the latest structured artifacts without hunting through `tmp/` or `scripts/benchmarks/runs/`.
 10. Keep live Hugging Face download flows tagged out of default CI unless the lane explicitly accepts network and artifact-size risk. Use `hf-validation` for deterministic URL/blocked-state coverage, `fixture-hf` for deterministic queue/install behavior, and `live-hf` for deliberate real Hub/device probes.
+11. HF flows must open the model library through `shared/open-model-library-debug.yaml`. That helper launches `com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY`, skips onboarding through the real `ChatViewModel` path, and waits for `debug_model_library_ready`. Do not use shared onboarding/bootstrap helpers for HF flow setup.
 
 ## Selection Examples
 
@@ -45,6 +48,9 @@ python3 tools/devctl/main.py lane maestro --include-tags smoke
 python3 tools/devctl/main.py lane maestro --include-tags model-management
 python3 tools/devctl/main.py lane maestro --include-tags smoke --exclude-tags long-running
 bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
+maestro-android test tests/maestro/scenario-hf-url-validation-smoke.yaml --device <device>
+maestro-android test tests/maestro/scenario-hf-search-to-candidate-smoke.yaml --device <device>
+maestro-android test tests/maestro/scenario-hf-download-installed-smoke.yaml --device <device>
 ```
 
 ## Scoped Debug Flows

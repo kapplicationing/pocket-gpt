@@ -11,6 +11,8 @@ CHUNK_SIZE="${POCKETGPT_HF_FIXTURE_CHUNK_SIZE:-16384}"
 CHUNK_DELAY_MS="${POCKETGPT_HF_FIXTURE_CHUNK_DELAY_MS:-20}"
 BUILD_APK=1
 RUN_PROBE=1
+ENABLE_NATIVE_BUILD="${POCKETGPT_ENABLE_NATIVE_BUILD:-true}"
+FLOW="tests/maestro/scenario-hf-fixture-download-smoke.yaml"
 RUN_ROOT=""
 
 usage() {
@@ -19,9 +21,11 @@ Usage: bash scripts/dev/maestro-hf-fixture-smoke.sh [options]
 
 Options:
   --serial <adb-serial>  Pin the connected device. Defaults to ANDROID_SERIAL.
+  --flow <path>          Maestro flow to run. Default: tests/maestro/scenario-hf-fixture-download-smoke.yaml.
   --port <port>          Local fixture server port. Default: 8765.
   --run-root <path>      Artifact directory. Default: tmp/hf-fixture-smoke/<timestamp>.
   --no-build             Reuse the currently installed debug APK.
+  --disable-native-build Build without native bridge libraries. Use only for compile/debug triage.
   --skip-probe           Skip the maestro-android bootstrap probe before the flow.
   --help                 Show this help text.
 USAGE
@@ -31,6 +35,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --serial)
       SERIAL="${2:?missing serial}"
+      shift 2
+      ;;
+    --flow)
+      FLOW="${2:?missing flow path}"
       shift 2
       ;;
     --port)
@@ -43,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-build)
       BUILD_APK=0
+      shift
+      ;;
+    --disable-native-build)
+      ENABLE_NATIVE_BUILD=false
       shift
       ;;
     --skip-probe)
@@ -63,6 +75,11 @@ done
 
 if [[ -z "${SERIAL}" ]]; then
   echo "ANDROID_SERIAL or --serial <id> required" >&2
+  exit 64
+fi
+
+if [[ ! -f "${FLOW}" ]]; then
+  echo "Flow not found: ${FLOW}" >&2
   exit 64
 fi
 
@@ -129,9 +146,18 @@ adb -s "${SERIAL}" reverse "tcp:${PORT}" "tcp:${PORT}" >/dev/null
 
 if [[ ${BUILD_APK} -eq 1 ]]; then
   GRADLE_USER_HOME=.gradle-home ./gradlew --no-daemon \
-    -Ppocketgpt.enableNativeBuild=false \
+    --rerun-tasks \
+    -Ppocketgpt.enableNativeBuild="${ENABLE_NATIVE_BUILD}" \
     -Ppocketgpt.hfFixtureBaseUrl="${FIXTURE_BASE_URL}" \
     :apps:mobile-android:assembleDebug
+
+  BUILD_CONFIG_PATH="apps/mobile-android/build/generated/source/buildConfig/debug/com/pocketagent/android/BuildConfig.java"
+  if [[ ! -f "${BUILD_CONFIG_PATH}" ]] ||
+    ! grep -Fq "HF_FIXTURE_BASE_URL = \"${FIXTURE_BASE_URL}\"" "${BUILD_CONFIG_PATH}"; then
+    echo "Debug APK was not built with the requested HF fixture base URL: ${FIXTURE_BASE_URL}" >&2
+    echo "Inspect ${BUILD_CONFIG_PATH} before running Maestro." >&2
+    exit 1
+  fi
 
   APK_PATH="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
   if [[ -z "${APK_PATH}" || ! -f "${APK_PATH}" ]]; then
@@ -159,7 +185,8 @@ cat >"${RUN_ROOT}/run-manifest.json" <<EOF
   "chunk_delay_ms": ${CHUNK_DELAY_MS},
   "chunk_size": ${CHUNK_SIZE},
   "fixture_base_url": "${FIXTURE_BASE_URL}",
-  "flow": "tests/maestro/scenario-hf-fixture-download-smoke.yaml",
+  "flow": "${FLOW}",
+  "enable_native_build": ${ENABLE_NATIVE_BUILD},
   "maestro_debug_dir": "${MAESTRO_DEBUG_DIR}",
   "junit_path": "${JUNIT_PATH}",
   "maestro_log": "${MAESTRO_LOG}",
@@ -170,7 +197,7 @@ cat >"${RUN_ROOT}/run-manifest.json" <<EOF
 EOF
 
 set +e
-maestro --device "${SERIAL}" test tests/maestro/scenario-hf-fixture-download-smoke.yaml \
+maestro --device "${SERIAL}" test "${FLOW}" \
   --debug-output "${MAESTRO_DEBUG_DIR}" \
   --format junit \
   --output "${JUNIT_PATH}" 2>&1 | tee "${MAESTRO_LOG}"

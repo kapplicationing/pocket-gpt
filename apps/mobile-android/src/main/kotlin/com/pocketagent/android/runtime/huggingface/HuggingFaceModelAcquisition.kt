@@ -48,20 +48,20 @@ data class HuggingFaceModelReference(
             if (trimmed.isBlank()) {
                 throw HuggingFaceAcquisitionException(
                     reason = HuggingFaceAcquisitionBlockReason.INVALID_URL,
-                    userMessage = "Paste a Hugging Face model file URL.",
+                    userMessage = "Paste a Hugging Face file URL ending in .gguf.",
                 )
             }
             val uri = runCatching { URI(trimmed) }.getOrNull()
                 ?: throw HuggingFaceAcquisitionException(
                     reason = HuggingFaceAcquisitionBlockReason.INVALID_URL,
-                    userMessage = "That is not a valid Hugging Face URL.",
+                    userMessage = "Paste a Hugging Face file URL ending in .gguf.",
                 )
             if (!uri.scheme.equals("https", ignoreCase = true) ||
                 !uri.host.equals("huggingface.co", ignoreCase = true)
             ) {
                 throw HuggingFaceAcquisitionException(
                     reason = HuggingFaceAcquisitionBlockReason.INVALID_URL,
-                    userMessage = "Use a public https://huggingface.co model file URL.",
+                    userMessage = "Paste a Hugging Face file URL ending in .gguf.",
                 )
             }
             val segments = uri.path.trim('/').split('/').filter { it.isNotBlank() }
@@ -69,7 +69,7 @@ data class HuggingFaceModelReference(
             if (markerIndex < 2 || markerIndex + 2 >= segments.size) {
                 throw HuggingFaceAcquisitionException(
                     reason = HuggingFaceAcquisitionBlockReason.INVALID_URL,
-                    userMessage = "Use a Hugging Face file URL like /owner/repo/resolve/main/model.gguf.",
+                    userMessage = "Paste a Hugging Face file URL ending in .gguf.",
                 )
             }
             val repoId = segments.take(markerIndex).joinToString("/")
@@ -83,13 +83,13 @@ data class HuggingFaceModelReference(
             if (!reference.fileName.endsWith(".gguf", ignoreCase = true)) {
                 throw HuggingFaceAcquisitionException(
                     reason = HuggingFaceAcquisitionBlockReason.NON_GGUF,
-                    userMessage = "Only GGUF model files are supported.",
+                    userMessage = "This URL is not a GGUF model file. Choose a .gguf file.",
                 )
             }
             if (SHARDED_GGUF_REGEX.matches(reference.fileName)) {
                 throw HuggingFaceAcquisitionException(
                     reason = HuggingFaceAcquisitionBlockReason.SHARDED_GGUF,
-                    userMessage = "Sharded GGUF files are not supported yet. Choose a single-file GGUF.",
+                    userMessage = "Sharded GGUF files are not supported yet. Choose a single .gguf file.",
                 )
             }
             return reference
@@ -292,11 +292,11 @@ class OkHttpHuggingFaceHubClient(
                 when (response.code) {
                     401, 403 -> throw HuggingFaceAcquisitionException(
                         reason = HuggingFaceAcquisitionBlockReason.ACCESS_DENIED,
-                        userMessage = "This Hugging Face file is private or gated. Public files are supported in this version.",
+                        userMessage = "Private or gated Hugging Face files are not supported in this version.",
                     )
                     404 -> throw HuggingFaceAcquisitionException(
                         reason = HuggingFaceAcquisitionBlockReason.FILE_NOT_FOUND,
-                        userMessage = "That Hugging Face file was not found.",
+                        userMessage = "The Hugging Face file was not found: ${reference.filePath}.",
                     )
                 }
                 if (!response.isSuccessful) {
@@ -311,7 +311,7 @@ class OkHttpHuggingFaceHubClient(
             }
             throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.NETWORK_ERROR,
-                userMessage = "Could not check the Hugging Face file. Check the URL and network, then try again.",
+                userMessage = "Could not check ${reference.fileName}. Check the URL and network, then try again.",
                 cause = error,
             )
         }
@@ -389,23 +389,20 @@ class DefaultHuggingFaceModelAcquisition(
         targetModelId: String,
     ): HuggingFaceCandidate {
         val target = supportedTextTargets().firstOrNull { it.modelId == targetModelId }
-            ?: throw HuggingFaceAcquisitionException(
-                reason = HuggingFaceAcquisitionBlockReason.UNSUPPORTED_MODEL,
-                userMessage = "Choose a supported text model target before checking the Hugging Face file.",
-            )
+            ?: throw unsupportedTargetException(targetModelId)
         val reference = HuggingFaceModelReference.parse(input)
         val metadata = hubClient.lookupFile(reference)
         val sha = metadata.lfsOid?.trim()?.lowercase(Locale.US).orEmpty()
         if (!SHA256_REGEX.matches(sha)) {
             throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SHA,
-                userMessage = "This Hugging Face file does not expose a usable LFS SHA-256 checksum.",
+                userMessage = "This file does not expose a usable Hugging Face LFS checksum, so PocketGPT cannot verify the download.",
             )
         }
         val sizeBytes = metadata.sizeBytes?.takeIf { it > 0L }
             ?: throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SIZE,
-                userMessage = "This Hugging Face file does not expose a usable file size.",
+                userMessage = "This file does not expose a usable file size, so PocketGPT cannot check storage before download.",
             )
         val repositoryMetadata = runCatching { hubClient.lookupRepository(reference) }.getOrNull()
         val spec = ModelCatalog.normalizedSpecFor(target.modelId)
@@ -479,6 +476,25 @@ class DefaultHuggingFaceModelAcquisition(
             )
         }
     }
+
+    private fun unsupportedTargetException(targetModelId: String): HuggingFaceAcquisitionException {
+        val spec = ModelCatalog.normalizedSpecFor(targetModelId)
+        val requiredCompanions = spec?.variants.orEmpty().flatMap { variant ->
+            variant.artifactBundle.requiredArtifacts()
+                .filter { artifact -> artifact.role != ModelArtifactRole.PRIMARY_GGUF }
+        }
+        return if (requiredCompanions.isNotEmpty() || spec?.capabilities?.supports(CapabilityFlag.IMAGE) == true) {
+            HuggingFaceAcquisitionException(
+                reason = HuggingFaceAcquisitionBlockReason.COMPANION_ARTIFACT_REQUIRED,
+                userMessage = "This model needs extra companion files. PocketGPT only supports single-file text GGUF downloads here.",
+            )
+        } else {
+            HuggingFaceAcquisitionException(
+                reason = HuggingFaceAcquisitionBlockReason.UNSUPPORTED_MODEL,
+                userMessage = "Choose a supported text model target before checking this file.",
+            )
+        }
+    }
 }
 
 internal fun HuggingFaceModelReference.treeApiUrl(): HttpUrl {
@@ -507,7 +523,7 @@ private fun parseTreeResponse(
         else -> null
     } ?: throw HuggingFaceAcquisitionException(
         reason = HuggingFaceAcquisitionBlockReason.FILE_NOT_FOUND,
-        userMessage = "That Hugging Face file was not found.",
+        userMessage = "The Hugging Face file was not found: ${reference.filePath}.",
     )
     val lfs = item.optJSONObject("lfs")
     return HuggingFaceHubFileMetadata(

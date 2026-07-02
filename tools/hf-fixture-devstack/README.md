@@ -28,7 +28,7 @@ Deploy from this directory so the Docker build context paths match `devstack.yam
 cd tools/hf-fixture-devstack
 devstack validate
 devstack deploy --wait --build
-devstack perms grant --all
+devstack permissions grant --all
 devstack ps
 ```
 
@@ -41,6 +41,11 @@ bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh \
   --fixture-base-url "${POCKETGPT_HF_FIXTURE_BASE_URL}" \
   --api-key-env MAESTRO_CLOUD_API_KEY
 ```
+
+If `devstack validate` reports a VPN or network issue, fix that first. This is
+the preferred path for Maestro Cloud because accountless tunnel providers may be
+blocked or rewritten by corporate VPN/firewall policy before they reach the local
+fixture.
 
 ## Local Container Check
 

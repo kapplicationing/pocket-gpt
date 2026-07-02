@@ -26,7 +26,7 @@ Options:
   --flow <path.yaml>          Flow file under tests/maestro-cloud/.
   --no-build                  Reuse the existing debug APK when needed.
   --api-level <level>         Android API level. Default: 34.
-  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY or MAESTRO_CLOUD_API_KEY_2.
+  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
   --app-binary-id <id>        Reuse an uploaded Maestro Cloud binary.
   --app-file <path.apk>       Use a specific APK instead of building/finding one.
   --device-locale <locale>    Device locale. Default: en_US.

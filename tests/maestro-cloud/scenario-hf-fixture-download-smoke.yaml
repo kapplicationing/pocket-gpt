@@ -5,33 +5,28 @@ tags:
   - hf-fixture
   - downloads
 ---
-- runFlow: shared/bootstrap-cloud-startup.yaml
-- runFlow: shared/open-model-library.yaml
+- runFlow: shared/open-model-library-debug.yaml
 
 - assertVisible: "Model library"
 - assertVisible:
     id: "model_library_add_hugging_face"
-- tapOn:
-    id: "model_library_hf_search_input"
-- eraseText
-- inputText: "tiny"
-- hideKeyboard
-- tapOn:
-    id: "model_library_hf_search_button"
-- extendedWaitUntil:
-    visible:
-      id: "model_library_hf_search_results"
-    timeout: 30000
-- assertVisible: "Repo: fixture/tiny-gguf"
-- assertVisible: "fixture/tiny-gguf / tiny.gguf"
-- assertVisible: "File: tiny.gguf"
-- assertVisible: "Downloads: 42 | Likes: 7 | License: apache-2.0"
 - scrollUntilVisible:
     element:
-      text: "Check this file"
+      id: "model_library_hf_url_input"
     direction: DOWN
     timeout: 20000
-- tapOn: "Check this file"
+- assertVisible:
+    id: "model_library_hf_target_model"
+- tapOn:
+    id: "model_library_hf_url_input"
+- eraseText
+- inputText: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
+    timeout: 10000
+- assertVisible: "Check file"
+- tapOn: "Check file"
 - extendedWaitUntil:
     visible:
       id: "model_library_hf_candidate_card"

@@ -12,7 +12,8 @@ pocketgpt_load_dotenv() {
 pocketgpt_known_maestro_cloud_key_envs() {
   printf '%s\n' \
     "MAESTRO_CLOUD_API_KEY" \
-    "MAESTRO_CLOUD_API_KEY_2"
+    "MAESTRO_CLOUD_API_KEY_2" \
+    "MAESTRO_CLOUD_API_KEY_3"
 }
 
 pocketgpt_default_maestro_cloud_key_env() {
@@ -21,7 +22,7 @@ pocketgpt_default_maestro_cloud_key_env() {
 
 pocketgpt_maestro_cloud_env_is_supported() {
   case "${1:-}" in
-    MAESTRO_CLOUD_API_KEY|MAESTRO_CLOUD_API_KEY_2)
+    MAESTRO_CLOUD_API_KEY|MAESTRO_CLOUD_API_KEY_2|MAESTRO_CLOUD_API_KEY_3)
       return 0
       ;;
     *)
@@ -46,6 +47,9 @@ pocketgpt_maestro_cloud_account_label() {
       ;;
     MAESTRO_CLOUD_API_KEY_2)
       printf '%s\n' "account-2"
+      ;;
+    MAESTRO_CLOUD_API_KEY_3)
+      printf '%s\n' "account-3"
       ;;
     *)
       printf '%s' "${1:-unknown}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_' '-'

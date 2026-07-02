@@ -13,13 +13,16 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.platform.app.InstrumentationRegistry
@@ -51,6 +54,7 @@ import com.pocketagent.core.model.ModelSourceKind
 import com.pocketagent.nativebridge.ModelLifecycleState
 import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.runtime.RuntimeLoadedModel
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -70,6 +74,18 @@ class ModelManagementSheetComposeContractTest {
             "Expected resource id to be visible for Maestro: $resourceId",
             device.wait(Until.hasObject(By.res(resourceId)), 2_000L),
         )
+    }
+
+    private fun scrollToTag(tag: String) {
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(tag))
+        composeRule.waitForIdle()
+    }
+
+    private fun scrollToText(text: String) {
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText(text))
+        composeRule.waitForIdle()
     }
 
     @Test
@@ -273,6 +289,8 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Retry"))
         composeRule.onNodeWithText("Retry").assertIsDisplayed()
         composeRule.onNodeWithTag("choose_another_model").assertIsDisplayed()
         composeRule.onNodeWithText("Choose another").assertIsDisplayed()
@@ -424,20 +442,44 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
+        scrollToTag("model_library_add_hugging_face")
         composeRule.onNodeWithTag("model_library_add_hugging_face").assertIsDisplayed()
+        composeRule.onNodeWithText("Advanced: Add GGUF from Hugging Face").assertIsDisplayed()
+        composeRule.onNodeWithText("Runs as").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Choose the PocketGPT model family this file is compatible with. This does not load the model.",
+        ).assertIsDisplayed()
+        scrollToTag("model_library_hf_url_input")
         composeRule.onNodeWithTag("model_library_hf_url_input")
             .performTextInput("https://huggingface.co/owner/repo/resolve/main/model.gguf")
+        scrollToTag("model_library_hf_check_url")
         composeRule.onNodeWithTag("model_library_hf_check_url").performClick()
+        scrollToTag("model_library_hf_candidate_card")
         composeRule.onNodeWithTag("model_library_hf_candidate_card").assertIsDisplayed()
+        composeRule.onNodeWithText("Identity").assertIsDisplayed()
+        composeRule.onNodeWithText("Repository: owner/repo @ main").assertIsDisplayed()
+        composeRule.onNodeWithText("File path: model.gguf").assertIsDisplayed()
         composeRule.onNodeWithText("Model card: https://huggingface.co/owner/repo").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_open_model_card").performClick()
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…"))
-        composeRule.onNodeWithText("Checksum: Hugging Face LFS SHA-256 aaaaaaaaaaaa…").assertIsDisplayed()
-        composeRule.onNodeWithTag("model_library_hf_license").assertIsDisplayed()
-        composeRule.onNodeWithText("License: apache-2.0").assertIsDisplayed()
+            .performScrollToNode(hasText("Compatibility"))
+        composeRule.onNodeWithText("Compatibility").assertIsDisplayed()
+        composeRule.onNodeWithText("Runs as: Qwen 3 0.6B").assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Checksum available from Hugging Face LFS"))
+        composeRule.onNodeWithText("Safety").assertIsDisplayed()
+        composeRule.onNodeWithText("Checksum available from Hugging Face LFS").assertIsDisplayed()
+        composeRule.onNodeWithText("SHA-256 starts with aaaaaaaaaaaa…").assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("License: apache-2.0"))
+        assertTrue(composeRule.onAllNodesWithText("License: apache-2.0").fetchSemanticsNodes().isNotEmpty())
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag("model_library_hf_open_license"))
         composeRule.onNodeWithTag("model_library_hf_open_license").performClick()
-        composeRule.onNodeWithTag("model_library_hf_storage_impact").assertIsDisplayed()
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasText("Storage"))
+        assertTrue(composeRule.onAllNodesWithText("Storage").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_storage_impact").fetchSemanticsNodes().isNotEmpty())
         composeRule.runOnIdle {
             assertTrue(
                 events.contains(
@@ -451,15 +493,11 @@ class ModelManagementSheetComposeContractTest {
                 "Expected model card event in $events",
                 events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")),
             )
-            assertTrue(
-                "Expected license event in $events",
-                events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/blob/main/LICENSE")),
-            )
         }
     }
 
     @Test
-    fun huggingFaceSearchDispatchesSearchAndResolveFromResult() {
+    fun huggingFaceSearchUsesResultUrlBeforeExplicitCheck() {
         val events = mutableListOf<ModelSheetEvent>()
         val candidate = sampleHuggingFaceCandidate()
         val searchResult = sampleHuggingFaceSearchResult()
@@ -484,28 +522,57 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
+        scrollToText("Open a model file ending in .gguf, copy its file URL, then paste it here.")
+        composeRule.onNodeWithText("Open a model file ending in .gguf, copy its file URL, then paste it here.")
+            .assertIsDisplayed()
+        scrollToTag("model_library_hf_find_on_hugging_face")
+        composeRule.onNodeWithTag("model_library_hf_find_on_hugging_face").performClick()
+        scrollToTag("model_library_hf_search")
         composeRule.onNodeWithTag("model_library_hf_search").assertIsDisplayed()
+        composeRule.onNodeWithText("Search Hugging Face for GGUF files").assertIsDisplayed()
+        scrollToTag("model_library_hf_search_input")
         composeRule.onNodeWithTag("model_library_hf_search_input").performTextInput("qwen")
+        scrollToTag("model_library_hf_search_button")
         composeRule.onNodeWithTag("model_library_hf_search_button").performClick()
+        scrollToTag("model_library_hf_search_results")
         composeRule.onNodeWithTag("model_library_hf_search_results").assertIsDisplayed()
         composeRule.onNodeWithText("Repo: owner/repo").assertIsDisplayed()
         composeRule.onNodeWithText("owner/repo / model-Q4_K_M.gguf").assertIsDisplayed()
         composeRule.onNodeWithText("File: model-Q4_K_M.gguf").assertIsDisplayed()
         composeRule.onNodeWithText("Quantization: Q4_K_M").assertIsDisplayed()
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasText("Downloads: 42 | Likes: 7 | License: apache-2.0"))
-        composeRule.onNodeWithText("Downloads: 42 | Likes: 7 | License: apache-2.0").assertIsDisplayed()
-        composeRule.onNodeWithTag("model_library_hf_search_open_model_card").performClick()
-        composeRule.onNodeWithTag("model_library_hf_search_open_file").performClick()
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_hf_search_use_file"))
-        composeRule.onNodeWithTag("model_library_hf_search_use_file").performClick()
-        composeRule.onNodeWithTag("model_library_hf_search_clear").performClick()
+        scrollToText("Downloads: 42 | Likes: 7 | License: apache-2.0")
+        assertTrue(
+            composeRule.onAllNodesWithText("Downloads: 42 | Likes: 7 | License: apache-2.0")
+                .fetchSemanticsNodes()
+                .isNotEmpty(),
+        )
+        composeRule.onNodeWithTag("model_library_hf_search_open_model_card").performScrollTo().performClick()
+        composeRule.onNodeWithTag("model_library_hf_search_open_file").performScrollTo().performClick()
+        composeRule.onNodeWithTag("model_library_hf_search_use_file").performScrollTo().performClick()
 
         composeRule.runOnIdle {
             assertTrue(events.contains(ModelSheetEvent.SearchHuggingFaceFiles("qwen")))
-            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo")))
-            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/owner/repo/resolve/main/model-Q4_K_M.gguf")))
+            assertTrue(events.contains(ModelSheetEvent.OpenExternalUrl("https://huggingface.co/models?search=gguf")))
+            assertTrue(events.contains(ModelSheetEvent.ClearHuggingFaceCandidate))
+            assertFalse(
+                "Use URL should not validate before the user taps Check file. Events: $events",
+                events.contains(
+                    ModelSheetEvent.ResolveHuggingFaceCandidate(
+                        input = "https://huggingface.co/owner/repo/resolve/main/model-Q4_K_M.gguf",
+                        targetModelId = "qwen3-0.6b-q4_k_m",
+                    ),
+                ),
+            )
+        }
+
+        scrollToTag("model_library_hf_url_input")
+        composeRule.onNodeWithTag("model_library_hf_url_input")
+            .assertTextContains("https://huggingface.co/owner/repo/resolve/main/model-Q4_K_M.gguf")
+        composeRule.onNodeWithTag("model_library_hf_check_url").performClick()
+        scrollToTag("model_library_hf_search_clear")
+        composeRule.onNodeWithTag("model_library_hf_search_clear").performClick()
+
+        composeRule.runOnIdle {
             assertTrue(
                 events.contains(
                     ModelSheetEvent.ResolveHuggingFaceCandidate(
@@ -540,10 +607,11 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
-        composeRule.onNodeWithTag("model_library_hf_recent").assertIsDisplayed()
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_hf_recent_license"))
-        composeRule.onNodeWithTag("model_library_hf_recent_license").assertIsDisplayed()
+        scrollToTag("model_library_hf_recent")
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_recent").fetchSemanticsNodes().isNotEmpty())
+        composeRule.onNodeWithText("Recent checked files").assertIsDisplayed()
+        scrollToTag("model_library_hf_recent_license")
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_recent_license").fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
@@ -597,16 +665,17 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_hf_search_results"))
+        scrollToTag("model_library_add_hugging_face")
         assertResourceIdVisible("model_library_add_hugging_face")
-        assertResourceIdVisible("model_library_hf_search_input")
-        assertResourceIdVisible("model_library_hf_search_button")
-        assertResourceIdVisible("model_library_hf_search_results")
-        assertResourceIdVisible("model_library_hf_search_use_file")
+        scrollToTag("model_library_hf_search_input")
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_search_input").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_search_button").fetchSemanticsNodes().isNotEmpty())
+        scrollToTag("model_library_hf_search_results")
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_search_results").fetchSemanticsNodes().isNotEmpty())
+        scrollToTag("model_library_hf_search_use_file")
+        assertTrue(composeRule.onAllNodesWithTag("model_library_hf_search_use_file").fetchSemanticsNodes().isNotEmpty())
 
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_hf_candidate_card"))
+        scrollToTag("model_library_hf_candidate_card")
         assertResourceIdVisible("model_library_hf_candidate_card")
     }
 

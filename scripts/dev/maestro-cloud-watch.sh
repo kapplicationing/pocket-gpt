@@ -32,7 +32,7 @@ Required:
   --apk <path.apk>            App APK path
 
 Options:
-  --api-key-env MAESTRO_CLOUD_API_KEY|MAESTRO_CLOUD_API_KEY_2   Default: MAESTRO_CLOUD_API_KEY
+  --api-key-env MAESTRO_CLOUD_API_KEY|MAESTRO_CLOUD_API_KEY_2|MAESTRO_CLOUD_API_KEY_3   Default: MAESTRO_CLOUD_API_KEY
   --project-id <id>           Override MAESTRO_PROJECT_ID
   --timeout-seconds <n>       Seconds before re-fire. Default: 1800
   --android-api-level <n>     Default: 34

@@ -21,7 +21,7 @@ Usage: bash scripts/dev/maestro-cloud-gpu-benchmark.sh [options]
 Options:
   --no-build                  Reuse the existing debug APK.
   --api-level <level[,level]> Add one or more Android API levels to run.
-  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY or MAESTRO_CLOUD_API_KEY_2.
+  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
   --run-root <path>           Write artifacts under the provided root.
   --help                      Show this help text.
 USAGE

@@ -33,7 +33,7 @@ Options:
   --api-levels <csv>          Android API levels to test. Default: 29,31,34.
   --models <csv>              Model keys to test. Default: tiny,qwen_0_8b,qwen_2b.
   --project-id <id>           Override MAESTRO_PROJECT_ID.
-  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY or MAESTRO_CLOUD_API_KEY_2.
+  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
   --output-root <path>        Write generated flows and logs under the provided root.
   --help                      Show this help text.
 USAGE

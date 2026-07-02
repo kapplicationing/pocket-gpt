@@ -4,9 +4,11 @@ import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +23,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.pocketagent.android.runtime.AppOperationTrace
 import com.pocketagent.android.runtime.huggingface.SharedPreferencesHuggingFaceRecentModelStore
+import com.pocketagent.android.runtime.modelmanager.ModelDownloadTaskStateStore
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
@@ -30,10 +33,13 @@ import com.pocketagent.android.ui.PocketAgentApp
 import com.pocketagent.android.ui.PocketAgentTheme
 import com.pocketagent.android.ui.ProvisioningBootstrapScreen
 import com.pocketagent.android.ui.controllers.AndroidTelemetryDeviceStateProvider
+import com.pocketagent.android.ui.state.ModalSurface
 import com.pocketagent.android.data.chat.AndroidSessionPersistence
 import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.voice.OffasListenerService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -47,6 +53,8 @@ class MainActivity : ComponentActivity() {
     private var warmedSessionPersistence: AndroidSessionPersistence? = null
     @Volatile
     private var warmedVoiceController: VoiceActivationController? = null
+    private val debugAutomationRequestState = mutableStateOf<DebugAutomationRequest?>(null)
+    private val debugModelLibraryReadyTagState = mutableStateOf(false)
 
     private val foregroundRuntimeServices by lazy(LazyThreadSafetyMode.NONE) {
         resolveAppForegroundRuntimeServices(applicationContext)
@@ -81,6 +89,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        debugAutomationRequestState.value = parseDebugAutomationRequest(intent)
         if (BuildConfig.DEBUG) {
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder()
@@ -115,12 +124,17 @@ class MainActivity : ComponentActivity() {
                         LaunchedEffect(Unit) {
                             viewModel.refreshRuntimeReadiness()
                         }
+                        val debugAutomationRequest = debugAutomationRequestState.value
+                        LaunchedEffect(runtimeReady, debugAutomationRequest) {
+                            handleDebugAutomationRequest(debugAutomationRequest)
+                        }
                         PocketAgentApp(
                             viewModel = viewModel,
                             provisioningViewModel = provisioningViewModel,
                             voiceController = checkNotNull(warmedVoiceController) {
                                 "Voice controller must be warmed before composition"
                             },
+                            debugModelLibraryReadyTagEnabled = debugModelLibraryReadyTagState.value,
                         )
                     } else {
                         ProvisioningBootstrapScreen()
@@ -129,6 +143,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         createNotificationChannels()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        debugAutomationRequestState.value = parseDebugAutomationRequest(intent)
     }
 
     private fun createNotificationChannels() {
@@ -215,9 +235,82 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private suspend fun handleDebugAutomationRequest(request: DebugAutomationRequest?) {
+        if (!BuildConfig.DEBUG || request == null) {
+            return
+        }
+        Log.i(DEBUG_AUTOMATION_LOG_TAG, "handling request=$request")
+        debugModelLibraryReadyTagState.value = false
+        withContext(Dispatchers.IO) {
+            if (request.clearDownloads) {
+                ModelDownloadTaskStateStore.resetForTests()
+                applicationContext.deleteDatabase(DOWNLOAD_TASK_DATABASE_NAME)
+                applicationContext
+                    .getSharedPreferences(DOWNLOAD_TASK_LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .commit()
+                ModelDownloadTaskStateStore.resetForTests()
+            }
+            if (request.clearRecentHuggingFace) {
+                SharedPreferencesHuggingFaceRecentModelStore(applicationContext).clear()
+            }
+        }
+        viewModel.uiState
+            .filter { it.bootstrapCompleted }
+            .first()
+        Log.i(DEBUG_AUTOMATION_LOG_TAG, "chat bootstrap complete")
+        if (request.skipOnboarding) {
+            viewModel.completeOnboarding()
+            Log.i(DEBUG_AUTOMATION_LOG_TAG, "onboarding completed through ChatViewModel")
+        }
+        if (request.openSurface == DEBUG_OPEN_SURFACE_MODEL_LIBRARY) {
+            provisioningViewModel.uiState
+                .filter { it.snapshot != null }
+                .first()
+            viewModel.showSurface(ModalSurface.ModelLibrary)
+            debugModelLibraryReadyTagState.value = true
+            Log.i(DEBUG_AUTOMATION_LOG_TAG, "model library requested")
+        }
+        debugAutomationRequestState.value = null
+    }
+
+    private fun parseDebugAutomationRequest(intent: Intent?): DebugAutomationRequest? {
+        if (!BuildConfig.DEBUG || intent == null) {
+            return null
+        }
+        val requestedSurface = intent.getStringExtra(EXTRA_DEBUG_OPEN_SURFACE)
+        val hasDebugLaunchRequest = intent.action == ACTION_DEBUG_OPEN_MODEL_LIBRARY ||
+            requestedSurface == DEBUG_OPEN_SURFACE_MODEL_LIBRARY
+        if (!hasDebugLaunchRequest) {
+            return null
+        }
+        val request = DebugAutomationRequest(
+            skipOnboarding = if (intent.hasExtra(EXTRA_DEBUG_SKIP_ONBOARDING)) {
+                intent.getBooleanExtra(EXTRA_DEBUG_SKIP_ONBOARDING, true)
+            } else {
+                true
+            },
+            openSurface = requestedSurface ?: DEBUG_OPEN_SURFACE_MODEL_LIBRARY,
+            clearDownloads = intent.getBooleanExtra(EXTRA_DEBUG_CLEAR_DOWNLOADS, false),
+            clearRecentHuggingFace = intent.getBooleanExtra(EXTRA_DEBUG_CLEAR_RECENT_HF, false),
+        )
+        Log.i(DEBUG_AUTOMATION_LOG_TAG, "parsed request=$request")
+        return request
+    }
+
     companion object {
         const val CHANNEL_MODEL_DOWNLOADS = "model_downloads"
         const val CHANNEL_RUNTIME_STATUS = "runtime_status"
+        const val ACTION_DEBUG_OPEN_MODEL_LIBRARY = "com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY"
+        const val EXTRA_DEBUG_SKIP_ONBOARDING = "pocketagent.debug.skip_onboarding"
+        const val EXTRA_DEBUG_OPEN_SURFACE = "pocketagent.debug.open_surface"
+        const val EXTRA_DEBUG_CLEAR_DOWNLOADS = "pocketagent.debug.clear_downloads"
+        const val EXTRA_DEBUG_CLEAR_RECENT_HF = "pocketagent.debug.clear_recent_hf"
+        const val DEBUG_OPEN_SURFACE_MODEL_LIBRARY = "model_library"
+        private const val DOWNLOAD_TASK_DATABASE_NAME = "pocketagent_model_downloads.db"
+        private const val DOWNLOAD_TASK_LEGACY_PREFS_NAME = "pocketagent_model_downloads"
+        private const val DEBUG_AUTOMATION_LOG_TAG = "PocketGptDebugAutomation"
         private const val TRIM_MEMORY_RUNNING_MODERATE_LEVEL = 5
         private const val TRIM_MEMORY_RUNNING_LOW_LEVEL = 10
         private const val TRIM_MEMORY_RUNNING_CRITICAL_LEVEL = 15
@@ -226,3 +319,10 @@ class MainActivity : ComponentActivity() {
         private const val TRIM_MEMORY_COMPLETE_LEVEL = 80
     }
 }
+
+private data class DebugAutomationRequest(
+    val skipOnboarding: Boolean,
+    val openSurface: String?,
+    val clearDownloads: Boolean,
+    val clearRecentHuggingFace: Boolean,
+)

@@ -250,12 +250,10 @@ internal fun ModelSheet(
                 onClearSearch = { onEvent(ModelSheetEvent.ClearHuggingFaceSearch) },
                 onUseSearchResult = { result ->
                     huggingFaceInput = result.canonicalUrl
-                    onEvent(
-                        ModelSheetEvent.ResolveHuggingFaceCandidate(
-                            input = result.canonicalUrl,
-                            targetModelId = resolvedHuggingFaceTargetId,
-                        ),
-                    )
+                    onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
+                    scope.launch {
+                        listState.animateScrollToItem(huggingFaceSectionIndex)
+                    }
                 },
                 onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
                 onOpenExternalUrl = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
@@ -411,6 +409,7 @@ internal fun ModelSheet(
 
 internal const val DOWNLOADED_SECTION_KEY = "downloaded_section_header"
 internal const val HUGGING_FACE_SECTION_KEY = "hugging_face_acquisition_section"
+private const val HUGGING_FACE_GGUF_SEARCH_URL = "https://huggingface.co/models?search=gguf"
 private const val HF_SEARCH_VISIBLE_RESULT_LIMIT = 5
 
 @Composable
@@ -465,10 +464,26 @@ private fun HuggingFaceAcquisitionSection(
                 singleLine = true,
                 placeholder = { Text(stringResource(id = R.string.ui_hf_url_placeholder)) },
             )
+            Text(
+                text = stringResource(id = R.string.ui_hf_find_helper),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = { onOpenExternalUrl(HUGGING_FACE_GGUF_SEARCH_URL) },
+                modifier = Modifier.testTag("model_library_hf_find_on_hugging_face"),
+            ) {
+                Text(stringResource(id = R.string.ui_hf_find_on_hugging_face))
+            }
             if (targets.isNotEmpty()) {
                 Text(
                     text = stringResource(id = R.string.ui_hf_target_model_label),
                     style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(id = R.string.ui_hf_target_model_hint),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 FlowRow(
@@ -522,17 +537,6 @@ private fun HuggingFaceAcquisitionSection(
                     }
                 }
             }
-            HorizontalDivider()
-            HuggingFaceSearchSection(
-                query = searchQuery,
-                selectedTargetId = selectedTargetId,
-                state = searchState,
-                onQueryChange = onSearchQueryChange,
-                onSearch = onSearch,
-                onClearSearch = onClearSearch,
-                onUseResult = onUseSearchResult,
-                onOpenExternalUrl = onOpenExternalUrl,
-            )
             when (state) {
                 HuggingFaceAcquisitionUiState.Idle -> Unit
                 HuggingFaceAcquisitionUiState.Resolving -> {
@@ -571,6 +575,17 @@ private fun HuggingFaceAcquisitionSection(
                     )
                 }
             }
+            HorizontalDivider()
+            HuggingFaceSearchSection(
+                query = searchQuery,
+                selectedTargetId = selectedTargetId,
+                state = searchState,
+                onQueryChange = onSearchQueryChange,
+                onSearch = onSearch,
+                onClearSearch = onClearSearch,
+                onUseResult = onUseSearchResult,
+                onOpenExternalUrl = onOpenExternalUrl,
+            )
             if (recentModels.isNotEmpty()) {
                 HorizontalDivider()
                 HuggingFaceRecentModelsSection(
@@ -1039,8 +1054,18 @@ private fun HuggingFaceCandidateCard(
             verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing / 2),
         ) {
             Text(candidate.displayName, style = MaterialTheme.typography.labelLarge)
+            HuggingFaceCandidateGroupTitle(R.string.ui_hf_candidate_identity_title)
             Text(
-                text = stringResource(id = R.string.ui_hf_candidate_target, candidate.target.displayName),
+                text = stringResource(
+                    id = R.string.ui_hf_candidate_source,
+                    candidate.reference.repoId,
+                    candidate.reference.revision,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_file_path, candidate.reference.filePath),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1055,12 +1080,9 @@ private fun HuggingFaceCandidateCard(
             ) {
                 Text(stringResource(id = R.string.ui_hf_open_model_card))
             }
+            HuggingFaceCandidateGroupTitle(R.string.ui_hf_candidate_compatibility_title)
             Text(
-                text = stringResource(
-                    id = R.string.ui_hf_candidate_source,
-                    candidate.reference.repoId,
-                    candidate.reference.revision,
-                ),
+                text = stringResource(id = R.string.ui_hf_candidate_target, candidate.target.displayName),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1072,20 +1094,24 @@ private fun HuggingFaceCandidateCard(
                 )
             }
             Text(
-                text = stringResource(
-                    id = R.string.ui_model_download_expected_size,
-                    Formatter.formatShortFileSize(context, candidate.sizeBytes),
-                ),
+                text = stringResource(id = R.string.ui_hf_candidate_compatibility),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            HuggingFaceCandidateStorageLine(
-                candidateSizeBytes = candidate.sizeBytes,
-                availableStorageBytes = availableStorageBytes,
+            HuggingFaceCandidateGroupTitle(R.string.ui_hf_candidate_safety_title)
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_checksum_status),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = stringResource(id = R.string.ui_hf_candidate_checksum_status, candidate.sha256.take(12)),
+                text = stringResource(id = R.string.ui_hf_candidate_sha, candidate.sha256.take(12)),
                 style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_hf_candidate_source_url, candidate.reference.canonicalResolveUrl),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             candidate.license?.takeIf { license -> license.isNotBlank() }?.let { license ->
@@ -1104,10 +1130,18 @@ private fun HuggingFaceCandidateCard(
                     Text(stringResource(id = R.string.ui_hf_open_license))
                 }
             }
+            HuggingFaceCandidateGroupTitle(R.string.ui_hf_candidate_storage_title)
             Text(
-                text = stringResource(id = R.string.ui_hf_candidate_compatibility),
-                style = MaterialTheme.typography.labelSmall,
+                text = stringResource(
+                    id = R.string.ui_model_download_expected_size,
+                    Formatter.formatShortFileSize(context, candidate.sizeBytes),
+                ),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HuggingFaceCandidateStorageLine(
+                candidateSizeBytes = candidate.sizeBytes,
+                availableStorageBytes = availableStorageBytes,
             )
             Button(
                 onClick = { onDownloadVersion(candidate.version) },
@@ -1128,6 +1162,16 @@ private fun HuggingFaceCandidateCard(
             }
         }
     }
+}
+
+@Composable
+private fun HuggingFaceCandidateGroupTitle(labelRes: Int) {
+    Text(
+        text = stringResource(id = labelRes),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 private val HF_SEARCH_QUANTIZATION_REGEX = Regex(

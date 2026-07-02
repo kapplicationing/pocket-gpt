@@ -1,8 +1,8 @@
 # Dynamic Hugging Face Roadmap
 
-Last updated: 2026-06-30
+Last updated: 2026-07-02
 Owner: Runtime + Android + Product
-Status: V1 paste-URL flow implemented, fixture proof hardened, product expansion staged
+Status: V1 paste-URL flow implemented, HF automation bootstrap stabilized, product expansion staged
 
 ## Current Position
 
@@ -29,10 +29,11 @@ Green proof from 2026-06-30:
 
 Blocked or pending proof:
 
-1. Local fixture Maestro is not fully green yet. The standalone probe failures were caused by probing before the app was installed; the wrapper-installed probe passed. The first full fixture flow then failed because it anchored on the `Download queue` header while the tiny fixture completed. The flow now targets the queue card id instead. The rerun was interrupted by wireless ADB going `offline` before the flow could reach the fake server beyond `/health`. Latest interrupted run: `tmp/hf-fixture-smoke/20260630T074038Z`.
-2. A later reconnect attempt still classified the local device proof as transport-blocked: `adb devices` saw `192.168.246.27:40781 offline`, `adb reconnect offline` removed the stale transport, and `adb connect 192.168.246.27:40781` failed. The next useful proof needs the phone re-paired or attached by USB.
-3. Maestro Cloud execution requires uploading the private debug APK to Maestro Cloud. The repo has a wrapper and flow, but an agent should not run it without explicit approval for that external upload.
-4. Live HF download remains a manual long-running compatibility probe, not a default CI gate.
+1. The prior `model_library_hf_search_button` cloud failure is classified as launch/bootstrap navigation flake. The fixture server path worked far enough for cloud execution; the app did not deterministically arrive at the HF section in Model Library.
+2. HF Maestro flows now use the debug-only action `com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY` and wait for `debug_model_library_ready` instead of using shared onboarding/bootstrap helpers.
+3. Local fixture Maestro still needs a fresh green run on a stable pinned device or emulator after the debug entrypoint change.
+4. Maestro Cloud fixture proof still requires a public fixture URL and an approved APK upload environment.
+5. Live HF download remains a manual long-running compatibility probe, not a default CI gate.
 
 ## Implemented V1 Surfaces
 
@@ -86,37 +87,57 @@ Implemented:
 3. Local fixture smoke wrapper: `scripts/dev/maestro-hf-fixture-smoke.sh`.
 4. Local wrapper bootstrap probe gate, so harness failures fail early.
 5. Local wrapper ADB state preflight, so offline wireless transports fail before starting the fixture server.
-6. Cloud fixture flow: `tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml`.
+6. Cloud fixture default flow: `tests/maestro-cloud/scenario-hf-download-installed-smoke.yaml`.
 7. Cloud fixture wrapper: `scripts/dev/maestro-cloud-hf-fixture-smoke.sh`.
 8. Cloud wrapper fixture preflight for `/health`, HF search, tree metadata, and byte-range artifact download, so an unreachable or incomplete public fixture URL fails before build/upload.
 9. Cloud wrapper rejects loopback/private fixture URLs by default because Maestro Cloud cannot reach the developer machine's `localhost`.
-10. Documentation for public fixture exposure through `cloudflared`, `ngrok`, `localhost.run`, Tailscale Funnel, or a tiny hosted VM.
+10. Documentation for public fixture exposure through Devstack, `ngrok`, Tailscale Funnel, or a tiny hosted VM.
 
 ## Tech Roadmap
 
-### 1. Close The Local Maestro Harness Gap
+### 1. Keep The HF Automation Entrypoint Deterministic
+
+Goal: keep HF UI proof failures tied to product steps, not generic launch/onboarding navigation.
+
+Implemented:
+
+1. Debug-only activity action: `com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY`.
+2. Debug extras for skipping onboarding, opening Model Library, clearing download tasks, and clearing recent HF entries. The action defaults to skipping onboarding and opening Model Library; the debug build also accepts `pocketagent.debug.open_surface=model_library` when a runner cannot set a custom action.
+3. The action uses the real app state path: `ChatViewModel.completeOnboarding()` and `ChatViewModel.showSurface(ModalSurface.ModelLibrary)`.
+4. `debug_model_library_ready` marks the sheet-open state for Maestro and instrumentation.
+5. HF Maestro flows use `shared/open-model-library-debug.yaml`.
+
+Rules:
+
+1. Release builds must ignore the debug action.
+2. Do not add test-only behavior to HF acquisition, download manager, model selection, or load/offload logic.
+3. Keep pause/resume/cancel/retry state-machine proof in instrumentation; Maestro should prove user-visible journey slices.
+
+### 2. Close The Local Maestro Harness Gap
 
 Goal: make local fixture smoke repeatable on one pinned device or emulator.
 
 Next checks:
 
 1. Recover or re-pair wireless ADB for `192.168.246.27:40781`, or use USB for the fixture smoke.
-2. Re-run `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <stable-serial>`.
-3. If the queue id appears and pause/resume/cancel/retry pass, record the run root as local fixture evidence.
-4. If the flow fails again with app UI evidence, inspect the new `maestro-debug` output captured by the wrapper.
-5. If a known-good emulator becomes available, run the same wrapper there to separate device transport from flow logic.
+2. Run `tests/maestro/scenario-hf-url-validation-smoke.yaml` first.
+3. Run `tests/maestro/scenario-hf-search-to-candidate-smoke.yaml` second.
+4. Run `tests/maestro/scenario-hf-download-installed-smoke.yaml` third.
+5. Re-run `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <stable-serial>` only after the split flows are green.
+6. If a known-good emulator becomes available, run the same split proofs there to separate device transport from flow logic.
 
 Do not keep rerunning on the offline wireless transport. The next useful local proof requires a stable ADB device.
 
-### 2. Finish Cloud Fixture Proof With Explicit Approval
+### 3. Finish Cloud Fixture Proof With Explicit Approval
 
-Goal: prove hosted paste/check/queue/pause/resume/cancel/retry/install-row behavior without live Hugging Face.
+Goal: prove hosted paste/check/queue/install-row behavior without live Hugging Face.
 
 Default path:
 
 1. Start `scripts/dev/hf-fixture-server.py` locally.
 2. Expose it with one public HTTPS or HTTP URL.
 3. Run `scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url <public-url>`.
+4. Keep pause/resume/cancel/retry in instrumentation and optional fixture regressions, not the default cloud smoke.
 
 Simple exposure options:
 
@@ -134,7 +155,7 @@ Constraint:
 2. This requires explicit approval in agent sessions.
 3. CI should use this only where the organization already permits APK upload to Maestro Cloud.
 
-### 3. Harden Metadata And Naming
+### 4. Harden Metadata And Naming
 
 Remaining cleanup:
 
@@ -143,7 +164,7 @@ Remaining cleanup:
 3. Reuse the same source metadata shape for future recent-HF catalog records if recents move out of `SharedPreferences`.
 4. Add device migration proof for task-store rows with and without `displayName`/`sourceRef`.
 
-### 4. Keep Admission Failures Pre-Enqueue
+### 5. Keep Admission Failures Pre-Enqueue
 
 All unsupported cases should fail before a task enters the download queue:
 
@@ -158,7 +179,7 @@ All unsupported cases should fail before a task enters the download queue:
 
 The UI should show a concrete blocked reason and never create a partial selected/downloaded state.
 
-### 5. CI Shape
+### 6. CI Shape
 
 Keep default CI deterministic:
 

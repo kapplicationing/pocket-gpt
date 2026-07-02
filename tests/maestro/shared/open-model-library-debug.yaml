@@ -1,0 +1,16 @@
+appId: com.pocketagent.android
+---
+- launchApp:
+    clearState: true
+    arguments:
+      android.intent.action: "com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY"
+      pocketagent.debug.skip_onboarding: "true"
+      pocketagent.debug.open_surface: "model_library"
+      pocketagent.debug.clear_recent_hf: "true"
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_ready"
+    timeout: 30000
+- assertVisible: "Model library"
+- assertVisible:
+    id: "model_library_add_hugging_face"

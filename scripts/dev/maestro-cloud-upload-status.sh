@@ -20,7 +20,7 @@ Usage: bash scripts/dev/maestro-cloud-upload-status.sh [options] <label:upload-i
 
 Options:
   --project-id <id>           Override MAESTRO_PROJECT_ID.
-  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY or MAESTRO_CLOUD_API_KEY_2.
+  --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
   --watch                     Poll until every upload is completed.
   --interval <sec>            Poll interval for --watch mode. Default: 60.
   --help                      Show this help text.

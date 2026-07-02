@@ -360,7 +360,7 @@ bash scripts/dev/maestro-cloud-smoke-parallel.sh
 Optional:
 
 1. Prefer the wrapper commands above instead of copying a raw `maestro cloud --api-key ...` command into shell history.
-2. Pick the cloud account explicitly with `--api-key-env MAESTRO_CLOUD_API_KEY` or `--api-key-env MAESTRO_CLOUD_API_KEY_2`.
+2. Pick the cloud account explicitly with `--api-key-env MAESTRO_CLOUD_API_KEY`, `--api-key-env MAESTRO_CLOUD_API_KEY_2`, or `--api-key-env MAESTRO_CLOUD_API_KEY_3`.
 3. Use `bash scripts/dev/maestro-cloud-smoke-parallel.sh` only when you intentionally want both configured accounts to run the same smoke suite in parallel.
 4. Android device model selection is not deterministic in our current lane. As of March 15, 2026 with Maestro CLI `2.2.0`, Android cloud runs executed on `Pixel 6`; use `--android-api-level` and `--device-locale` as the reliable selectors.
 5. Maestro Cloud Android binaries should include `arm64-v8a` or be multi-arch. Quick local check:
@@ -391,7 +391,38 @@ Dynamic Hugging Face fixture smoke on a pinned local device:
 bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
 ```
 
-This starts `scripts/dev/hf-fixture-server.py`, builds the debug APK with `-Ppocketgpt.hfFixtureBaseUrl=http://127.0.0.1:<port>/`, reverses the fixture port through `adb`, and runs `tests/maestro/scenario-hf-fixture-download-smoke.yaml`. The UI searches Hugging Face and selects a canonical `https://huggingface.co/...` file result; only network calls are rewritten.
+This starts `scripts/dev/hf-fixture-server.py`, builds the debug APK with `-Ppocketgpt.hfFixtureBaseUrl=http://127.0.0.1:<port>/`, reverses the fixture port through `adb`, and runs `tests/maestro/scenario-hf-fixture-download-smoke.yaml`. The UI pastes the canonical `https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf` URL and only network calls are rewritten.
+
+The local fixture wrapper builds native bridge libraries by default because the app must pass runtime/provisioning readiness before the debug Model Library entrypoint opens. Use `--disable-native-build` only for compile/debug triage where you do not expect the app to leave the provisioning screen.
+
+HF Maestro flows launch Model Library through the debug-only action `com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY` with:
+
+```text
+pocketagent.debug.skip_onboarding=true
+pocketagent.debug.open_surface=model_library
+pocketagent.debug.clear_recent_hf=true
+```
+
+The action defaults to `skip_onboarding=true` and `open_surface=model_library`. The debug build also accepts `pocketagent.debug.open_surface=model_library` as a launch extra when a runner cannot set a custom Android action. Release builds ignore this debug entrypoint.
+
+Use one pinned transport for device proof:
+
+```bash
+adb devices
+adb disconnect <duplicate-or-stale-wireless-serial>
+maestro-android device probe --device <device>
+```
+
+Run split HF proofs before the optional full fixture regression:
+
+```bash
+maestro-android test tests/maestro/scenario-hf-url-validation-smoke.yaml --device <device>
+maestro-android test tests/maestro/scenario-hf-search-to-candidate-smoke.yaml --device <device>
+maestro-android test tests/maestro/scenario-hf-download-installed-smoke.yaml --device <device>
+bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
+```
+
+The debug action opens the real `ChatViewModel.showSurface(ModalSurface.ModelLibrary)` path. Do not use `bootstrap-clean-start.yaml` or `open-model-library.yaml` for HF-specific flows; those helpers are intentionally broad and were the source of prior HF automation flake.
 
 Focused model-management split smoke on Maestro Cloud:
 

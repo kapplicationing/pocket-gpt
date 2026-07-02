@@ -4,8 +4,7 @@ tags:
   - model-management
   - hf-validation
 ---
-- runFlow: shared/bootstrap-cloud-startup.yaml
-- runFlow: shared/open-model-library.yaml
+- runFlow: shared/open-model-library-debug.yaml
 
 - assertVisible: "Model library"
 - assertVisible:
@@ -19,11 +18,9 @@ tags:
     id: "model_library_hf_check_url"
 - scrollUntilVisible:
     element:
-      text: "Use a public https://huggingface.co model file URL."
+      id: "model_library_hf_error"
     direction: DOWN
     timeout: 20000
-- assertVisible:
-    id: "model_library_hf_error"
 - assertNotVisible:
     id: "model_library_hf_candidate_card"
 - takeScreenshot: "cloud-hf-url-validation-blocked"

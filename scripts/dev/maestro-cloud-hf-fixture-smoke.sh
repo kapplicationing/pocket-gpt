@@ -24,7 +24,7 @@ Options:
   --fixture-base-url <url>   Public URL for scripts/dev/hf-fixture-server.py.
   --api-level <level>        Android API level. Default: 34.
   --api-key-env <env>        Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
-  --flow <path.yaml>         Maestro Cloud flow. Default: scenario-hf-download-installed-smoke.yaml.
+  --flow <path.yaml>         Maestro Cloud flow. Default: scenario-hf-download-installed-smoke.yaml queue-status proof.
   --run-root <path>          Write artifacts under this directory.
   --allow-local-fixture-url  Allow loopback/private fixture URLs for wrapper debugging only.
   --preflight-only           Validate fixture endpoint and exit before building or uploading.

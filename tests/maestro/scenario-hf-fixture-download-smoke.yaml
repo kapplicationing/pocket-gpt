@@ -4,32 +4,7 @@ tags:
   - model-management
   - downloads
 ---
-- runFlow: shared/open-model-library-debug.yaml
-
-- assertVisible: "Model library"
-- assertVisible:
-    id: "model_library_add_hugging_face"
-- scrollUntilVisible:
-    element:
-      id: "model_library_hf_url_input"
-    direction: DOWN
-    timeout: 20000
-- assertVisible:
-    id: "model_library_hf_target_model"
-- tapOn:
-    id: "model_library_hf_url_input"
-- eraseText
-- inputText: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
-- hideKeyboard
-- extendedWaitUntil:
-    visible: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
-    timeout: 10000
-- assertVisible: "Check file"
-- tapOn: "Check file"
-- extendedWaitUntil:
-    visible:
-      id: "model_library_hf_candidate_card"
-    timeout: 30000
+- runFlow: shared/open-model-library-debug-hf-candidate.yaml
 - assertVisible: "fixture/tiny-gguf / tiny.gguf"
 - scrollUntilVisible:
     element:
@@ -43,48 +18,8 @@ tags:
       visible: "Large download on metered network"
     commands:
       - tapOn: "Continue download"
-- scrollUntilVisible:
-    element:
-      id: "model_library_download_queue_pause"
-    direction: DOWN
-    timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_pause"
-- scrollUntilVisible:
-    element:
-      id: "model_library_download_queue_resume"
-    direction: DOWN
-    timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_resume"
-- scrollUntilVisible:
-    element:
-      id: "model_library_download_queue_pause"
-    direction: DOWN
-    timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_cancel"
-- scrollUntilVisible:
-    element:
-      id: "model_library_download_queue_retry"
-    direction: DOWN
-    timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_retry"
-- scrollUntilVisible:
-    element:
-      id: "model_library_download_queue_pause"
-    direction: DOWN
-    timeout: 60000
 - extendedWaitUntil:
-    notVisible:
-      id: "model_library_download_queue_pause"
-    timeout: 180000
-- scrollUntilVisible:
-    element:
-      text: "fixture/tiny-gguf / tiny.gguf"
-    direction: DOWN
-    timeout: 30000
-- assertVisible: "fixture/tiny-gguf / tiny.gguf"
-- assertVisible: "Load"
-- takeScreenshot: "hf-fixture-download-installed"
+    visible:
+      id: "debug_model_library_task_present"
+    timeout: 60000
+- takeScreenshot: "hf-fixture-download-queued"

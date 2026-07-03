@@ -62,12 +62,13 @@ internal fun rememberChatAppLaunchers(
                 context.getString(R.string.ui_model_download_notifications_disabled),
             )
         }
-        beginDownload(
-            context = context,
-            scope = scope,
-            provisioningViewModel = provisioningViewModel,
-            version = version,
-        )
+        scope.launch {
+            beginDownload(
+                context = context,
+                provisioningViewModel = provisioningViewModel,
+                version = version,
+            )
+        }
     }
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -144,7 +145,6 @@ internal fun rememberChatAppLaunchers(
 
                 else -> beginDownload(
                     context = context,
-                    scope = scope,
                     provisioningViewModel = provisioningViewModel,
                     version = version,
                 )
@@ -229,35 +229,32 @@ internal fun voiceActivationFeedback(
     }
 }
 
-private fun beginDownload(
+private suspend fun beginDownload(
     context: Context,
-    scope: CoroutineScope,
     provisioningViewModel: ModelProvisioningViewModel,
     version: ModelDistributionVersion,
 ) {
-    scope.launch {
-        runCatching { provisioningViewModel.enqueueDownload(version) }
-            .onSuccess { taskId ->
-                provisioningViewModel.setStatusMessage(
-                    context.getString(
-                        R.string.ui_model_download_enqueued,
-                        version.modelId,
-                        version.version,
-                        taskId,
-                    ),
-                )
-            }
-            .onFailure { error ->
-                provisioningViewModel.setStatusMessage(
-                    context.getString(
-                        R.string.ui_model_download_start_failed,
-                        version.modelId,
-                        version.version,
-                        error.message ?: "unknown error",
-                    ),
-                )
-            }
-    }
+    runCatching { provisioningViewModel.enqueueDownload(version) }
+        .onSuccess { taskId ->
+            provisioningViewModel.setStatusMessage(
+                context.getString(
+                    R.string.ui_model_download_enqueued,
+                    version.modelId,
+                    version.version,
+                    taskId,
+                ),
+            )
+        }
+        .onFailure { error ->
+            provisioningViewModel.setStatusMessage(
+                context.getString(
+                    R.string.ui_model_download_start_failed,
+                    version.modelId,
+                    version.version,
+                    error.message ?: "unknown error",
+                ),
+            )
+        }
 }
 
 @Composable

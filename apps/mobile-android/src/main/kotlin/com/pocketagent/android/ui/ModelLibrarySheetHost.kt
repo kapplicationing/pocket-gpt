@@ -39,6 +39,7 @@ internal fun ModelLibrarySheetHost(
     modelRemoveUndoState: ModelRemoveUndoState,
     actions: ModelLibraryActions,
     debugModelLibraryReadyTagEnabled: Boolean = false,
+    debugModelLibraryStatus: String? = null,
 ) {
     if (activeSurface !is ModalSurface.ModelLibrary) {
         return
@@ -68,6 +69,25 @@ internal fun ModelLibrarySheetHost(
         onDismiss = actions::dismissSheet,
         modifier = sheetModifier,
     ) {
+        if (debugModelLibraryReadyTagEnabled && !debugModelLibraryStatus.isNullOrBlank()) {
+            Text(
+                text = debugModelLibraryStatus,
+                modifier = Modifier.testTag("debug_model_library_status"),
+            )
+            DebugModelLibraryStatusTags(debugModelLibraryStatus)
+        }
+        if (debugModelLibraryReadyTagEnabled) {
+            Text(
+                text = provisioningState.debugHuggingFaceTaskStatus(),
+                modifier = Modifier.testTag("debug_model_library_task_status"),
+            )
+            if (provisioningState.hasDebugHuggingFaceTask()) {
+                Text(
+                    text = "hf_task_present",
+                    modifier = Modifier.testTag("debug_model_library_task_present"),
+                )
+            }
+        }
         ModelSheet(
             libraryState = modelLibraryState,
             runtimeState = runtimeModelState,
@@ -193,6 +213,82 @@ internal fun ModelLibrarySheetHost(
                     Text(stringResource(id = R.string.ui_cancel_button))
                 }
             },
+        )
+    }
+}
+
+private fun ModelProvisioningUiState.debugHuggingFaceTaskStatus(): String {
+    return when (val state = huggingFaceAcquisitionState) {
+        HuggingFaceAcquisitionUiState.Idle -> "hf_candidate:idle"
+        HuggingFaceAcquisitionUiState.Resolving -> "hf_candidate:resolving"
+        is HuggingFaceAcquisitionUiState.Blocked -> "hf_candidate:blocked:${state.reason}"
+        is HuggingFaceAcquisitionUiState.Ready -> {
+            val version = state.candidate.version
+            val key = "${version.modelId}::${version.version}"
+            val task = downloads.firstOrNull { download ->
+                "${download.modelId}::${download.version}" == key
+            }
+            when {
+                key in enqueuingModelIds && task == null -> "hf_task:ENQUEUING|model=${version.modelId}|version=${version.version}"
+                task != null -> buildString {
+                    append("hf_task:${task.status}")
+                    append("|stage=${task.processingStage}")
+                    append("|failure=${task.failureReason ?: "none"}")
+                    append("|bytes=${task.progressBytes}/${task.totalBytes}")
+                    append("|id=${task.taskId}")
+                }
+                else -> "hf_task:none|model=${version.modelId}|version=${version.version}"
+            }
+        }
+    }
+}
+
+private fun ModelProvisioningUiState.hasDebugHuggingFaceTask(): Boolean {
+    val version = (huggingFaceAcquisitionState as? HuggingFaceAcquisitionUiState.Ready)?.candidate?.version
+        ?: return false
+    val key = "${version.modelId}::${version.version}"
+    return downloads.any { download ->
+        "${download.modelId}::${download.version}" == key
+    }
+}
+
+@Composable
+private fun DebugModelLibraryStatusTags(status: String) {
+    val normalized = status.trim()
+    val blockedReason = normalized
+        .takeIf { it.startsWith("hf_blocked:") }
+        ?.substringAfter("hf_blocked:")
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?.lowercase()
+    val statusTag = when {
+        normalized == "hf_ready" -> "debug_model_library_status_ready"
+        normalized.startsWith("hf_blocked:") -> "debug_model_library_status_blocked"
+        normalized.startsWith("hf_resolving:") -> "debug_model_library_status_resolving"
+        normalized == "hf_no_target" -> "debug_model_library_status_no_target"
+        normalized == "hf_no_url" -> "debug_model_library_status_no_url"
+        normalized == "hf_still_resolving" -> "debug_model_library_status_still_resolving"
+        normalized == "hf_idle_after_resolve" -> "debug_model_library_status_idle_after_resolve"
+        else -> null
+    }
+    val terminal = normalized.startsWith("hf_") && !normalized.startsWith("hf_resolving:")
+    if (terminal) {
+        Text(
+            text = "hf_terminal",
+            modifier = Modifier.testTag("debug_model_library_status_terminal"),
+        )
+    }
+    statusTag?.let { tag ->
+        Text(
+            text = tag,
+            modifier = Modifier.testTag(tag),
+        )
+    }
+    blockedReason?.let { reason ->
+        val tag = "debug_model_library_status_blocked_$reason"
+        Text(
+            text = tag,
+            modifier = Modifier.testTag(tag),
         )
     }
 }

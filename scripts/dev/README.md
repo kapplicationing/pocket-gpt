@@ -391,7 +391,7 @@ Dynamic Hugging Face fixture smoke on a pinned local device:
 bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
 ```
 
-This starts `scripts/dev/hf-fixture-server.py`, builds the debug APK with `-Ppocketgpt.hfFixtureBaseUrl=http://127.0.0.1:<port>/`, reverses the fixture port through `adb`, and runs `tests/maestro/scenario-hf-fixture-download-smoke.yaml`. The UI pastes the canonical `https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf` URL and only network calls are rewritten.
+This starts `scripts/dev/hf-fixture-server.py`, builds the debug APK with `-Ppocketgpt.hfFixtureBaseUrl=http://127.0.0.1:<port>/`, reverses the fixture port through `adb`, and runs `tests/maestro/scenario-hf-fixture-download-smoke.yaml`. The smoke resolves the canonical `https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf` URL through the real debug `ModelProvisioningViewModel` path, then queues it through the normal download UI and asserts visible HF task status. URL input, search result, `Check file`, and install behavior stay covered by the split validation/search flows, Compose contracts, and `ModelDownloadManagerInstrumentationTest`.
 
 The local fixture wrapper builds native bridge libraries by default because the app must pass runtime/provisioning readiness before the debug Model Library entrypoint opens. Use `--disable-native-build` only for compile/debug triage where you do not expect the app to leave the provisioning screen.
 
@@ -401,9 +401,11 @@ HF Maestro flows launch Model Library through the debug-only action `com.pocketa
 pocketagent.debug.skip_onboarding=true
 pocketagent.debug.open_surface=model_library
 pocketagent.debug.clear_recent_hf=true
+pocketagent.debug.hf_resolve_url=<optional canonical HF file URL>
+pocketagent.debug.hf_target_model_id=<optional supported target model id>
 ```
 
-The action defaults to `skip_onboarding=true` and `open_surface=model_library`. The debug build also accepts `pocketagent.debug.open_surface=model_library` as a launch extra when a runner cannot set a custom Android action. Release builds ignore this debug entrypoint.
+The action defaults to `skip_onboarding=true` and `open_surface=model_library`. When `pocketagent.debug.hf_resolve_url` is present, the debug build resolves that URL through the same HF acquisition policy used by the `Check file` button. The debug build also accepts `pocketagent.debug.open_surface=model_library` as a launch extra when a runner cannot set a custom Android action. Release builds ignore this debug entrypoint.
 
 Use one pinned transport for device proof:
 
@@ -413,7 +415,7 @@ adb disconnect <duplicate-or-stale-wireless-serial>
 maestro-android device probe --device <device>
 ```
 
-Run split HF proofs before the optional full fixture regression:
+Run split HF proofs before optional hosted fixture work:
 
 ```bash
 maestro-android test tests/maestro/scenario-hf-url-validation-smoke.yaml --device <device>

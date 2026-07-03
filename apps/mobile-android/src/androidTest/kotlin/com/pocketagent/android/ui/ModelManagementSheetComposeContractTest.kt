@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
@@ -677,6 +678,33 @@ class ModelManagementSheetComposeContractTest {
 
         scrollToTag("model_library_hf_candidate_card")
         assertResourceIdVisible("model_library_hf_candidate_card")
+    }
+
+    @Test
+    fun huggingFaceCandidateCardShowsMatchingDownloadTaskStatus() {
+        val candidate = sampleHuggingFaceCandidate()
+        val state = sampleLibraryState(
+            huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Ready(candidate),
+            downloads = listOf(sampleHuggingFaceDownload(status = DownloadTaskStatus.DOWNLOADING)),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = state,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = {},
+                )
+            }
+        }
+
+        scrollToTag("model_library_hf_download_status")
+        composeRule.onNodeWithTag("model_library_hf_download_status").assertIsDisplayed()
+        composeRule.onNodeWithText("State: Downloading (25%)").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_hf_queue_download").assertIsNotEnabled()
     }
 
     @Test

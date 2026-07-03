@@ -478,7 +478,7 @@ class ModelDistributionManifestProvider(
                 .get()
                 .url(endpoint)
                 .build()
-            DownloadHttpClient.base().newCall(request).execute().use { response ->
+            DownloadHttpClient.metadata().newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw RuntimeDomainException(
                         domainError = RuntimeDomainError(

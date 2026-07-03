@@ -18,9 +18,10 @@ tags:
 - hideKeyboard
 - tapOn:
     id: "model_library_hf_check_url"
-- extendedWaitUntil:
-    visible:
+- scrollUntilVisible:
+    element:
       id: "model_library_hf_candidate_card"
+    direction: DOWN
     timeout: 30000
 - assertVisible: "fixture/tiny-gguf / tiny.gguf"
 - assertVisible:

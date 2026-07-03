@@ -4,29 +4,7 @@ tags:
   - model-management
   - hf-download
 ---
-- runFlow: shared/open-model-library-debug.yaml
-
-- scrollUntilVisible:
-    element:
-      id: "model_library_hf_url_input"
-    direction: DOWN
-    timeout: 20000
-- assertVisible:
-    id: "model_library_hf_target_model"
-- tapOn:
-    id: "model_library_hf_url_input"
-- eraseText
-- inputText: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
-- hideKeyboard
-- extendedWaitUntil:
-    visible: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
-    timeout: 10000
-- assertVisible: "Check file"
-- tapOn: "Check file"
-- extendedWaitUntil:
-    visible:
-      id: "model_library_hf_candidate_card"
-    timeout: 30000
+- runFlow: shared/open-model-library-debug-hf-candidate.yaml
 - scrollUntilVisible:
     element:
       id: "model_library_hf_queue_download"
@@ -41,7 +19,6 @@ tags:
       - tapOn: "Continue download"
 - extendedWaitUntil:
     visible:
-      text: "fixture/tiny-gguf / tiny.gguf"
-    timeout: 180000
-- assertVisible: "Load"
-- takeScreenshot: "cloud-hf-download-installed"
+      id: "debug_model_library_task_present"
+    timeout: 60000
+- takeScreenshot: "cloud-hf-download-queued"

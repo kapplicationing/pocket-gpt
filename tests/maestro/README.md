@@ -22,8 +22,8 @@ Source of truth for execution commands and cloud guidance:
 10. `scenario-session-drawer-smoke.yaml`: onboarding skip -> session drawer delete/replacement smoke
 11. `scenario-hf-url-validation-smoke.yaml` (`smoke`, `model-management`, `hf-validation`): debug-open model library -> invalid HF URL -> blocked reason contract. This is in the default `devctl lane maestro` list.
 12. `scenario-hf-search-to-candidate-smoke.yaml` (`smoke`, `model-management`, `hf-search`): debug-open model library -> fixture search -> file result -> candidate preview.
-13. `scenario-hf-download-installed-smoke.yaml` (`smoke`, `model-management`, `hf-download`): debug-open model library -> paste fixture URL -> check -> queue -> installed row -> visible `Load`.
-14. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): optional local fake-HF regression for paste fixture URL -> check -> queue -> pause/resume/cancel/retry -> install row -> visible `Load`. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
+13. `scenario-hf-download-installed-smoke.yaml` (`smoke`, `model-management`, `hf-download`): debug-open model library -> resolve fixture candidate -> queue -> visible HF task status. Install is proven by `ModelDownloadManagerInstrumentationTest`, not Maestro.
+14. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): optional local fake-HF queue-status regression. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
 15. `scenario-hf-live-download-smoke.yaml` (`live-hf`, `long-running`): explicit device-only probe for public HF URL -> queue -> pause/resume/cancel/retry -> install -> Load. Keep it out of default lanes because hosted/live network and artifact-size variance are not deterministic.
 
 ## Contract Notes
@@ -37,8 +37,9 @@ Source of truth for execution commands and cloud guidance:
 7. Keep split-surface validation concentrated in dedicated model-management flows and focused Compose/instrumentation tests; do not re-assert the same library/runtime separation in unrelated long journeys.
 8. Tag every stable flow. `devctl lane maestro` now supports `--include-tags`, `--exclude-tags`, and `--flows` so you can run one risk slice without cloning/renaming files.
 9. Use `python3 tools/devctl/main.py report journey` or `python3 tools/devctl/main.py report screenshot-pack` to inspect the latest structured artifacts without hunting through `tmp/` or `scripts/benchmarks/runs/`.
-10. Keep live Hugging Face download flows tagged out of default CI unless the lane explicitly accepts network and artifact-size risk. Use `hf-validation` for deterministic URL/blocked-state coverage, `fixture-hf` for deterministic queue/install behavior, and `live-hf` for deliberate real Hub/device probes.
+10. Keep live Hugging Face download flows tagged out of default CI unless the lane explicitly accepts network and artifact-size risk. Use `hf-validation` for deterministic URL/blocked-state coverage, `fixture-hf` for deterministic queue-state UI behavior, the instrumented executor test for install, and `live-hf` for deliberate real Hub/device probes.
 11. HF flows must open the model library through `shared/open-model-library-debug.yaml`. That helper launches `com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY`, skips onboarding through the real `ChatViewModel` path, and waits for `debug_model_library_ready`. Do not use shared onboarding/bootstrap helpers for HF flow setup.
+12. HF download smokes may use `shared/open-model-library-debug-hf-candidate.yaml`. That helper still resolves the fixture URL through the real `ModelProvisioningViewModel` and HF acquisition policy; it only removes Maestro's flaky text-field/button-tap setup from the queue-state proof. Keep URL validation and search flows on the visible controls.
 
 ## Selection Examples
 

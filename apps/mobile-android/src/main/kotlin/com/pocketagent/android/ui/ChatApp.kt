@@ -78,6 +78,7 @@ fun PocketAgentApp(
     provisioningViewModel: ModelProvisioningViewModel,
     voiceController: VoiceActivationController? = null,
     debugModelLibraryReadyTagEnabled: Boolean = false,
+    debugModelLibraryStatus: String? = null,
 ) {
     val bootstrapCompleted by viewModel.bootstrapCompletedFlow.collectAsState()
     val runtime by viewModel.runtimeFlow.collectAsState()
@@ -438,6 +439,7 @@ fun PocketAgentApp(
         modelRemoveUndoState = modelRemoveUndoState,
         actions = modelLibraryActions,
         debugModelLibraryReadyTagEnabled = debugModelLibraryReadyTagEnabled,
+        debugModelLibraryStatus = debugModelLibraryStatus,
     )
 
     ModalOrchestratorHost(

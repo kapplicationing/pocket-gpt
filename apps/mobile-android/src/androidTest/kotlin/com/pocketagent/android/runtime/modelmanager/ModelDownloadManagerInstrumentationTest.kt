@@ -4,11 +4,18 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pocketagent.android.runtime.AndroidRuntimeProvisioningStore
 import com.pocketagent.core.model.ModelSourceKind
+import com.pocketagent.core.model.ModelSourceRef
+import com.pocketagent.core.model.SourceTrustPolicy
+import java.io.File
+import java.security.MessageDigest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -23,6 +30,7 @@ class ModelDownloadManagerInstrumentationTest {
         ModelDownloadTaskStateStore.resetForTests()
         appContext.deleteDatabase("pocketagent_model_downloads.db")
         appContext.getSharedPreferences("pocketagent_model_downloads", 0).edit().clear().commit()
+        resetProvisioningStorage()
         ModelDownloadTaskStateStore.resetForTests()
     }
 
@@ -31,6 +39,7 @@ class ModelDownloadManagerInstrumentationTest {
         ModelDownloadTaskStateStore.resetForTests()
         appContext.deleteDatabase("pocketagent_model_downloads.db")
         appContext.getSharedPreferences("pocketagent_model_downloads", 0).edit().clear().commit()
+        resetProvisioningStorage()
         ModelDownloadTaskStateStore.resetForTests()
     }
 
@@ -71,19 +80,85 @@ class ModelDownloadManagerInstrumentationTest {
         assertEquals("Retrying", retried?.message)
     }
 
-    private fun sampleHuggingFaceVersion(): ModelDistributionVersion {
+    @Test
+    fun executorDownloadsVerifiesAndInstallsDynamicHuggingFaceTaskFromDeviceFixture() = runBlocking {
+        val payload = "PocketGPT HF fixture bytes\n".repeat(32).encodeToByteArray()
+        val sha256 = sha256Hex(payload)
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/octet-stream")
+                .setBody(payload.decodeToString()),
+        )
+        server.start()
+        try {
+            val manager = ModelDownloadManager(
+                context = appContext,
+                provisioningStore = AndroidRuntimeProvisioningStore(appContext),
+                scheduler = RecordingScheduler(),
+            )
+            val version = sampleHuggingFaceVersion(
+                downloadUrl = server.url("/fixture/tiny-gguf/resolve/main/tiny.gguf").toString(),
+                expectedSha256 = sha256,
+                fileSizeBytes = payload.size.toLong(),
+            )
+
+            val taskId = manager.enqueueDownload(version)
+            val outcome = ModelDownloadExecutor(appContext).execute(
+                taskId = taskId,
+                host = RecordingDownloadExecutionHost(),
+                network = null,
+                retryAllowed = false,
+            )
+
+            assertEquals(DownloadExecutionOutcome.SUCCESS, outcome)
+            val completed = ModelDownloadTaskStateStore.get(appContext, taskId)
+            assertNotNull(completed)
+            assertTrue(completed!!.status == DownloadTaskStatus.INSTALLED_INACTIVE || completed.status == DownloadTaskStatus.COMPLETED)
+            assertTrue(completed.terminal)
+            assertTrue(completed.progressBytes > 0L)
+            assertEquals(ModelSourceKind.HUGGING_FACE, completed.sourceKind)
+            assertEquals(version.sourceRef, completed.sourceRef)
+            assertTrue(completed.artifactStates.single().installedAbsolutePath?.let { File(it).isFile } == true)
+
+            val installed = AndroidRuntimeProvisioningStore(appContext)
+                .listInstalledVersions(version.modelId)
+                .single { it.version == version.version }
+            assertEquals(ModelSourceKind.HUGGING_FACE, installed.sourceKind)
+            assertEquals(version.sourceRef, installed.sourceRef)
+            assertTrue(File(installed.absolutePath).isFile)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    private fun sampleHuggingFaceVersion(
+        downloadUrl: String = "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf",
+        expectedSha256: String = "a".repeat(64),
+        fileSizeBytes: Long = 1024L,
+    ): ModelDistributionVersion {
         return ModelDistributionVersion(
             modelId = "qwen3-0.6b-q4_k_m",
             version = "hf-tiny-aaaaaaaaaaaa",
             sourceKind = ModelSourceKind.HUGGING_FACE,
             displayName = "fixture/tiny-gguf / tiny.gguf",
-            downloadUrl = "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf",
-            expectedSha256 = "a".repeat(64),
+            downloadUrl = downloadUrl,
+            expectedSha256 = expectedSha256,
             provenanceIssuer = "huggingface:fixture/tiny-gguf",
             provenanceSignature = "",
             verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
             runtimeCompatibility = "android-arm64-v8a",
-            fileSizeBytes = 1024L,
+            fileSizeBytes = fileSizeBytes,
+            sourceRef = ModelSourceRef(
+                kind = ModelSourceKind.HUGGING_FACE,
+                originId = "qwen3-0.6b-q4_k_m",
+                publisher = "fixture",
+                repository = "fixture/tiny-gguf",
+                trustPolicy = SourceTrustPolicy.INTEGRITY_ONLY,
+                revision = "main",
+                originUrl = "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf",
+            ),
         )
     }
 
@@ -95,6 +170,26 @@ class ModelDownloadManagerInstrumentationTest {
             kotlinx.coroutines.delay(100L)
         }
         assertTrue(assertion())
+    }
+
+    private fun resetProvisioningStorage() {
+        appContext.getSharedPreferences("pocketagent_runtime_models", 0).edit().clear().commit()
+        File(appContext.filesDir, "runtime-models").deleteRecursively()
+        File(appContext.filesDir, "runtime-model-downloads").deleteRecursively()
+        File("/sdcard/Android/media/${appContext.packageName}/models").deleteRecursively()
+        File("/storage/emulated/0/Android/media/${appContext.packageName}/models").deleteRecursively()
+        File("/sdcard/Android/media/${appContext.packageName}/runtime-model-downloads").deleteRecursively()
+        File("/storage/emulated/0/Android/media/${appContext.packageName}/runtime-model-downloads").deleteRecursively()
+        appContext.getExternalFilesDir(null)?.let { mediaDir ->
+            File(mediaDir, "models").deleteRecursively()
+            File(mediaDir, "runtime-model-downloads").deleteRecursively()
+        }
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 }
 
@@ -118,4 +213,16 @@ private class RecordingScheduler : DownloadExecutionScheduler {
         cancelledTaskIds += taskId
         taskInfos.value = taskInfos.value.filterNot { snapshot -> snapshot.taskId == taskId }
     }
+}
+
+private class RecordingDownloadExecutionHost : DownloadExecutionHost {
+    val notificationUpdates = mutableListOf<Pair<String, Int>>()
+
+    override suspend fun updateNotification(taskId: String, modelId: String, percent: Int) {
+        notificationUpdates += taskId to percent
+    }
+
+    override fun isStopped(): Boolean = false
+
+    override fun stopDisposition(): DownloadStopDisposition = DownloadStopDisposition.MARK_CANCELLED
 }

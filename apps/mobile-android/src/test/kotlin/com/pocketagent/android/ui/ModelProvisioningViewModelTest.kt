@@ -358,6 +358,7 @@ class ModelProvisioningViewModelTest {
 
         assertEquals(version, gateway.lastEnqueuedVersion)
         assertTrue(viewModel.uiState.value.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Ready)
+        assertTrue(viewModel.uiState.value.enqueuingModelIds.isEmpty())
     }
 
     @Test
@@ -555,6 +556,7 @@ class ModelProvisioningViewModelTest {
 
         assertTrue(recentStore.list().isEmpty())
         assertTrue(viewModel.uiState.value.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Ready)
+        assertTrue(viewModel.uiState.value.enqueuingModelIds.isEmpty())
     }
 
     @Test

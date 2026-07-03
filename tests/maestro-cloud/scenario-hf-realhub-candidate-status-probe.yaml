@@ -1,0 +1,118 @@
+appId: com.pocketagent.android
+tags:
+  - cloud-realhub
+  - model-management
+  - hf-candidate
+  - diagnostic
+---
+# Cloud probe against the REAL huggingface.co hub (no fixture, no tunnel).
+#
+# Requires an APK built with a BLANK HF_FIXTURE_BASE_URL so
+# configuredHuggingFaceEndpointAdapter falls back to RealHuggingFaceEndpointAdapter
+# (verified: HuggingFaceModelAcquisition.kt:276-278). The Maestro Cloud device is
+# on the open internet and can reach huggingface.co directly, unlike the internal
+# Devstack fixture host.
+#
+# The debug launch auto-selects the first HF target (qwen3-0.6b-q4_k_m); the
+# resolve URL below is a real single-file GGUF that exposes LFS oid + size, so
+# resolveCandidate() should reach Ready.
+#
+# Same diagnosis design as the fixture probe: ready passes, non-ready terminal
+# states fail with a self-describing message in junit.xml/status.json.
+- launchApp:
+    clearState: true
+    arguments:
+      android.intent.action: "com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY"
+      pocketagent.debug.skip_onboarding: "true"
+      pocketagent.debug.open_surface: "model_library"
+      pocketagent.debug.clear_recent_hf: "true"
+      pocketagent.debug.clear_downloads: "true"
+      pocketagent.debug.hf_resolve_url: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf"
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_ready"
+    timeout: 30000
+- assertVisible:
+    id: "debug_model_library_status"
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_status_terminal"
+    timeout: 90000
+- takeScreenshot: "cloud-hf-realhub-candidate-status-probe"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_network_error"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_network_error__cloud_device_cannot_reach_real_hub_or_tls_rejected"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_file_not_found"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_file_not_found__real_hub_file_not_found"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_missing_sha"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_missing_sha__real_hub_file_missing_lfs_oid"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_missing_size"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_missing_size__real_hub_file_missing_lfs_size"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_access_denied"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_access_denied__real_hub_file_gated_or_private"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_unknown_reason__inspect_debug_model_library_status"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_no_target"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_no_target__no_hugging_face_target_model_at_debug_launch"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_still_resolving"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_still_resolving__resolve_did_not_settle__network_hang"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_idle_after_resolve"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_idle_after_resolve__resolve_returned_idle_unexpected"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_no_url"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_no_url__debug_resolve_url_extra_missing_on_cloud"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_ready"
+    commands:
+      - assertVisible:
+          id: "debug_model_library_status_ready"

@@ -1,0 +1,35 @@
+appId: com.pocketagent.android
+tags:
+  - cloud-realhub
+  - model-management
+  - hf-download
+  - live-hf
+---
+# Hosted proof that real Hugging Face candidate resolution can create a durable
+# download task in Maestro Cloud. This intentionally stops at queue-status; full
+# download/install correctness is covered by instrumentation with MockWebServer.
+- runFlow: shared/open-model-library-debug-realhub-candidate.yaml
+- scrollUntilVisible:
+    element:
+      id: "model_library_hf_queue_download"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "model_library_hf_queue_download"
+- runFlow:
+    when:
+      visible: "Large download on metered network"
+    commands:
+      - tapOn: "Continue download"
+- runFlow:
+    when:
+      visible: "Allow PocketAgent to send you notifications?"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_task_present"
+    timeout: 60000
+- assertVisible:
+    id: "debug_model_library_task_status"
+- takeScreenshot: "cloud-hf-realhub-download-queued"

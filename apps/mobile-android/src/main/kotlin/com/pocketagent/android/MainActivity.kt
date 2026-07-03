@@ -27,6 +27,7 @@ import com.pocketagent.android.runtime.modelmanager.ModelDownloadTaskStateStore
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.ChatViewModel
 import com.pocketagent.android.ui.ChatViewModelFactory
+import com.pocketagent.android.ui.HuggingFaceAcquisitionUiState
 import com.pocketagent.android.ui.ModelProvisioningViewModel
 import com.pocketagent.android.ui.ModelProvisioningViewModelFactory
 import com.pocketagent.android.ui.PocketAgentApp
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
     private var warmedVoiceController: VoiceActivationController? = null
     private val debugAutomationRequestState = mutableStateOf<DebugAutomationRequest?>(null)
     private val debugModelLibraryReadyTagState = mutableStateOf(false)
+    private val debugModelLibraryStatusState = mutableStateOf<String?>(null)
 
     private val foregroundRuntimeServices by lazy(LazyThreadSafetyMode.NONE) {
         resolveAppForegroundRuntimeServices(applicationContext)
@@ -135,6 +137,7 @@ class MainActivity : ComponentActivity() {
                                 "Voice controller must be warmed before composition"
                             },
                             debugModelLibraryReadyTagEnabled = debugModelLibraryReadyTagState.value,
+                            debugModelLibraryStatus = debugModelLibraryStatusState.value,
                         )
                     } else {
                         ProvisioningBootstrapScreen()
@@ -241,6 +244,7 @@ class MainActivity : ComponentActivity() {
         }
         Log.i(DEBUG_AUTOMATION_LOG_TAG, "handling request=$request")
         debugModelLibraryReadyTagState.value = false
+        debugModelLibraryStatusState.value = "debug_pending"
         withContext(Dispatchers.IO) {
             if (request.clearDownloads) {
                 ModelDownloadTaskStateStore.resetForTests()
@@ -270,7 +274,41 @@ class MainActivity : ComponentActivity() {
                 .first()
             viewModel.showSurface(ModalSurface.ModelLibrary)
             debugModelLibraryReadyTagState.value = true
+            debugModelLibraryStatusState.value = "debug_model_library_open"
             Log.i(DEBUG_AUTOMATION_LOG_TAG, "model library requested")
+        }
+        val huggingFaceResolveUrl = request.huggingFaceResolveUrl?.trim().orEmpty()
+        if (huggingFaceResolveUrl.isNotBlank()) {
+            val targetModelId = request.huggingFaceTargetModelId?.trim()?.takeIf { it.isNotBlank() }
+                ?: provisioningViewModel.uiState.value.huggingFaceTargets.firstOrNull()?.modelId
+            if (targetModelId == null) {
+                debugModelLibraryStatusState.value = "hf_no_target"
+                Log.w(
+                    DEBUG_AUTOMATION_LOG_TAG,
+                    "skipping HF debug resolve because no target models are available",
+                )
+            } else {
+                debugModelLibraryStatusState.value = "hf_resolving:$targetModelId"
+                Log.i(
+                    DEBUG_AUTOMATION_LOG_TAG,
+                    "resolving HF debug candidate url=$huggingFaceResolveUrl target=$targetModelId",
+                )
+                provisioningViewModel.resolveHuggingFaceCandidate(
+                    input = huggingFaceResolveUrl,
+                    targetModelId = targetModelId,
+                )
+                val acquisitionState = provisioningViewModel.uiState.value.huggingFaceAcquisitionState
+                debugModelLibraryStatusState.value = when (acquisitionState) {
+                    is HuggingFaceAcquisitionUiState.Ready -> "hf_ready"
+                    is HuggingFaceAcquisitionUiState.Blocked -> {
+                        "hf_blocked:${acquisitionState.reason}"
+                    }
+                    HuggingFaceAcquisitionUiState.Idle -> "hf_idle_after_resolve"
+                    HuggingFaceAcquisitionUiState.Resolving -> "hf_still_resolving"
+                }
+            }
+        } else {
+            debugModelLibraryStatusState.value = "hf_no_url"
         }
         debugAutomationRequestState.value = null
     }
@@ -294,6 +332,8 @@ class MainActivity : ComponentActivity() {
             openSurface = requestedSurface ?: DEBUG_OPEN_SURFACE_MODEL_LIBRARY,
             clearDownloads = intent.getBooleanExtra(EXTRA_DEBUG_CLEAR_DOWNLOADS, false),
             clearRecentHuggingFace = intent.getBooleanExtra(EXTRA_DEBUG_CLEAR_RECENT_HF, false),
+            huggingFaceResolveUrl = intent.getStringExtra(EXTRA_DEBUG_HF_RESOLVE_URL),
+            huggingFaceTargetModelId = intent.getStringExtra(EXTRA_DEBUG_HF_TARGET_MODEL_ID),
         )
         Log.i(DEBUG_AUTOMATION_LOG_TAG, "parsed request=$request")
         return request
@@ -307,6 +347,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_DEBUG_OPEN_SURFACE = "pocketagent.debug.open_surface"
         const val EXTRA_DEBUG_CLEAR_DOWNLOADS = "pocketagent.debug.clear_downloads"
         const val EXTRA_DEBUG_CLEAR_RECENT_HF = "pocketagent.debug.clear_recent_hf"
+        const val EXTRA_DEBUG_HF_RESOLVE_URL = "pocketagent.debug.hf_resolve_url"
+        const val EXTRA_DEBUG_HF_TARGET_MODEL_ID = "pocketagent.debug.hf_target_model_id"
         const val DEBUG_OPEN_SURFACE_MODEL_LIBRARY = "model_library"
         private const val DOWNLOAD_TASK_DATABASE_NAME = "pocketagent_model_downloads.db"
         private const val DOWNLOAD_TASK_LEGACY_PREFS_NAME = "pocketagent_model_downloads"
@@ -325,4 +367,6 @@ private data class DebugAutomationRequest(
     val openSurface: String?,
     val clearDownloads: Boolean,
     val clearRecentHuggingFace: Boolean,
+    val huggingFaceResolveUrl: String?,
+    val huggingFaceTargetModelId: String?,
 )

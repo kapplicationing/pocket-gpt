@@ -51,13 +51,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 @Immutable
 sealed interface HuggingFaceAcquisitionUiState {
     data object Idle : HuggingFaceAcquisitionUiState
     data object Resolving : HuggingFaceAcquisitionUiState
     data class Ready(val candidate: HuggingFaceCandidate) : HuggingFaceAcquisitionUiState
-    data class Enqueueing(val candidate: HuggingFaceCandidate) : HuggingFaceAcquisitionUiState
     data class Blocked(
         val reason: HuggingFaceAcquisitionBlockReason,
         val message: String,
@@ -237,11 +237,13 @@ class ModelProvisioningViewModel internal constructor(
             state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Resolving)
         }
         val nextState = runCatching {
-            withContext(ioDispatcher) {
-                huggingFaceModelAcquisition.resolveCandidate(
-                    input = input,
-                    targetModelId = targetModelId,
-                )
+            withTimeout(HUGGING_FACE_CANDIDATE_TIMEOUT_MS) {
+                withContext(ioDispatcher) {
+                    huggingFaceModelAcquisition.resolveCandidate(
+                        input = input,
+                        targetModelId = targetModelId,
+                    )
+                }
             }
         }.fold(
             onSuccess = { candidate -> HuggingFaceAcquisitionUiState.Ready(candidate) },
@@ -507,11 +509,6 @@ class ModelProvisioningViewModel internal constructor(
                     candidate.version.version == version.version
             }
         updateLocalUiState { state -> state.copy(enqueuingModelIds = state.enqueuingModelIds + key) }
-        if (hfCandidate != null) {
-            updateLocalUiState { state ->
-                state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Enqueueing(hfCandidate))
-            }
-        }
         return try {
             val taskId = withContext(ioDispatcher) {
                 gateway.enqueueDownload(version = version, options = options)
@@ -528,17 +525,8 @@ class ModelProvisioningViewModel internal constructor(
             taskId
         } finally {
             updateLocalUiState { state ->
-                val restoredHfState = if (
-                    hfCandidate != null &&
-                    state.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Enqueueing
-                ) {
-                    HuggingFaceAcquisitionUiState.Ready(hfCandidate)
-                } else {
-                    state.huggingFaceAcquisitionState
-                }
                 state.copy(
                     enqueuingModelIds = state.enqueuingModelIds - key,
-                    huggingFaceAcquisitionState = restoredHfState,
                 )
             }
         }
@@ -810,6 +798,8 @@ private fun ProvisioningAggregateState.toModelProvisioningUiState(
         huggingFaceSearchState = local.huggingFaceSearchState,
     )
 }
+
+private const val HUGGING_FACE_CANDIDATE_TIMEOUT_MS = 20_000L
 
 internal fun provisioningMutationFailureMessage(
     result: ProvisioningMutationResult,

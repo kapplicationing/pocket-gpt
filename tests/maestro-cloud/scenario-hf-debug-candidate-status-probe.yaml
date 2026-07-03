@@ -1,0 +1,128 @@
+appId: com.pocketagent.android
+tags:
+  - cloud-fixture
+  - model-management
+  - hf-candidate
+  - diagnostic
+---
+# Diagnostic-only Cloud probe. It does NOT require candidate-card visibility.
+#
+# Purpose: surface the REAL debug_model_library_status from the Maestro Cloud
+# device into the junit failure message (the only artifact pulled locally),
+# plus a screenshot in the Cloud web console.
+#
+# The old candidate flow waited on literal "hf_ready" or candidate-card
+# visibility and, on failure, erased the real acquisition state.
+#
+# Behaviour (verified against MainActivity.handleDebugAutomationRequest +
+# ModelProvisioningViewModel.resolveHuggingFaceCandidate):
+#   - status is set to "hf_resolving:<target>" before the suspend resolve call.
+#   - it flips to a terminal value only after resolveCandidate() returns.
+#   - metadata HTTP calls now use a bounded metadata client, so a stuck terminal
+#     wait means the APK did not include that fix or another path is blocking.
+#
+# This probe yields two distinct, self-describing outcomes in junit locally:
+#   1. hf_ready: probe passes. Fixture resolution reached the candidate state.
+#   2. non-ready terminal state: exactly one PROBE_DIAGNOSIS__* branch fails.
+#   3. no terminal state in 90s: terminal wait fails, meaning resolve did not
+#      return on the expected bounded metadata path.
+- launchApp:
+    clearState: true
+    arguments:
+      android.intent.action: "com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY"
+      pocketagent.debug.skip_onboarding: "true"
+      pocketagent.debug.open_surface: "model_library"
+      pocketagent.debug.clear_recent_hf: "true"
+      pocketagent.debug.clear_downloads: "true"
+      pocketagent.debug.hf_resolve_url: "https://huggingface.co/fixture/tiny-gguf/resolve/main/tiny.gguf"
+# Sheet + debug status surface rendered -> proves debug extras arrived.
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_ready"
+    timeout: 30000
+- assertVisible:
+    id: "debug_model_library_status"
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_status_terminal"
+    timeout: 90000
+- takeScreenshot: "cloud-hf-debug-candidate-status-probe"
+# Branch on the terminal status. Ready passes; non-ready states fail with a
+# self-describing diagnosis that lands in junit.xml / status.json locally.
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_network_error"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_network_error__cloud_device_cannot_reach_fixture_or_tls_rejected"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_file_not_found"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_file_not_found__fixture_tree_did_not_match_requested_file"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_missing_sha"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_missing_sha__fixture_tree_missing_lfs_oid"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_missing_size"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_missing_size__fixture_tree_missing_lfs_size"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked_access_denied"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_access_denied__fixture_returned_403"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_blocked"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_blocked_unknown_reason__inspect_debug_model_library_status"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_no_target"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_no_target__no_hugging_face_target_model_at_debug_launch"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_still_resolving"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_still_resolving__resolve_returned_but_state_stuck_resolving"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_idle_after_resolve"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_idle_after_resolve__resolve_returned_idle_unexpected"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_no_url"
+    commands:
+      - assertVisible:
+          text: "PROBE_DIAGNOSIS__hf_no_url__debug_resolve_url_extra_missing_on_cloud"
+- runFlow:
+    when:
+      visible:
+        id: "debug_model_library_status_ready"
+    commands:
+      - assertVisible:
+          id: "debug_model_library_status_ready"

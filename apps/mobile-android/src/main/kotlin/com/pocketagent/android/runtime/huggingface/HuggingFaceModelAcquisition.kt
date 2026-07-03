@@ -288,7 +288,7 @@ class OkHttpHuggingFaceHubClient(
             .url(endpointAdapter.treeApiUrl(reference))
             .build()
         return runCatching {
-            DownloadHttpClient.base().newCall(request).execute().use { response ->
+            DownloadHttpClient.metadata().newCall(request).execute().use { response ->
                 when (response.code) {
                     401, 403 -> throw HuggingFaceAcquisitionException(
                         reason = HuggingFaceAcquisitionBlockReason.ACCESS_DENIED,
@@ -325,7 +325,7 @@ class OkHttpHuggingFaceHubClient(
             .url(endpointAdapter.modelInfoApiUrl(reference))
             .build()
         return runCatching {
-            DownloadHttpClient.base().newCall(request).execute().use { response ->
+            DownloadHttpClient.metadata().newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     parseModelInfoResponse(reference, response.body?.string().orEmpty())
                 } else {
@@ -341,7 +341,7 @@ class OkHttpHuggingFaceHubClient(
             .url(endpointAdapter.modelSearchApiUrl(query, limit))
             .build()
         return runCatching {
-            DownloadHttpClient.base().newCall(request).execute().use { response ->
+            DownloadHttpClient.metadata().newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IOException("Hugging Face returned HTTP ${response.code}")
                 }

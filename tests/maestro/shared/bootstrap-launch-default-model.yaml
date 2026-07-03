@@ -46,16 +46,16 @@ appId: com.pocketagent.android
     when:
       visible: "Model library"
     commands:
+      - runFlow:
+          when:
+            visible: "Refresh"
+          commands:
+            - tapOn: "Refresh"
       - scrollUntilVisible:
           element:
-            text: "Downloaded models"
+            id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
           direction: UP
-          timeout: 20000
-- runFlow:
-    when:
-      visible: "Refresh"
-    commands:
-      - tapOn: "Refresh"
+          timeout: 60000
 - runFlow:
     when:
       visible:

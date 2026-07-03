@@ -453,6 +453,9 @@ class ModelManagementSheetComposeContractTest {
         scrollToTag("model_library_hf_url_input")
         composeRule.onNodeWithTag("model_library_hf_url_input")
             .performTextInput("https://huggingface.co/owner/repo/resolve/main/model.gguf")
+        composeRule.runOnIdle {
+            assertTrue(events.contains(ModelSheetEvent.ClearHuggingFaceCandidate))
+        }
         scrollToTag("model_library_hf_check_url")
         composeRule.onNodeWithTag("model_library_hf_check_url").performClick()
         scrollToTag("model_library_hf_candidate_card")
@@ -705,6 +708,35 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithTag("model_library_hf_download_status").assertIsDisplayed()
         composeRule.onNodeWithText("State: Downloading (25%)").assertIsDisplayed()
         composeRule.onNodeWithTag("model_library_hf_queue_download").assertIsNotEnabled()
+    }
+
+    @Test
+    fun huggingFaceCandidateCardDisablesQueueForInstalledTask() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val candidate = sampleHuggingFaceCandidate()
+        val state = sampleLibraryState(
+            huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Ready(candidate),
+            downloads = listOf(sampleHuggingFaceDownload(status = DownloadTaskStatus.INSTALLED_INACTIVE)),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = state,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        scrollToTag("model_library_hf_queue_download")
+        composeRule.onNodeWithTag("model_library_hf_queue_download").assertIsNotEnabled()
+        composeRule.runOnIdle {
+            assertFalse(events.any { it is ModelSheetEvent.DownloadVersion })
+        }
     }
 
     @Test

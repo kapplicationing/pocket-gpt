@@ -518,10 +518,13 @@ private fun parseTreeResponse(
                 .mapNotNull { index -> array.optJSONObject(index) }
                 .firstOrNull { json ->
                     json.optString("path", "").trim() == reference.filePath ||
-                        json.optString("rfilename", "").trim() == reference.filePath ||
+                    json.optString("rfilename", "").trim() == reference.filePath ||
                         json.optString("path", "").trim().endsWith("/${reference.fileName}")
                 }
-                ?: array.optJSONObject(0)
+                ?: throw HuggingFaceAcquisitionException(
+                    reason = HuggingFaceAcquisitionBlockReason.FILE_NOT_FOUND,
+                    userMessage = "The Hugging Face file was not found: ${reference.filePath}.",
+                )
         }
         trimmed.startsWith("{") -> JSONObject(trimmed)
         else -> null

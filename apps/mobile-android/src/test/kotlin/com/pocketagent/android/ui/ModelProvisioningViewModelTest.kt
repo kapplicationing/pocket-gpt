@@ -525,6 +525,56 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `hugging face resolve blocks when tree omits requested file`() = runTest(dispatcher) {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    [
+                      {
+                        "path": "different.gguf",
+                        "lfs": {
+                          "oid": "${"c".repeat(64)}",
+                          "size": 4096
+                        }
+                      }
+                    ]
+                    """.trimIndent(),
+                ),
+        )
+        server.start()
+        try {
+            val endpointAdapter = FixtureHuggingFaceEndpointAdapter(server.url("/"))
+            val acquisition = DefaultHuggingFaceModelAcquisition(
+                endpointAdapter = endpointAdapter,
+                hubClient = OkHttpHuggingFaceHubClient(endpointAdapter),
+            )
+            val targetModelId = acquisition.supportedTargets().first().modelId
+            val viewModel = ModelProvisioningViewModel(
+                gateway = FakeProvisioningGateway(),
+                huggingFaceModelAcquisition = acquisition,
+                ioDispatcher = dispatcher,
+            )
+            advanceUntilIdle()
+
+            viewModel.resolveHuggingFaceCandidate(
+                input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+                targetModelId = targetModelId,
+            )
+            advanceUntilIdle()
+
+            val blocked = viewModel.uiState.value.huggingFaceAcquisitionState
+            assertTrue(blocked is HuggingFaceAcquisitionUiState.Blocked)
+            assertEquals(HuggingFaceAcquisitionBlockReason.FILE_NOT_FOUND, blocked.reason)
+            assertEquals("/api/models/owner/repo/tree/main", server.takeRequest().path)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `hugging face enqueue failure does not store recent model`() = runTest(dispatcher) {
         val version = sampleDownloadVersion().copy(
             sourceKind = ModelSourceKind.HUGGING_FACE,

@@ -235,9 +235,19 @@ internal fun ModelSheet(
                 searchState = libraryState.huggingFaceSearchState,
                 recentModels = libraryState.recentHuggingFaceModels,
                 availableStorageBytes = libraryState.snapshot.storageSummary.freeBytes,
-                onInputChange = { value -> huggingFaceInput = value },
+                onInputChange = { value ->
+                    if (value != huggingFaceInput) {
+                        huggingFaceInput = value
+                        onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
+                    }
+                },
                 onSearchQueryChange = { value -> huggingFaceSearchQuery = value },
-                onSelectTarget = { targetId -> selectedHuggingFaceTargetId = targetId },
+                onSelectTarget = { targetId ->
+                    if (targetId != resolvedHuggingFaceTargetId) {
+                        selectedHuggingFaceTargetId = targetId
+                        onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
+                    }
+                },
                 onCheck = {
                     onEvent(
                         ModelSheetEvent.ResolveHuggingFaceCandidate(
@@ -1055,7 +1065,9 @@ private fun HuggingFaceCandidateCard(
     val context = LocalContext.current
     val modelCardUrl = "https://huggingface.co/${candidate.reference.repoId}"
     val transientQueueing = queueing && task == null
-    val downloadButtonEnabled = !transientQueueing && task?.terminal != false
+    val installed = task?.status == DownloadTaskStatus.COMPLETED ||
+        task?.status == DownloadTaskStatus.INSTALLED_INACTIVE
+    val downloadButtonEnabled = !transientQueueing && task?.terminal != false && !installed
     Card(
         modifier = Modifier
             .fillMaxWidth()

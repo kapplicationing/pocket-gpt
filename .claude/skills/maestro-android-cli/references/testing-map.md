@@ -58,6 +58,24 @@ Unless the risk is already clearly isolated, do not stop after one surface. Star
 3. Hosted-smoke regression triage:
    use the smallest hosted subset that can fail authoritatively, and if the same hosted path is still stuck twice, pivot back to emulator/device evidence and inspect the uploaded cloud flow set instead of blindly rerunning.
 
+## CI Lifecycle Reproduction
+
+The required `lifecycle-e2e-first-run` CI job runs `tests/maestro/scenario-first-run-download-chat.yaml`
+through `scripts/ci/run_lifecycle_e2e.sh` on a clean API 33 x86_64 Pixel 6 Google APIs
+emulator. For the closest local match, build with native x86_64 enabled and pin the target:
+
+```bash
+./gradlew --no-daemon \
+  -Ppocketgpt.enableNativeBuild=true \
+  -Ppocketgpt.nativeAbiFilters=x86_64 \
+  :apps:mobile-android:assembleDebug
+
+bash scripts/ci/run_lifecycle_e2e.sh --device <serial> local-manual
+```
+
+Use `maestro-android lint ...` and `maestro-android scoped --flow ... --device <serial>` first
+for fast selector/harness debugging, then use the CI wrapper as final local proof.
+
 ## Flow Health
 
 - `maestro-android lint` checks tmp flow conventions and reports stale tmp flows.

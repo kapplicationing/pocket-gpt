@@ -376,14 +376,43 @@ python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-r
 
 ## Runbook: Main-Push Blocking Lifecycle Check (CI Equivalent)
 
+Use this when debugging or preflighting the required `lifecycle-e2e-first-run` CI job.
+Separate fast harness proof from CI-like proof; do not use PR CI as the main debug loop.
+
+Fast local selector and flow-contract proof:
+
 ```bash
-python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml
+maestro-android lint \
+  tests/maestro/scenario-first-run-download-chat.yaml \
+  tests/maestro/shared/bootstrap-launch-default-model.yaml
+
+maestro-android scoped \
+  --flow tests/maestro/scenario-first-run-download-chat.yaml \
+  --device <serial>
 ```
 
-For CI-equivalent raw Maestro + crash-signature guard behavior, run:
+The exact CI target is a clean API 33 x86_64 Pixel 6 Google APIs emulator on
+`ubuntu-latest`, with GPU set to `swiftshader_indirect` and animations disabled.
+For a CI-like local proof, first start and pin that emulator, then build with the same
+native flags CI uses:
 
 ```bash
-bash scripts/ci/run_lifecycle_e2e.sh local-manual
+./gradlew --no-daemon \
+  -Ppocketgpt.enableNativeBuild=true \
+  -Ppocketgpt.nativeAbiFilters=x86_64 \
+  :apps:mobile-android:assembleDebug
+
+bash scripts/ci/run_lifecycle_e2e.sh --device <serial> local-manual
+```
+
+`scripts/ci/run_lifecycle_e2e.sh` is the CI retry/artifact/crash-signature wrapper. It
+honors `--device`, `ADB_SERIAL`, `ANDROID_SERIAL`, and `DEVICE_SERIAL`; without one of
+those, exactly one authorized adb target must be attached.
+
+For a broader local lane without exact CI emulator parity, run:
+
+```bash
+python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml
 ```
 
 ## Runbook: Cloud Smoke (Hosted Machine-Verifiable Rerun)

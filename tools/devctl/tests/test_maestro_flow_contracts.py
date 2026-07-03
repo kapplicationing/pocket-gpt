@@ -342,6 +342,16 @@ class MaestroFlowContractsTest(unittest.TestCase):
         )
         self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', bootstrap_text)
         self.assertNotIn('text: "Downloaded models"', bootstrap_text)
+        self.assertNotIn(
+            'scrollUntilVisible:\n          element:\n            id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"',
+            bootstrap_text,
+        )
+
+        cloud_bootstrap_text = (
+            REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-launch-default-model.yaml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', cloud_bootstrap_text)
+        self.assertNotIn('text: "Downloaded models"', cloud_bootstrap_text)
 
         cloud_benchmark_path = REPO_ROOT / "tests/maestro-cloud/scenario-gpu-cpu-benchmark.yaml"
         cloud_text = cloud_benchmark_path.read_text(encoding="utf-8")

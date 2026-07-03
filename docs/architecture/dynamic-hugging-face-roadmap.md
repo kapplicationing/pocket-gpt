@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-03
 Owner: Runtime + Android + Product
-Status: V1 paste-URL flow implemented, HF automation bootstrap stabilized, product expansion staged
+Current state: V1 paste-URL flow implemented, HF automation bootstrap stabilized, product expansion staged
 
 ## Current Position
 
@@ -109,7 +109,7 @@ Implemented:
 2. Debug extras for skipping onboarding, opening Model Library, clearing download tasks, and clearing recent HF entries. The action defaults to skipping onboarding and opening Model Library; the debug build also accepts `pocketagent.debug.open_surface=model_library` when a runner cannot set a custom action.
 3. The action uses the real app state path: `ChatViewModel.completeOnboarding()` and `ChatViewModel.showSurface(ModalSurface.ModelLibrary)`.
 4. `debug_model_library_ready` marks the sheet-open state for Maestro and instrumentation.
-5. HF Maestro flows use `shared/open-model-library-debug.yaml`.
+5. HF Maestro flows use `tests/maestro/shared/open-model-library-debug.yaml`.
 
 Rules:
 

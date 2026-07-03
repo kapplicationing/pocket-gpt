@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-29
 Owner: Runtime + Android + Product
-Status: Tracer-bullet implementation in progress
+Current state: Tracer-bullet implementation in progress
 
 ## Recommendation
 

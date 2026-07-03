@@ -139,21 +139,6 @@ android {
         }
     }
 
-    signingConfigs {
-        // Reuse the well-known Android debug keystore so the benchmark variant is installable
-        // on developer/CI devices without provisioning a custom signing key. The benchmark
-        // variant is NEVER published; it is the perf-measurement APK only.
-        create("benchmark") {
-            val debugKeystore = File(System.getProperty("user.home"), ".android/debug.keystore")
-            if (debugKeystore.exists()) {
-                storeFile = debugKeystore
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -173,7 +158,9 @@ android {
             isDebuggable = false
             isProfileable = true
             matchingFallbacks += listOf("release")
-            signingConfig = signingConfigs.getByName("benchmark")
+            // The benchmark APK is installable test/perf evidence, never a published artifact.
+            // Use Android Gradle Plugin's debug signing config so CI can generate the keystore.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

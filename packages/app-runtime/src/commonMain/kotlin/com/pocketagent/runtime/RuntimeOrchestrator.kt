@@ -60,6 +60,7 @@ class RuntimeOrchestrator(
     private val memoryBudgetTracker: MemoryBudgetTracker? = null,
     private val recommendedGpuLayers: (String, PerformanceRuntimeConfig) -> Int? = { _, _ -> null },
     private val mmProjPathResolver: (String) -> String? = { null },
+    private val availableCpuCoresProvider: () -> Int = { Runtime.getRuntime().availableProcessors() },
 ) : RuntimeContainer {
     private val runtimeInferencePorts: RuntimeInferencePorts = inferenceModule.runtimeInferencePorts()
     private val runtimeLifecycleObserverLock = Any()
@@ -141,6 +142,7 @@ class RuntimeOrchestrator(
         modelLifecycleCoordinator = modelLifecycleCoordinator,
         routingModeProvider = { routingMode },
         residentModelIdProvider = { runtimeResidencyManager.loadedModelId() },
+        availableCpuCoresProvider = availableCpuCoresProvider,
     )
     private val diagnosticsUseCase = DiagnosticsUseCase(
         policyModule = policyModule,

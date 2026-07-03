@@ -76,6 +76,7 @@ class AndroidMvpContainer(
     private val responseCacheMaxEntries: Int = runtimeEnvConfig.responseCacheMaxEntries,
     private val streamContractV2Enabled: Boolean = runtimeEnvConfig.streamContractV2Enabled,
     private val networkPolicyClient: PolicyAwareNetworkClient = PolicyAwareNetworkClient(policyModule),
+    private val availableCpuCoresProvider: () -> Int = { Runtime.getRuntime().availableProcessors() },
 ) {
     private val runtimeConfig = buildRuntimeConfig()
 
@@ -115,6 +116,7 @@ class AndroidMvpContainer(
                 store?.resolveMmProjPath(modelId)
             }
         },
+        availableCpuCoresProvider = availableCpuCoresProvider,
     )
 
     fun createSession(): SessionId = orchestrator.createSession()

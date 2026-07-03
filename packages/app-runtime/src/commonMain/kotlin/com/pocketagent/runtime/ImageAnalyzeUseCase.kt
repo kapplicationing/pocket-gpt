@@ -24,12 +24,13 @@ internal class ImageAnalyzeUseCase(
         prompt: String,
         deviceState: DeviceState,
     ): ImageAnalysisResult {
+        val availableCpuCores = availableCpuCoresProvider().coerceAtLeast(1)
         if (!isMultimodalCapable(deviceState)) {
             return ImageAnalysisResult.Failure(
                 failure = ImageFailure.Runtime(
                     code = "device_insufficient",
                     userMessage = "This device doesn't have enough resources for image analysis.",
-                    technicalDetail = "multimodal_gate: ram=${deviceState.ramClassGb}GB cores=${Runtime.getRuntime().availableProcessors()}",
+                    technicalDetail = "multimodal_gate: ram=${deviceState.ramClassGb}GB cores=$availableCpuCores",
                 ),
             )
         }
@@ -127,7 +128,7 @@ internal class ImageAnalyzeUseCase(
         val minRamGb = MIN_MULTIMODAL_RAM_GB
         val minCores = MIN_MULTIMODAL_CORES
         return deviceState.ramClassGb >= minRamGb &&
-            availableCpuCoresProvider() >= minCores
+            availableCpuCoresProvider().coerceAtLeast(1) >= minCores
     }
 
     companion object {

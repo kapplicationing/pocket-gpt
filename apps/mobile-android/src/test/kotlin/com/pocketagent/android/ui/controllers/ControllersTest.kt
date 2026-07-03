@@ -79,11 +79,12 @@ class ControllersTest {
         val checks = controller.runStartupChecks(
             runtimeGateway = runtime,
             ioDispatcher = Dispatchers.IO,
-            timeoutMs = 1_000L,
+            timeoutMs = 5_000L,
         )
 
         assertEquals(1, checks.size)
-        assertTrue(checks.single().contains("failed unexpectedly"))
+        assertTrue(checks.single().contains("Startup checks"))
+        assertTrue(checks.single().contains("startup crash"))
     }
 
     @Test

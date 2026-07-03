@@ -543,6 +543,7 @@ private fun defaultContainer(
     inferenceModule: InferenceModule = RecordingInferenceModule(),
     policyModule: PolicyModule = RecordingPolicyModule(),
     observabilityModule: ObservabilityModule = InMemoryObservabilityModule(),
+    availableCpuCoresProvider: () -> Int = { 8 },
 ): AndroidMvpContainer {
     val payloads = testPayloads()
     val issuerByModel = testProvenanceIssuers(payloads)
@@ -556,6 +557,7 @@ private fun defaultContainer(
         artifactSha256ByModelId = payloads.mapValues { (_, bytes) -> sha256Hex(bytes) },
         artifactProvenanceIssuerByModelId = issuerByModel,
         artifactProvenanceSignatureByModelId = signatureByModel,
+        availableCpuCoresProvider = availableCpuCoresProvider,
     )
 }
 

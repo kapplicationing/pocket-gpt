@@ -165,7 +165,8 @@ internal fun ModelProvisioningUiState.toRuntimeModelUiState(): RuntimeModelUiSta
 class ModelProvisioningViewModel internal constructor(
     private val gateway: ProvisioningGateway,
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
-    private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
+    private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider =
+        ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
     private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
     private val ioDispatcher: CoroutineDispatcher = dispatchers.io,
     private val huggingFaceModelAcquisition: HuggingFaceModelAcquisition = DefaultHuggingFaceModelAcquisition(),
@@ -532,7 +533,10 @@ class ModelProvisioningViewModel internal constructor(
         }
     }
 
-    @Deprecated("UI paths must use shouldWarnForMeteredLargeDownloadAsync so preference/network-backed checks stay on IO.")
+    @Deprecated(
+        "UI paths must use shouldWarnForMeteredLargeDownloadAsync " +
+            "so preference/network-backed checks stay on IO.",
+    )
     fun shouldWarnForMeteredLargeDownload(version: ModelDistributionVersion): Boolean {
         return gateway.shouldWarnForMeteredLargeDownload(version)
     }
@@ -631,13 +635,6 @@ class ModelProvisioningViewModel internal constructor(
         aggregateState.value = state
         _modelLoadingState.value = state.lifecycle.toModelLoadingState()
         _uiState.value = buildUiState()
-    }
-
-    private fun updateAggregateState(
-        transform: (ProvisioningAggregateState) -> ProvisioningAggregateState,
-    ) {
-        aggregateState.update(transform)
-        publishUiStateFromIo()
     }
 
     private fun updateLocalUiState(
@@ -744,7 +741,8 @@ class ProvisioningUserFacingException(
 class ModelProvisioningViewModelFactory internal constructor(
     private val gateway: ProvisioningGateway,
     private val eligibilityEvaluator: ModelCatalogEligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
-    private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider = ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
+    private val eligibilitySignalsProvider: ModelEligibilitySignalsProvider =
+        ModelEligibilitySignalsProvider.ASSUME_SUPPORTED,
     private val dispatchers: AppDispatchers = AppDispatchers.DEFAULT,
     private val huggingFaceModelAcquisition: HuggingFaceModelAcquisition = DefaultHuggingFaceModelAcquisition(),
     private val huggingFaceRecentModelStore: HuggingFaceRecentModelStore = HuggingFaceRecentModelStore.None,

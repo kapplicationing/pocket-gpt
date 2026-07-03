@@ -20,9 +20,8 @@ Current flow set:
 7. `scenario-hf-debug-candidate-status-probe.yaml` (`cloud-fixture`, `model-management`, `hf-candidate`, `diagnostic`): hosted fixture diagnostic for the debug HF resolve state machine. It waits on explicit debug resource IDs and passes only on `hf_ready`; non-ready terminal states fail with a `PROBE_DIAGNOSIS__...` message.
 8. `scenario-hf-realhub-candidate-status-probe.yaml` (`cloud-realhub`, `model-management`, `hf-candidate`, `diagnostic`): hosted real-Hugging Face diagnostic. Use it with an APK built without a fixture base URL when fixture reachability is suspect.
 9. `scenario-hf-realhub-queue-status-smoke.yaml` (`cloud-realhub`, `model-management`, `hf-download`, `live-hf`): hosted real-Hugging Face queue-status proof. It resolves a public GGUF, taps queue, handles metered/notification prompts, and stops once `debug_model_library_task_present` is visible. It does not prove full install.
-10. `scenario-hf-download-installed-smoke.yaml` (`cloud-fixture`, `model-management`, `hf-download`): hosted fixture contract for debug-open Model Library -> resolve fixture candidate -> queue -> visible HF task status. Install is proven locally by instrumentation first.
-11. `scenario-hf-fixture-download-smoke.yaml` (`cloud-fixture`, `model-management`, `hf-fixture`, `downloads`): optional hosted fixture queue-status regression. This flow requires a debug APK built with `pocketgpt.hfFixtureBaseUrl` pointing at a public fixture server and opens Model Library through the debug-only activity entrypoint.
-12. `scenario-gpu-cpu-benchmark.yaml` (`cloud-benchmark`, `benchmark`, `long-running`): clean install, first-run provisioning, GPU-on send benchmark, new-session GPU-off send benchmark, and assertion that GPU completes faster than CPU on the same cloud device.
+10. `scenario-hf-fixture-download-smoke.yaml` (`cloud-fixture`, `model-management`, `hf-fixture`, `downloads`): optional hosted fixture queue-status regression. This flow requires a debug APK built with `pocketgpt.hfFixtureBaseUrl` pointing at a public fixture server and opens Model Library through the debug-only activity entrypoint. Install is proven locally by instrumentation first.
+11. `scenario-gpu-cpu-benchmark.yaml` (`cloud-benchmark`, `benchmark`, `long-running`): clean install, first-run provisioning, GPU-on send benchmark, new-session GPU-off send benchmark, and assertion that GPU completes faster than CPU on the same cloud device.
 
 Recommended command:
 
@@ -31,7 +30,23 @@ bash scripts/dev/maestro-cloud-smoke.sh
 bash scripts/dev/maestro-cloud-gpu-benchmark.sh
 ```
 
-Dynamic Hugging Face fixture command:
+Dynamic Hugging Face Cloud default:
+
+```bash
+bash scripts/dev/maestro-cloud-flow.sh \
+  --flow tests/maestro-cloud/scenario-hf-realhub-candidate-status-probe.yaml \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --api-level 34
+
+bash scripts/dev/maestro-cloud-flow.sh \
+  --flow tests/maestro-cloud/scenario-hf-realhub-queue-status-smoke.yaml \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --api-level 34
+```
+
+Use these two real-Hugging Face probes as the hosted default when fixture reachability is suspect. They require an APK built without `pocketgpt.hfFixtureBaseUrl`, prove hosted app networking to `huggingface.co`, and stop at candidate/queue-status rather than full install.
+
+Optional dynamic Hugging Face fixture command:
 
 ```bash
 python3 scripts/dev/hf-fixture-server.py --port 8765
@@ -39,7 +54,7 @@ cloudflared tunnel --url http://127.0.0.1:8765
 bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh --fixture-base-url https://your-tunnel.example
 ```
 
-Use the public base URL of `scripts/dev/hf-fixture-server.py` here. The wrapper defaults to `scenario-hf-download-installed-smoke.yaml`, the stable candidate/queue-status proof. Pass `--flow tests/maestro-cloud/scenario-hf-search-to-candidate-smoke.yaml` to prove hosted candidate resolution separately. Do not use a Maestro Cloud upload or report URL; those pages only show run results and cannot answer the fake Hugging Face `/health`, `/api/models`, `/tree`, or `/resolve` endpoints.
+Use the public base URL of `scripts/dev/hf-fixture-server.py` here only when the endpoint is reachable from Maestro Cloud's hosted device. Host-side preflight is necessary but not enough; a Devstack or tunnel endpoint can answer local `curl` checks and still be blocked from the hosted emulator. The wrapper defaults to `scenario-hf-fixture-download-smoke.yaml`, the fixture candidate/queue-status proof. Pass `--flow tests/maestro-cloud/scenario-hf-search-to-candidate-smoke.yaml` to prove hosted candidate resolution separately. Do not use a Maestro Cloud upload or report URL; those pages only show run results and cannot answer the fake Hugging Face `/health`, `/api/models`, `/tree`, or `/resolve` endpoints.
 
 When candidate resolution fails opaquely in Cloud, run `scenario-hf-debug-candidate-status-probe.yaml` first. It uses `debug_model_library_status_*` resource IDs instead of broad text waits, so the first failing artifact classifies the state as fixture blocked, missing debug extras, no target, stale resolving, or ready.
 
@@ -51,7 +66,7 @@ bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh \
   --preflight-only
 ```
 
-Devstack-backed fixture command:
+Devstack-backed fixture command, optional:
 
 ```bash
 cd tools/hf-fixture-devstack

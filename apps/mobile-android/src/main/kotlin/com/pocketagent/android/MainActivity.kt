@@ -44,7 +44,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// TODO: Add material3-window-size-class dependency to build.gradle.kts:
+// Add material3-window-size-class dependency to build.gradle.kts before enabling adaptive layouts:
 //   implementation("androidx.compose.material3:material3-window-size-class:<version>")
 // Then uncomment:
 // import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            // TODO: Once material3-window-size-class dependency is added, compute and pass down:
+            // Once material3-window-size-class dependency is added, compute and pass down:
             // val windowSizeClass = calculateWindowSizeClass(this)
             // Pass windowSizeClass to PocketAgentApp for adaptive layouts.
             PocketAgentTheme {

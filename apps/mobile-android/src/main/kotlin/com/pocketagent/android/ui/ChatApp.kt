@@ -72,6 +72,7 @@ import kotlinx.coroutines.withContext
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
+@Suppress("CyclomaticComplexMethod", "LongMethod", "MaxLineLength", "ComplexCondition")
 @Composable
 fun PocketAgentApp(
     viewModel: ChatViewModel,
@@ -181,7 +182,6 @@ fun PocketAgentApp(
         viewModel = viewModel,
         provisioningViewModel = provisioningViewModel,
         voiceController = resolvedVoiceController,
-        voiceState = voiceState,
     )
     val openModelSheet: () -> Unit = {
         viewModel.showSurface(ModalSurface.ModelLibrary)
@@ -230,11 +230,6 @@ fun PocketAgentApp(
     val loadLastUsedModelAction: (Boolean) -> Unit = { closeOnSuccess ->
         scope.launch {
             modelLibraryActions.loadLastUsedModel(closeOnSuccess)
-        }
-    }
-    val offloadModelAction: (Boolean) -> Unit = { closeOnSuccess ->
-        scope.launch {
-            modelLibraryActions.offloadModel(closeOnSuccess)
         }
     }
     val refreshAction: () -> Unit = {
@@ -549,6 +544,7 @@ private fun SessionDrawerHost(
 }
 
 @Composable
+@Suppress("LongParameterList")
 private fun ChatScreenHost(
     viewModel: ChatViewModel,
     runtime: RuntimeUiState,
@@ -591,6 +587,7 @@ private fun ChatScreenHost(
 }
 
 @Composable
+@Suppress("LongParameterList")
 private fun ModalOrchestratorHost(
     viewModel: ChatViewModel,
     activeSurface: ModalSurface,

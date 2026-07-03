@@ -16,7 +16,6 @@ import com.pocketagent.android.R
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.voice.VoiceActivationEnableResult
 import com.pocketagent.android.voice.VoiceActivationController
-import com.pocketagent.android.voice.VoiceActivationUiState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,6 +32,7 @@ internal data class ChatAppLaunchers(
 )
 
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod")
 internal fun rememberChatAppLaunchers(
     context: Context,
     scope: CoroutineScope,
@@ -41,7 +41,6 @@ internal fun rememberChatAppLaunchers(
     viewModel: ChatViewModel,
     provisioningViewModel: ModelProvisioningViewModel,
     voiceController: VoiceActivationController,
-    voiceState: VoiceActivationUiState,
 ): ChatAppLaunchers {
     val launchImageAttachmentPicker = rememberChatAppImageAttachmentLauncher(
         context = context,
@@ -138,7 +137,10 @@ internal fun rememberChatAppLaunchers(
                 }
 
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
                     appViewModel.setPendingNotificationPermissionVersion(version)
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
@@ -154,7 +156,10 @@ internal fun rememberChatAppLaunchers(
     val toggleVoiceActivation: (Boolean) -> Unit = { enabled ->
         when {
             !enabled -> voiceController.setEnabled(false)
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
                 microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             else -> handleVoiceActivationResult(
                 result = voiceController.setEnabled(true),

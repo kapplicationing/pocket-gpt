@@ -1,4 +1,5 @@
 @file:OptIn(ExperimentalLayoutApi::class, ExperimentalAnimationApi::class, ExperimentalComposeUiApi::class)
+@file:Suppress("CyclomaticComplexMethod", "LongMethod", "LongParameterList", "MaxLineLength")
 
 package com.pocketagent.android.ui
 

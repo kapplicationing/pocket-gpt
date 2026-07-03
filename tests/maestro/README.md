@@ -22,9 +22,8 @@ Source of truth for execution commands and cloud guidance:
 10. `scenario-session-drawer-smoke.yaml`: onboarding skip -> session drawer delete/replacement smoke
 11. `scenario-hf-url-validation-smoke.yaml` (`smoke`, `model-management`, `hf-validation`): debug-open model library -> invalid HF URL -> blocked reason contract. This is in the default `devctl lane maestro` list.
 12. `scenario-hf-search-to-candidate-smoke.yaml` (`smoke`, `model-management`, `hf-search`): debug-open model library -> fixture search -> file result -> candidate preview.
-13. `scenario-hf-download-installed-smoke.yaml` (`smoke`, `model-management`, `hf-download`): debug-open model library -> resolve fixture candidate -> queue -> visible HF task status. Install is proven by `ModelDownloadManagerInstrumentationTest`, not Maestro.
-14. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): optional local fake-HF queue-status regression. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`.
-15. `scenario-hf-live-download-smoke.yaml` (`live-hf`, `long-running`): explicit device-only probe for public HF URL -> queue -> pause/resume/cancel/retry -> install -> Load. Keep it out of default lanes because hosted/live network and artifact-size variance are not deterministic.
+13. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): optional local fake-HF queue-status regression. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`. Install is proven by `ModelDownloadManagerInstrumentationTest`, not Maestro.
+14. `scenario-hf-live-download-smoke.yaml` (`live-hf`, `long-running`): explicit device-only probe for public HF URL -> queue -> pause/resume/cancel/retry -> install -> Load. Keep it out of default lanes because hosted/live network and artifact-size variance are not deterministic.
 
 ## Contract Notes
 
@@ -51,7 +50,7 @@ python3 tools/devctl/main.py lane maestro --include-tags smoke --exclude-tags lo
 bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
 maestro-android test tests/maestro/scenario-hf-url-validation-smoke.yaml --device <device>
 maestro-android test tests/maestro/scenario-hf-search-to-candidate-smoke.yaml --device <device>
-maestro-android test tests/maestro/scenario-hf-download-installed-smoke.yaml --device <device>
+bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
 ```
 
 ## Scoped Debug Flows

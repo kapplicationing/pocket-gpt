@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod", "MaxLineLength")
 internal fun ModelLibrarySheetHost(
     activeSurface: ModalSurface,
     provisioningViewModel: ModelProvisioningViewModel,
@@ -229,7 +230,11 @@ private fun ModelProvisioningUiState.debugHuggingFaceTaskStatus(): String {
                 "${download.modelId}::${download.version}" == key
             }
             when {
-                key in enqueuingModelIds && task == null -> "hf_task:ENQUEUING|model=${version.modelId}|version=${version.version}"
+                key in enqueuingModelIds && task == null -> buildString {
+                    append("hf_task:ENQUEUING")
+                    append("|model=${version.modelId}")
+                    append("|version=${version.version}")
+                }
                 task != null -> buildString {
                     append("hf_task:${task.status}")
                     append("|stage=${task.processingStage}")

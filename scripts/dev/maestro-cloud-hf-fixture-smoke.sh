@@ -11,7 +11,7 @@ pocketgpt_load_dotenv
 API_LEVEL=34
 API_KEY_ENV="$(pocketgpt_default_maestro_cloud_key_env)"
 FIXTURE_BASE_URL="${POCKETGPT_HF_FIXTURE_BASE_URL:-}"
-FLOW="tests/maestro-cloud/scenario-hf-download-installed-smoke.yaml"
+FLOW="tests/maestro-cloud/scenario-hf-fixture-download-smoke.yaml"
 RUN_ROOT=""
 ALLOW_LOCAL_FIXTURE_URL=0
 PREFLIGHT_ONLY=0
@@ -24,7 +24,7 @@ Options:
   --fixture-base-url <url>   Public URL for scripts/dev/hf-fixture-server.py.
   --api-level <level>        Android API level. Default: 34.
   --api-key-env <env>        Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
-  --flow <path.yaml>         Maestro Cloud flow. Default: scenario-hf-download-installed-smoke.yaml queue-status proof.
+  --flow <path.yaml>         Maestro Cloud flow. Default: scenario-hf-fixture-download-smoke.yaml queue-status proof.
   --run-root <path>          Write artifacts under this directory.
   --allow-local-fixture-url  Allow loopback/private fixture URLs for wrapper debugging only.
   --preflight-only           Validate fixture endpoint and exit before building or uploading.
@@ -39,6 +39,12 @@ Avoid accountless tunnels on restricted corporate networks unless preflight pass
 Cloudflared and localhost.run can be blocked by VPN/firewall policy before Maestro
 Cloud ever reaches the fixture.
 USAGE
+}
+
+fixture_preflight_failure_hint() {
+  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
+  echo "Use only a fixture endpoint proven reachable from Maestro Cloud's hosted device." >&2
+  echo "Host-side preflight is necessary but not enough; if hosted reachability is suspect, run the real-HF Cloud candidate/queue-status probes instead." >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -139,7 +145,8 @@ if address.is_loopback or address.is_private or address.is_link_local or address
     raise SystemExit(1)
 PY
   then
-    echo "Expose the fixture with a public URL, for example Devstack, ngrok, Tailscale Funnel, or a short-lived hosted VM." >&2
+    echo "Expose the fixture with a public URL that Maestro Cloud's hosted device can actually reach." >&2
+    echo "Devstack and tunnels can pass host preflight while still being unreachable from the hosted emulator." >&2
     echo "Use --allow-local-fixture-url only to debug this wrapper without running a real cloud device." >&2
     exit 64
   fi
@@ -162,16 +169,14 @@ RANGE_BYTES="${RUN_ROOT}/fixture-range-byte.bin"
 HEALTH_BODY="$(curl -fsS "${FIXTURE_BASE_URL%/}/health" || true)"
 if [[ "${HEALTH_BODY}" != "ok" ]]; then
   echo "Fixture preflight failed: /health did not return ok." >&2
-  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
-  echo "Use tools/hf-fixture-devstack for the preferred hosted fixture, or expose scripts/dev/hf-fixture-server.py through a public HTTPS endpoint that passes the printed preflight checks." >&2
+  fixture_preflight_failure_hint
   exit 1
 fi
 echo "Fixture preflight ok: /health" >&2
 
 if ! curl -fsS "${FIXTURE_BASE_URL%/}/api/models?search=tiny" -o "${SEARCH_JSON}"; then
   echo "Fixture preflight failed: /api/models?search=tiny" >&2
-  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
-  echo "Use tools/hf-fixture-devstack for the preferred hosted fixture, or expose scripts/dev/hf-fixture-server.py through a public HTTPS endpoint that passes the printed preflight checks." >&2
+  fixture_preflight_failure_hint
   exit 1
 fi
 echo "Fixture preflight ok: /api/models?search=tiny" >&2
@@ -187,15 +192,13 @@ if not any(item.get("id") == "fixture/tiny-gguf" for item in search):
     raise SystemExit(1)
 PY
 then
-  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
-  echo "Use tools/hf-fixture-devstack for the preferred hosted fixture, or expose scripts/dev/hf-fixture-server.py through a public HTTPS endpoint that passes the printed preflight checks." >&2
+  fixture_preflight_failure_hint
   exit 1
 fi
 
 if ! curl -fsS "${FIXTURE_BASE_URL%/}/api/models/fixture/tiny-gguf/tree/main" -o "${TREE_JSON}"; then
   echo "Fixture preflight failed: /api/models/fixture/tiny-gguf/tree/main" >&2
-  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
-  echo "Use tools/hf-fixture-devstack for the preferred hosted fixture, or expose scripts/dev/hf-fixture-server.py through a public HTTPS endpoint that passes the printed preflight checks." >&2
+  fixture_preflight_failure_hint
   exit 1
 fi
 echo "Fixture preflight ok: /api/models/fixture/tiny-gguf/tree/main" >&2
@@ -216,8 +219,7 @@ if not any(
     raise SystemExit(1)
 PY
 then
-  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
-  echo "Use tools/hf-fixture-devstack for the preferred hosted fixture, or expose scripts/dev/hf-fixture-server.py through a public HTTPS endpoint that passes the printed preflight checks." >&2
+  fixture_preflight_failure_hint
   exit 1
 fi
 
@@ -225,8 +227,7 @@ RANGE_STATUS="$(curl -fsS --range 0-0 -w "%{http_code}" -o "${RANGE_BYTES}" "${F
 RANGE_SIZE="$(wc -c <"${RANGE_BYTES}" | tr -d ' ')"
 if [[ "${RANGE_STATUS}" != "206" || "${RANGE_SIZE}" != "1" ]]; then
   echo "Fixture preflight failed: range download returned HTTP ${RANGE_STATUS:-missing} and ${RANGE_SIZE:-0} byte(s), expected HTTP 206 and 1 byte." >&2
-  echo "Fixture server did not pass the HF API/download preflight at ${FIXTURE_BASE_URL%/}." >&2
-  echo "Use tools/hf-fixture-devstack for the preferred hosted fixture, or expose scripts/dev/hf-fixture-server.py through a public HTTPS endpoint that passes the printed preflight checks." >&2
+  fixture_preflight_failure_hint
   exit 1
 fi
 echo "Fixture preflight ok: /fixture/tiny-gguf/resolve/main/tiny.gguf range 0-0" >&2

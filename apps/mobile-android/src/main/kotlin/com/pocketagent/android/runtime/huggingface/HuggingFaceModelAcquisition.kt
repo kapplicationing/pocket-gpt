@@ -43,6 +43,7 @@ data class HuggingFaceModelReference(
         get() = buildHuggingFaceRepoUrl(repoId)
 
     companion object {
+        @Suppress("ThrowsCount")
         fun parse(input: String): HuggingFaceModelReference {
             val trimmed = input.trim()
             if (trimmed.isBlank()) {
@@ -396,13 +397,15 @@ class DefaultHuggingFaceModelAcquisition(
         if (!SHA256_REGEX.matches(sha)) {
             throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SHA,
-                userMessage = "This file does not expose a usable Hugging Face LFS checksum, so PocketGPT cannot verify the download.",
+                userMessage = "This file does not expose a usable Hugging Face LFS checksum, " +
+                    "so PocketGPT cannot verify the download.",
             )
         }
         val sizeBytes = metadata.sizeBytes?.takeIf { it > 0L }
             ?: throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SIZE,
-                userMessage = "This file does not expose a usable file size, so PocketGPT cannot check storage before download.",
+                userMessage = "This file does not expose a usable file size, " +
+                    "so PocketGPT cannot check storage before download.",
             )
         val repositoryMetadata = runCatching { hubClient.lookupRepository(reference) }.getOrNull()
         val spec = ModelCatalog.normalizedSpecFor(target.modelId)
@@ -486,7 +489,8 @@ class DefaultHuggingFaceModelAcquisition(
         return if (requiredCompanions.isNotEmpty() || spec?.capabilities?.supports(CapabilityFlag.IMAGE) == true) {
             HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.COMPANION_ARTIFACT_REQUIRED,
-                userMessage = "This model needs extra companion files. PocketGPT only supports single-file text GGUF downloads here.",
+                userMessage = "This model needs extra companion files. " +
+                    "PocketGPT only supports single-file text GGUF downloads here.",
             )
         } else {
             HuggingFaceAcquisitionException(
@@ -562,6 +566,7 @@ private fun parseModelInfoResponse(
     )
 }
 
+@Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements")
 private fun parseModelSearchResponse(
     raw: String,
     limit: Int,

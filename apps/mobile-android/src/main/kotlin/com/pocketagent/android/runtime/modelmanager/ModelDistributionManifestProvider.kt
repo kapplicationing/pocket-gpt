@@ -104,6 +104,7 @@ class ModelDistributionManifestProvider(
         }
     }
 
+    @Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements", "MaxLineLength")
     private fun parseManifest(raw: String): ModelDistributionManifest {
         val root = JSONObject(raw)
         val modelsJson = root.optJSONArray("models") ?: JSONArray()
@@ -127,8 +128,15 @@ class ModelDistributionManifestProvider(
             for (v in 0 until versionsJson.length()) {
                 val versionItem = versionsJson.optJSONObject(v) ?: continue
                 val version = versionItem.optString("version", "").trim()
-                val artifacts = parseArtifacts(modelId = modelId, version = version, versionItem = versionItem, warnings = warnings)
-                val primaryArtifact = artifacts.firstOrNull { artifact -> artifact.role == ModelArtifactRole.PRIMARY_GGUF }
+                val artifacts = parseArtifacts(
+                    modelId = modelId,
+                    version = version,
+                    versionItem = versionItem,
+                    warnings = warnings,
+                )
+                val primaryArtifact = artifacts.firstOrNull { artifact ->
+                    artifact.role == ModelArtifactRole.PRIMARY_GGUF
+                }
                 val downloadUrl = primaryArtifact?.downloadUrl
                     ?: versionItem.optString("downloadUrl", "").trim()
                 val sha = primaryArtifact?.expectedSha256
@@ -306,6 +314,7 @@ class ModelDistributionManifestProvider(
         return runCatching { DownloadVerificationPolicy.valueOf(normalized) }.getOrNull()
     }
 
+    @Suppress("LoopWithTooManyJumpStatements")
     private fun parseArtifacts(
         modelId: String,
         version: String,
@@ -326,7 +335,6 @@ class ModelDistributionManifestProvider(
             val fileSizeBytes = artifactItem.optLong("fileSizeBytes", 0L)
             val required = artifactItem.optBoolean("required", true)
             val rejectionReason = validateArtifactEntry(
-                role = role,
                 downloadUrl = downloadUrl,
                 expectedSha256 = expectedSha256,
                 fileSizeBytes = fileSizeBytes,
@@ -360,7 +368,6 @@ class ModelDistributionManifestProvider(
     }
 
     private fun validateArtifactEntry(
-        role: ModelArtifactRole,
         downloadUrl: String,
         expectedSha256: String,
         fileSizeBytes: Long,

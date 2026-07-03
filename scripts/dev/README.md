@@ -420,11 +420,26 @@ Run split HF proofs before optional hosted fixture work:
 ```bash
 maestro-android test tests/maestro/scenario-hf-url-validation-smoke.yaml --device <device>
 maestro-android test tests/maestro/scenario-hf-search-to-candidate-smoke.yaml --device <device>
-maestro-android test tests/maestro/scenario-hf-download-installed-smoke.yaml --device <device>
 bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>
 ```
 
 The debug action opens the real `ChatViewModel.showSurface(ModalSurface.ModelLibrary)` path. Do not use `bootstrap-clean-start.yaml` or `open-model-library.yaml` for HF-specific flows; those helpers are intentionally broad and were the source of prior HF automation flake.
+
+For Maestro Cloud HF proof, use the real-Hugging Face candidate and queue-status probes before optional hosted fixture work:
+
+```bash
+bash scripts/dev/maestro-cloud-flow.sh \
+  --flow tests/maestro-cloud/scenario-hf-realhub-candidate-status-probe.yaml \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --api-level 34
+
+bash scripts/dev/maestro-cloud-flow.sh \
+  --flow tests/maestro-cloud/scenario-hf-realhub-queue-status-smoke.yaml \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --api-level 34
+```
+
+Run `scripts/dev/maestro-cloud-hf-fixture-smoke.sh` only with a fixture endpoint that Maestro Cloud's hosted device can reach. A local host preflight, Devstack health check, or tunnel health check does not by itself prove hosted-device reachability.
 
 Focused model-management split smoke on Maestro Cloud:
 

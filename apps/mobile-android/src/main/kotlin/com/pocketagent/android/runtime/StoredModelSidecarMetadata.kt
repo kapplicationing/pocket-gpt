@@ -59,7 +59,9 @@ internal object StoredModelSidecarMetadataStore {
             val artifacts = json.optJSONArray("artifacts")
                 ?.let(::decodeArtifacts)
                 .orEmpty()
-            val parameters = json.optJSONObject("parameters")?.let(::decodeParameters)
+            val parameters = json.optJSONObject("parameters")
+                ?.let(::decodeParameters)
+                ?.takeIf { parameters -> parameters.hasKnownValue() }
                 ?: decodeParametersFromLegacyGguf(json.optJSONObject("gguf"))
             StoredModelSidecarMetadata(
                 modelId = json.optString("modelId", "").trim(),
@@ -185,6 +187,18 @@ internal object StoredModelSidecarMetadataStore {
             headCountKv = attention?.optInt("headCountKv", -1)?.takeIf { it >= 0 },
             vocabularySize = architecture?.optInt("vocabSize", -1)?.takeIf { it >= 0 },
         )
+    }
+
+    private fun StoredModelParameterSnapshot.hasKnownValue(): Boolean {
+        return architecture != null ||
+            quantization != null ||
+            quantizationVersion != null ||
+            contextLength != null ||
+            layerCount != null ||
+            embeddingSize != null ||
+            headCount != null ||
+            headCountKv != null ||
+            vocabularySize != null
     }
 
     private fun parseArtifactRole(raw: String): ModelArtifactRole? {

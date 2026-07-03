@@ -41,6 +41,7 @@ import com.pocketagent.android.ui.state.toModelLoadingState
 import com.pocketagent.runtime.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -175,6 +176,7 @@ class ModelProvisioningViewModel internal constructor(
     private val aggregateState = MutableStateFlow(gateway.observeProvisioningAggregateState().value)
     private val localUiState = MutableStateFlow(ModelProvisioningLocalUiState())
     private val _modelLoadingState = MutableStateFlow(aggregateState.value.lifecycle.toModelLoadingState())
+    private val huggingFaceResolveGeneration = AtomicLong(0L)
     private val _uiState = MutableStateFlow(
         aggregateState.value.toModelProvisioningUiState(
             local = localUiState.value,
@@ -234,6 +236,7 @@ class ModelProvisioningViewModel internal constructor(
         input: String,
         targetModelId: String,
     ) {
+        val resolveGeneration = huggingFaceResolveGeneration.incrementAndGet()
         updateLocalUiState { state ->
             state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Resolving)
         }
@@ -262,10 +265,17 @@ class ModelProvisioningViewModel internal constructor(
                 }
             },
         )
-        updateLocalUiState { state -> state.copy(huggingFaceAcquisitionState = nextState) }
+        updateLocalUiState { state ->
+            if (huggingFaceResolveGeneration.get() == resolveGeneration) {
+                state.copy(huggingFaceAcquisitionState = nextState)
+            } else {
+                state
+            }
+        }
     }
 
     fun clearHuggingFaceCandidate() {
+        huggingFaceResolveGeneration.incrementAndGet()
         updateLocalUiState { state ->
             state.copy(huggingFaceAcquisitionState = HuggingFaceAcquisitionUiState.Idle)
         }

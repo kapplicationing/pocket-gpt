@@ -124,6 +124,61 @@ class StoredModelSidecarMetadataTest {
     }
 
     @Test
+    fun `all null parameter snapshot falls back to extracted gguf metadata`() {
+        val file = File.createTempFile("pocketgpt-sidecar-gguf-fallback", ".json")
+        try {
+            file.writeText(
+                """
+                {
+                  "modelId": "llama-3.2-1b-instruct-q4_k_m",
+                  "version": "q4_k_m",
+                  "parameters": {
+                    "architecture": null,
+                    "quantization": null,
+                    "quantizationVersion": null,
+                    "contextLength": null,
+                    "layerCount": null,
+                    "embeddingSize": null,
+                    "headCount": null,
+                    "headCountKv": null,
+                    "vocabularySize": null
+                  },
+                  "gguf": {
+                    "architecture": {
+                      "architecture": "llama",
+                      "quantizationVersion": 2,
+                      "vocabSize": 128256
+                    },
+                    "dimensions": {
+                      "contextLength": 131072,
+                      "blockCount": 16,
+                      "embeddingSize": 2048
+                    },
+                    "attention": {
+                      "headCount": 32,
+                      "headCountKv": 8
+                    }
+                  }
+                }
+                """.trimIndent(),
+            )
+
+            val decoded = StoredModelSidecarMetadataStore.read(file)
+
+            assertNotNull(decoded)
+            assertEquals("llama", decoded.parameters.architecture)
+            assertEquals(131072, decoded.parameters.contextLength)
+            assertEquals(16, decoded.parameters.layerCount)
+            assertEquals(2048, decoded.parameters.embeddingSize)
+            assertEquals(32, decoded.parameters.headCount)
+            assertEquals(8, decoded.parameters.headCountKv)
+            assertEquals(128256, decoded.parameters.vocabularySize)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun `sidecar metadata read is cached until file changes`() {
         val file = File.createTempFile("pocketgpt-sidecar-cache", ".json")
         try {

@@ -24,8 +24,22 @@ open class StartupProbeController {
             if (error is CancellationException) {
                 throw error
             }
-            val detail = error.message?.trim().takeUnless { it.isNullOrEmpty() } ?: error::class.simpleName.orEmpty()
+            val detail = error.startupFailureDetail()
             listOf("Startup checks failed unexpectedly: $detail")
         }
     }
+}
+
+private fun Throwable.startupFailureDetail(): String {
+    val messages = generateSequence(this) { error -> error.cause }
+        .mapNotNull { error -> error.message?.trim()?.takeUnless { it.isEmpty() } }
+        .distinct()
+        .toList()
+    if (messages.isNotEmpty()) {
+        return messages.joinToString(": ")
+    }
+    return generateSequence(this) { error -> error.cause }
+        .mapNotNull { error -> error::class.simpleName?.takeUnless { it.isEmpty() } }
+        .firstOrNull()
+        ?: "unknown error"
 }

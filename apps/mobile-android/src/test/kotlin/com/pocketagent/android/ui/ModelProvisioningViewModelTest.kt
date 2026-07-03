@@ -50,9 +50,11 @@ import com.pocketagent.android.testutil.fakeUri
 import com.pocketagent.nativebridge.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -697,6 +699,42 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `stale hugging face resolve completion is ignored after clear`() = runTest(dispatcher) {
+        val resolveStarted = CompletableDeferred<Unit>()
+        val pendingCandidate = CompletableDeferred<HuggingFaceCandidate>()
+        val version = sampleDownloadVersion()
+        val acquisition = FakeHuggingFaceModelAcquisition(
+            resolve = { _, _ ->
+                resolveStarted.complete(Unit)
+                pendingCandidate.await()
+            },
+        )
+        val viewModel = ModelProvisioningViewModel(
+            gateway = FakeProvisioningGateway(),
+            huggingFaceModelAcquisition = acquisition,
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        val resolveJob = launch {
+            viewModel.resolveHuggingFaceCandidate(
+                input = "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+                targetModelId = "qwen3.5-0.8b-q4",
+            )
+        }
+        advanceUntilIdle()
+
+        assertTrue(resolveStarted.isCompleted)
+
+        viewModel.clearHuggingFaceCandidate()
+        pendingCandidate.complete(sampleHuggingFaceCandidate(version))
+        resolveJob.join()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.huggingFaceAcquisitionState is HuggingFaceAcquisitionUiState.Idle)
+    }
+
+    @Test
     fun `hugging face search exposes results and clear resets state`() = runTest(dispatcher) {
         val result = sampleHuggingFaceSearchResult()
         val acquisition = FakeHuggingFaceModelAcquisition(searchResults = listOf(result))
@@ -1025,6 +1063,7 @@ private class FakeHuggingFaceModelAcquisition(
     private val failure: HuggingFaceAcquisitionException? = null,
     private val searchResults: List<HuggingFaceSearchFileResult> = emptyList(),
     private val searchFailure: HuggingFaceAcquisitionException? = null,
+    private val resolve: (suspend (String, String) -> HuggingFaceCandidate)? = null,
 ) : HuggingFaceModelAcquisition {
     val searchQueries = mutableListOf<String>()
 
@@ -1040,6 +1079,7 @@ private class FakeHuggingFaceModelAcquisition(
 
     override suspend fun resolveCandidate(input: String, targetModelId: String): HuggingFaceCandidate {
         failure?.let { throw it }
+        resolve?.let { return it(input, targetModelId) }
         return requireNotNull(candidate)
     }
 }

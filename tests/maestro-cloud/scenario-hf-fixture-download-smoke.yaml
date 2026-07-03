@@ -19,6 +19,11 @@ tags:
       visible: "Large download on metered network"
     commands:
       - tapOn: "Continue download"
+- runFlow:
+    when:
+      visible: "Allow PocketAgent to send you notifications?"
+    commands:
+      - tapOn: "Allow"
 - extendedWaitUntil:
     visible:
       id: "debug_model_library_task_present"

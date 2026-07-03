@@ -5,12 +5,55 @@ FLOW_PATH="tests/maestro/scenario-first-run-download-chat.yaml"
 OUT_DIR="tmp/lifecycle-e2e-first-run"
 APP_ID="com.pocketagent.android"
 APP_TEST_ID="com.pocketagent.android.test"
-RISK_REASON="${1:-unknown}"
+RISK_REASON="unknown"
+REQUESTED_SERIAL="${ADB_SERIAL:-${ANDROID_SERIAL:-${DEVICE_SERIAL:-}}}"
 ATTEMPT_TIMEOUT_SEC="${LIFECYCLE_E2E_ATTEMPT_TIMEOUT_SEC:-1200}"
 ADB_TIMEOUT_SEC="${LIFECYCLE_E2E_ADB_TIMEOUT_SEC:-120}"
 TIMEOUT_KILL_AFTER="${LIFECYCLE_E2E_KILL_AFTER_SEC:-30}"
 CRASH_SIGNATURE_REGEX="${LIFECYCLE_E2E_CRASH_SIGNATURE_REGEX:-SIGSEGV|Abort message|nativeLoadModel failed|UI-RUNTIME-001|FATAL EXCEPTION}"
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/ci/run_lifecycle_e2e.sh [--device <serial>] [reason]
+
+Runs the first-run lifecycle Maestro flow with crash-signature capture and one clean-state retry.
+If --device is omitted, ADB_SERIAL, ANDROID_SERIAL, or DEVICE_SERIAL is used. Without an
+explicit serial, exactly one authorized adb device must be attached.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --device|--serial)
+      REQUESTED_SERIAL="${2:?missing serial for $1}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      RISK_REASON="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ $# -gt 0 ]]; then
+  echo "Unexpected trailing arguments: $*" >&2
+  usage >&2
+  exit 2
+fi
 
 with_timeout() {
   local duration="$1"
@@ -20,6 +63,33 @@ with_timeout() {
     return
   fi
   "$@"
+}
+
+select_device_serial() {
+  if [[ -n "${REQUESTED_SERIAL}" ]]; then
+    if ! with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${REQUESTED_SERIAL}" get-state >/dev/null; then
+      echo "Requested device ${REQUESTED_SERIAL} is not connected and authorized." >&2
+      return 1
+    fi
+    printf '%s\n' "${REQUESTED_SERIAL}"
+    return 0
+  fi
+
+  local devices
+  devices="$(with_timeout "${ADB_TIMEOUT_SEC}" adb devices | awk 'NR>1 && $2=="device" {print $1}')"
+  local count
+  count="$(printf '%s\n' "${devices}" | sed '/^$/d' | wc -l | tr -d ' ')"
+  if [[ "${count}" == "1" ]]; then
+    printf '%s\n' "${devices}"
+    return 0
+  fi
+  if [[ "${count}" == "0" ]]; then
+    echo "No connected emulator/device for Maestro run." >&2
+  else
+    echo "Multiple adb devices detected; pass --device or set ADB_SERIAL/ANDROID_SERIAL." >&2
+    printf '%s\n' "${devices}" >&2
+  fi
+  return 1
 }
 
 capture_logcat() {
@@ -96,11 +166,7 @@ if [[ -z "${APK_PATH}" ]]; then
   exit 1
 fi
 
-DEVICE_SERIAL="$(with_timeout "${ADB_TIMEOUT_SEC}" adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')"
-if [[ -z "${DEVICE_SERIAL}" ]]; then
-  echo "No connected emulator/device for Maestro run." >&2
-  exit 1
-fi
+DEVICE_SERIAL="$(select_device_serial)"
 
 if ! with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" install -r "${APK_PATH}" >/dev/null; then
   echo "Failed to install APK on ${DEVICE_SERIAL} within ${ADB_TIMEOUT_SEC}s." >&2

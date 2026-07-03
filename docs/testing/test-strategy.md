@@ -168,7 +168,7 @@ Flow-truth rule in practice:
 
 1. Merge-unblock gate contract:
    - `merge` + `doctor` + `android-instrumented`
-   - risk-triggered lifecycle flow (`tests/maestro/scenario-first-run-download-chat.yaml`) executed through the hardened wrapper `python3 tools/devctl/main.py lane maestro --flows ...`
+   - risk-triggered lifecycle flow (`tests/maestro/scenario-first-run-download-chat.yaml`) executed through the CI lifecycle wrapper for retry, artifact, and crash-signature capture
 2. Promotion gate contract:
    - `merge` + `doctor` + `android-instrumented` + `maestro` + strict `journey`
    - optional `screenshot-pack` via `--include-screenshot-pack`
@@ -186,8 +186,8 @@ Flow-truth rule in practice:
    - PR label is one of `risk:e2e-lifecycle`, `risk:runtime`, `risk:provisioning`, or
    - high-risk paths change (mobile runtime/provisioning/download/chat and shared app-runtime/native-bridge paths).
 3. Every push to `main` runs `lifecycle-e2e-first-run` and blocks on failure.
-4. Lifecycle gate executes `tests/maestro/scenario-first-run-download-chat.yaml` through the hardened `devctl lane maestro --flows ...` path rather than raw `maestro test`.
-5. Gate allows one bounded clean-state retry; first-failure artifacts are preserved for triage.
+4. The CI lifecycle gate executes `tests/maestro/scenario-first-run-download-chat.yaml` through `scripts/ci/run_lifecycle_e2e.sh`, which wraps raw Maestro with install, crash-signature capture, first-failure artifacts, and one clean-state retry.
+5. Local broad rehearsal can still use `python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml`; use the CI wrapper with an explicit `--device` when reproducing the required GitHub job.
 
 ## CI Baseline
 

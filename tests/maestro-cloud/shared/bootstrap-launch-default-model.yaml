@@ -46,43 +46,73 @@ appId: com.pocketagent.android
     when:
       visible: "Model library"
     commands:
+      - runFlow:
+          when:
+            visible: "Refresh"
+          commands:
+            - tapOn: "Refresh"
+      - runFlow:
+          when:
+            visible:
+              id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
+              enabled: true
+          commands:
+            - tapOn:
+                id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
+      - runFlow:
+          when:
+            visible:
+              id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
+              enabled: true
+          commands:
+            - tapOn:
+                id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
+      - runFlow:
+          when:
+            visible:
+              id: "refresh_button"
+          commands:
+            - tapOn:
+                id: "refresh_button"
+      - back
+- runFlow:
+    when:
+      visible:
+        id: "chat_gate_inline_card"
+    commands:
+      - runFlow: open-model-library.yaml
+      - tapOn: "Search models"
+      - eraseText
+      - inputText: "qwen3-0.6b-q4_k_m"
+      - hideKeyboard
       - scrollUntilVisible:
           element:
-            text: "Downloaded models"
-          direction: UP
-          timeout: 20000
-- runFlow:
-    when:
-      visible: "Refresh"
-    commands:
-      - tapOn: "Refresh"
-- runFlow:
-    when:
-      visible:
-        id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
-        enabled: true
-    commands:
-      - tapOn:
-          id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
-- runFlow:
-    when:
-      visible:
-        id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
-        enabled: true
-    commands:
-      - tapOn:
-          id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
-- runFlow:
-    when:
-      visible:
-        id: "refresh_button"
-    commands:
-      - tapOn:
-          id: "refresh_button"
-- runFlow:
-    when:
-      visible: "Model library"
-    commands:
+            id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
+          direction: DOWN
+          timeout: 60000
+      - runFlow:
+          when:
+            visible:
+              id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
+              enabled: true
+          commands:
+            - tapOn:
+                id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
+      - runFlow:
+          when:
+            visible:
+              id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
+              enabled: true
+          commands:
+            - tapOn:
+                id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
+      - runFlow:
+          when:
+            visible:
+              id: "refresh_button"
+          commands:
+            - tapOn:
+                id: "refresh_button"
       - back
 - extendedWaitUntil:
     visible:

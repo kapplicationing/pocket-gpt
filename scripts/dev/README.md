@@ -498,15 +498,24 @@ Contract summary:
 5. Lifecycle flow under gate: `tests/maestro/scenario-first-run-download-chat.yaml`.
 6. Gate includes one clean-state retry with first-failure artifacts retained.
 
-Local command to mirror the lifecycle gate quickly:
+Local commands to mirror the lifecycle gate:
 
 ```bash
-./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=false :apps:mobile-android:assembleDebug
-APK_PATH="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
-adb install -r "${APK_PATH}"
-maestro --format junit --device "$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')" \
-  test tests/maestro/scenario-first-run-download-chat.yaml > tmp/lifecycle-e2e-first-run-local.xml
+maestro-android lint \
+  tests/maestro/scenario-first-run-download-chat.yaml \
+  tests/maestro/shared/bootstrap-launch-default-model.yaml
+
+./gradlew --no-daemon \
+  -Ppocketgpt.enableNativeBuild=true \
+  -Ppocketgpt.nativeAbiFilters=x86_64 \
+  :apps:mobile-android:assembleDebug
+
+bash scripts/ci/run_lifecycle_e2e.sh --device <serial> local-manual
 ```
+
+Use an API 33 x86_64 Pixel 6 Google APIs emulator for the closest local match to CI.
+The lifecycle wrapper honors `--device`, `ADB_SERIAL`, `ANDROID_SERIAL`, and
+`DEVICE_SERIAL`; it now refuses ambiguous multi-device local runs.
 
 ## Governance Commands
 

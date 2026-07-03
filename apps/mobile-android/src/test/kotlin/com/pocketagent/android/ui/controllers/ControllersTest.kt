@@ -15,6 +15,7 @@ import com.pocketagent.android.ui.state.StartupProbeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -68,7 +69,7 @@ class ControllersTest {
     }
 
     @Test
-    fun `startup probe controller converts unexpected startup exception into check message`() = runTest {
+    fun `startup probe controller converts unexpected startup exception into check message`() = runBlocking {
         val runtime = RecordingRuntimeGateway(
             startupBehavior = {
                 error("startup crash")

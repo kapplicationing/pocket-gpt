@@ -88,7 +88,7 @@ appId: com.pocketagent.android
       - scrollUntilVisible:
           element:
             id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
-          direction: UP
+          direction: DOWN
           timeout: 60000
       - runFlow:
           when:

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 FLOW_PATH="tests/maestro/scenario-first-run-download-chat.yaml"
-OUT_DIR="tmp/lifecycle-e2e-first-run"
+OUT_DIR="${LIFECYCLE_E2E_OUT_DIR:-tmp/lifecycle-e2e-first-run}"
 APP_ID="com.pocketagent.android"
 APP_TEST_ID="com.pocketagent.android.test"
 RISK_REASON="unknown"

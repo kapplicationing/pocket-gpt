@@ -31,6 +31,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm",GROUP="kvm",MODE="0666",OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Run nightly instrumentation smoke matrix
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -38,10 +44,11 @@ jobs:
           arch: x86_64
           profile: pixel_6
           target: google_apis
-          force-avd-creation: false
+          emulator-boot-timeout: 900
+          force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-load -no-snapshot-save
           disable-animations: true
-          script: ./gradlew --no-daemon :apps:mobile-android:connectedDebugAndroidTest
+          script: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=false :apps:mobile-android:connectedDebugAndroidTest
 
       - name: Upload nightly instrumentation reports
         if: always()
@@ -78,6 +85,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm",GROUP="kvm",MODE="0666",OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Install Maestro CLI
         run: |
           curl -Ls https://get.maestro.mobile.dev | bash
@@ -90,7 +103,8 @@ jobs:
           arch: x86_64
           profile: pixel_6
           target: google_apis
-          force-avd-creation: false
+          emulator-boot-timeout: 900
+          force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-load -no-snapshot-save
           disable-animations: true
           script: python3 tools/devctl/main.py lane maestro
@@ -129,13 +143,19 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm",GROUP="kvm",MODE="0666",OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Install Maestro CLI
         run: |
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "${HOME}/.maestro/bin" >> "${GITHUB_PATH}"
 
       - name: Assemble debug APK
-        run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleDebug
+        run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug
 
       - name: Run first-run lifecycle flow on emulator
         uses: reactivecircus/android-emulator-runner@v2
@@ -144,31 +164,11 @@ jobs:
           arch: x86_64
           profile: pixel_6
           target: google_apis
-          force-avd-creation: false
+          emulator-boot-timeout: 900
+          force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-load -no-snapshot-save
           disable-animations: true
-          script: |
-            set -euo pipefail
-            FLOW_PATH="tests/maestro/scenario-first-run-download-chat.yaml"
-            OUT_DIR="tmp/nightly-maestro-first-run/api-${{ matrix.api-level }}"
-            mkdir -p "${OUT_DIR}"
-
-            APK_PATH="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
-            if [[ -z "${APK_PATH}" ]]; then
-              echo "No debug APK found under apps/mobile-android/build/outputs/apk/debug" >&2
-              exit 1
-            fi
-
-            DEVICE_SERIAL="$(adb devices | awk 'NR>1 && $2==\"device\" {print $1; exit}')"
-            if [[ -z "${DEVICE_SERIAL}" ]]; then
-              echo "No connected emulator/device for Maestro run." >&2
-              exit 1
-            fi
-
-            adb -s "${DEVICE_SERIAL}" install -r "${APK_PATH}" >/dev/null
-            maestro --device "${DEVICE_SERIAL}" test "${FLOW_PATH}" --format junit --debug-output "${OUT_DIR}/debug" \
-              > "${OUT_DIR}/junit.xml" \
-              2> "${OUT_DIR}/maestro-stderr.log"
+          script: LIFECYCLE_E2E_OUT_DIR="tmp/nightly-maestro-first-run/api-${{ matrix.api-level }}" bash scripts/ci/run_lifecycle_e2e.sh "nightly-api-${{ matrix.api-level }}"
 
       - name: Upload nightly Maestro first-run artifacts
         if: always()

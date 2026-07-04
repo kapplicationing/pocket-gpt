@@ -16,7 +16,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -90,7 +89,8 @@ class ChatScreenComposeContractTest {
         composeRule.onNodeWithTag("runtime_error_banner").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_gate_inline_card").assertIsDisplayed()
         composeRule.onNodeWithTag("send_button").assertTextEquals("Refresh")
-        composeRule.onAllNodesWithText("Refresh runtime checks").onFirst().assertIsDisplayed()
+        composeRule.onNodeWithText("Runtime checks need attention before sending. Refresh checks and retry.")
+            .assertIsDisplayed()
     }
 
     @Test

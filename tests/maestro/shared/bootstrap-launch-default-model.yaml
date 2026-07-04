@@ -69,16 +69,20 @@ appId: com.pocketagent.android
                 id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
       - runFlow:
           when:
-            visible:
-              id: "refresh_button"
-          commands:
-            - tapOn:
-                id: "refresh_button"
-      - runFlow:
-          when:
             visible: "Model library"
           commands:
             - back
+- runFlow:
+    when:
+      visible:
+        id: "chat_gate_inline_card"
+    commands:
+      - tapOn:
+          id: "send_button"
+      - extendedWaitUntil:
+          notVisible:
+            id: "chat_gate_inline_card"
+          timeout: 180000
 - runFlow:
     when:
       visible:
@@ -110,13 +114,6 @@ appId: com.pocketagent.android
           commands:
             - tapOn:
                 id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
-      - runFlow:
-          when:
-            visible:
-              id: "refresh_button"
-          commands:
-            - tapOn:
-                id: "refresh_button"
       - runFlow:
           when:
             visible: "Model library"

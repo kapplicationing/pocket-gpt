@@ -209,9 +209,10 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "permission_allow_button"', text)
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertIn('visible: "Preparing PocketAgent"', text)
-        self.assertIn('visible: "Model library"', text)
-        self.assertIn('visible: "Close"', text)
-        self.assertIn("- back", text)
+        self.assertIn('id: "unified_model_sheet"', text)
+        self.assertIn("runFlow: close-model-library-if-open.yaml", text)
+        self.assertNotIn('visible: "Model library"', text)
+        self.assertNotIn("- back", text)
         self.assertIn('id: "session_drawer_button"', text)
         self.assertIn('id: "send_button"', text)
         self.assertNotIn('id: "composer_input"', text)
@@ -295,9 +296,10 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
         self.assertIn('id: "permission_allow_button"', text)
         self.assertIn('visible: "Allow PocketAgent to send you notifications?"', text)
-        self.assertIn('visible: "Model library"', text)
-        self.assertIn('visible: "Close"', text)
-        self.assertIn('- back', text)
+        self.assertIn('id: "unified_model_sheet"', text)
+        self.assertIn("runFlow: close-model-library-if-open.yaml", text)
+        self.assertNotIn('visible: "Model library"', text)
+        self.assertNotIn('- back', text)
         self.assertIn('id: "composer_input"', text)
 
     def test_settle_current_ready_shell_handles_running_app_without_launch(self) -> None:
@@ -311,7 +313,9 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_next"', text)
         self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_get_started"', text)
         self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
-        self.assertIn('visible: "Model library"', text)
+        self.assertIn('id: "unified_model_sheet"', text)
+        self.assertIn("runFlow: close-model-library-if-open.yaml", text)
+        self.assertNotIn('visible: "Model library"', text)
         self.assertIn('id: "composer_input"', text)
 
     def test_first_run_and_benchmark_flows_reuse_shared_bootstrap_contracts(self) -> None:
@@ -344,7 +348,10 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertNotIn('text: "Downloaded models"', bootstrap_text)
         self.assertIn('id: "chat_gate_inline_card"', bootstrap_text)
         self.assertNotIn("\n      - back", bootstrap_text)
-        self.assertIn('visible: "Model library"\n          commands:\n            - back', bootstrap_text)
+        self.assertIn("runFlow: close-model-library-if-open.yaml", bootstrap_text)
+        self.assertIn('id: "unified_model_sheet"', (
+            REPO_ROOT / "tests/maestro/shared/close-model-library-if-open.yaml"
+        ).read_text(encoding="utf-8"))
 
         cloud_bootstrap_text = (
             REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-launch-default-model.yaml"
@@ -352,8 +359,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', cloud_bootstrap_text)
         self.assertNotIn('text: "Downloaded models"', cloud_bootstrap_text)
         self.assertIn('id: "chat_gate_inline_card"', cloud_bootstrap_text)
+        self.assertNotIn('id: "refresh_button"', cloud_bootstrap_text)
         self.assertNotIn("\n      - back", cloud_bootstrap_text)
-        self.assertIn('visible: "Model library"\n          commands:\n            - back', cloud_bootstrap_text)
+        self.assertIn("runFlow: close-model-library-if-open.yaml", cloud_bootstrap_text)
+        self.assertIn('id: "unified_model_sheet"', (
+            REPO_ROOT / "tests/maestro-cloud/shared/close-model-library-if-open.yaml"
+        ).read_text(encoding="utf-8"))
 
         cloud_benchmark_path = REPO_ROOT / "tests/maestro-cloud/scenario-gpu-cpu-benchmark.yaml"
         cloud_text = cloud_benchmark_path.read_text(encoding="utf-8")

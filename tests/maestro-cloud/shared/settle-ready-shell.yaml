@@ -40,18 +40,16 @@ appId: com.pocketagent.android
 - runFlow: dismiss-system-overlays.yaml
 - runFlow:
     when:
-      visible: "Model library"
+      visible:
+        id: "unified_model_sheet"
     commands:
-      - runFlow:
-          when:
-            visible: "Close"
-          commands:
-            - tapOn: "Close"
+      - runFlow: close-model-library-if-open.yaml
 - runFlow:
     when:
-      visible: "Model library"
+      visible:
+        id: "unified_model_sheet"
     commands:
-      - back
+      - runFlow: close-model-library-if-open.yaml
 - runFlow:
     when:
       visible:

@@ -115,6 +115,11 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     'id: "unified_model_sheet"\n    commands:\n      - runFlow: close-model-library-if-open.yaml\n      - runFlow: bootstrap-launch-default-model.yaml',
                     recovery_text,
                 )
+                self.assertLess(
+                    recovery_text.index('id: "unified_model_sheet"'),
+                    recovery_text.index('visible: "Load"'),
+                    "sheet reset must run before generic row text actions.",
+                )
                 if explicit_setup_marker is not None:
                     self.assertIn(explicit_setup_marker, helper_chain_text)
                 if "tests/maestro-cloud/shared" in helper_path.as_posix():

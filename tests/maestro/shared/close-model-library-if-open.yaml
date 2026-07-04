@@ -5,8 +5,22 @@ appId: com.pocketagent.android
       visible:
         id: "unified_model_sheet"
     commands:
-      - tapOn: "Close"
-      - extendedWaitUntil:
-          notVisible:
-            id: "unified_model_sheet"
-          timeout: 30000
+      - runFlow:
+          when:
+            visible: "Close"
+          commands:
+            - tapOn: "Close"
+            - extendedWaitUntil:
+                notVisible:
+                  id: "unified_model_sheet"
+                timeout: 30000
+      - runFlow:
+          when:
+            visible:
+              id: "unified_model_sheet"
+          commands:
+            - back
+            - extendedWaitUntil:
+                notVisible:
+                  id: "unified_model_sheet"
+                timeout: 30000

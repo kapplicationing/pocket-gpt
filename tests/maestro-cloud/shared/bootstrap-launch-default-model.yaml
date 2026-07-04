@@ -42,10 +42,10 @@ appId: com.pocketagent.android
       visible: "Large download on metered network"
     commands:
       - tapOn: "Continue download"
-- runFlow: close-model-library-if-open.yaml
 - runFlow:
     when:
-      visible: "Model library"
+      visible:
+        id: "unified_model_sheet"
     commands:
       - runFlow:
           when:

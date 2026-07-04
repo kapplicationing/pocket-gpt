@@ -349,9 +349,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "chat_gate_inline_card"', bootstrap_text)
         self.assertNotIn("\n      - back", bootstrap_text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", bootstrap_text)
-        self.assertIn('id: "unified_model_sheet"', (
+        local_close_helper_text = (
             REPO_ROOT / "tests/maestro/shared/close-model-library-if-open.yaml"
-        ).read_text(encoding="utf-8"))
+        ).read_text(encoding="utf-8")
+        self.assertIn('id: "unified_model_sheet"', local_close_helper_text)
+        self.assertIn('visible: "Close"', local_close_helper_text)
+        self.assertIn("- back", local_close_helper_text)
 
         cloud_bootstrap_text = (
             REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-launch-default-model.yaml"
@@ -362,9 +365,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertNotIn('id: "refresh_button"', cloud_bootstrap_text)
         self.assertNotIn("\n      - back", cloud_bootstrap_text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", cloud_bootstrap_text)
-        self.assertIn('id: "unified_model_sheet"', (
+        cloud_close_helper_text = (
             REPO_ROOT / "tests/maestro-cloud/shared/close-model-library-if-open.yaml"
-        ).read_text(encoding="utf-8"))
+        ).read_text(encoding="utf-8")
+        self.assertIn('id: "unified_model_sheet"', cloud_close_helper_text)
+        self.assertIn('visible: "Close"', cloud_close_helper_text)
+        self.assertIn("- back", cloud_close_helper_text)
 
         cloud_benchmark_path = REPO_ROOT / "tests/maestro-cloud/scenario-gpu-cpu-benchmark.yaml"
         cloud_text = cloud_benchmark_path.read_text(encoding="utf-8")

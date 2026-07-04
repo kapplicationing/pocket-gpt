@@ -48,6 +48,7 @@ appId: com.pocketagent.android
       visible:
         id: "unified_model_sheet"
     commands:
+      - runFlow: close-model-library-if-open.yaml
       - runFlow: bootstrap-launch-default-model.yaml
 - runFlow:
     when:

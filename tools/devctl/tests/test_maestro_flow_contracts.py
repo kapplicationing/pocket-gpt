@@ -111,6 +111,10 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 self.assertIn('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertIn('id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
+                self.assertIn(
+                    'id: "unified_model_sheet"\n    commands:\n      - runFlow: close-model-library-if-open.yaml\n      - runFlow: bootstrap-launch-default-model.yaml',
+                    recovery_text,
+                )
                 if explicit_setup_marker is not None:
                     self.assertIn(explicit_setup_marker, helper_chain_text)
                 if "tests/maestro-cloud/shared" in helper_path.as_posix():

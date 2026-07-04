@@ -39,18 +39,16 @@ appId: com.pocketagent.android
           timeout: 60000
 - runFlow:
     when:
-      visible: "Model library"
+      visible:
+        id: "unified_model_sheet"
     commands:
-      - runFlow:
-          when:
-            visible: "Close"
-          commands:
-            - tapOn: "Close"
+      - runFlow: close-model-library-if-open.yaml
 - runFlow:
     when:
-      visible: "Model library"
+      visible:
+        id: "unified_model_sheet"
     commands:
-      - back
+      - runFlow: close-model-library-if-open.yaml
 - extendedWaitUntil:
     visible:
       id: "session_drawer_button"

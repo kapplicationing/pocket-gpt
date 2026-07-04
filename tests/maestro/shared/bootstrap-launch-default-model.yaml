@@ -42,6 +42,7 @@ appId: com.pocketagent.android
       visible: "Large download on metered network"
     commands:
       - tapOn: "Continue download"
+- runFlow: close-model-library-if-open.yaml
 - runFlow:
     when:
       visible: "Model library"
@@ -67,11 +68,7 @@ appId: com.pocketagent.android
           commands:
             - tapOn:
                 id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
-      - runFlow:
-          when:
-            visible: "Model library"
-          commands:
-            - back
+      - runFlow: close-model-library-if-open.yaml
 - runFlow:
     when:
       visible:
@@ -114,11 +111,8 @@ appId: com.pocketagent.android
           commands:
             - tapOn:
                 id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
-      - runFlow:
-          when:
-            visible: "Model library"
-          commands:
-            - back
+      - runFlow: close-model-library-if-open.yaml
+- runFlow: close-model-library-if-open.yaml
 - extendedWaitUntil:
     visible:
       id: "composer_input"

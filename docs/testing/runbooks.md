@@ -565,6 +565,15 @@ python3 tools/devctl/main.py lane screenshot-pack --product-signal-only
 bash scripts/dev/bench.sh stage2 --profile closure --device your-device-id --models both --scenarios both --install-mode auto
 ```
 
+The scheduled Hardware Truth Lane is disabled unless the repository variable
+`POCKETGPT_HARDWARE_RUNNER_ENABLED` is set to `true` and the secret
+`POCKETGPT_HARDWARE_RUNNER_ADMIN_TOKEN` can verify an online self-hosted runner
+with the `pocketgpt-android` label. Leave the variable unset or false when the
+hardware runner is offline; otherwise the scheduled lane skips on GitHub-hosted
+infrastructure instead of queueing for 24 hours. Manual dispatches fail fast
+when the gate is disabled, the token is missing, or no matching runner is
+online.
+
 Attach evidence note and run:
 
 ```bash

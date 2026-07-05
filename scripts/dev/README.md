@@ -101,6 +101,14 @@ export POCKETGPT_QWEN3_1_7B_Q4_K_M_SIDELOAD_PATH=/absolute/device/path/qwen3-1.7
 
 Only the paths for the selected `--models` are required now. A `0.8b` quick run does not require the 1.7B path.
 
+GitHub's scheduled Hardware Truth Lane is gated by the repository variable
+`POCKETGPT_HARDWARE_RUNNER_ENABLED=true` and secret
+`POCKETGPT_HARDWARE_RUNNER_ADMIN_TOKEN`. Leave the variable unset or false when
+no self-hosted `pocketgpt-android` runner is online so scheduled runs skip
+instead of queueing for 24 hours. When the variable is true, the secret must be
+able to read repository self-hosted runners so the workflow can fail closed if
+the matching runner is offline.
+
 Contract outputs under `scripts/benchmarks/runs/YYYY-MM-DD/your-device-id/`:
 
 1. `scenario-a.csv`

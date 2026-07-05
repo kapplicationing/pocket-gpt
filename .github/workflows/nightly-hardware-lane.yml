@@ -22,8 +22,72 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
+  runner-availability:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+      reason: ${{ steps.check.outputs.reason }}
+    steps:
+      - name: Check hardware runner gate
+        id: check
+        env:
+          HARDWARE_RUNNER_ENABLED: ${{ vars.POCKETGPT_HARDWARE_RUNNER_ENABLED }}
+          RUNNER_ADMIN_TOKEN: ${{ secrets.POCKETGPT_HARDWARE_RUNNER_ADMIN_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${HARDWARE_RUNNER_ENABLED}" != "true" ]]; then
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "reason=gate-disabled" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Hardware runner gate is disabled. Set repository variable POCKETGPT_HARDWARE_RUNNER_ENABLED=true only while an online self-hosted runner with label pocketgpt-android is available."
+            exit 0
+          fi
+
+          if [[ -z "${RUNNER_ADMIN_TOKEN}" ]]; then
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "reason=missing-runner-token" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Hardware runner gate is enabled, but secret POCKETGPT_HARDWARE_RUNNER_ADMIN_TOKEN is missing; failing closed."
+            exit 0
+          fi
+
+          matching_runner="$(
+            GH_TOKEN="${RUNNER_ADMIN_TOKEN}" gh api "repos/${REPOSITORY}/actions/runners" --paginate \
+              --jq 'first(.runners[]? | select(.status == "online" and ([.labels[].name] | index("self-hosted")) and ([.labels[].name] | index("pocketgpt-android"))) | .name) // ""'
+          )"
+
+          if [[ -n "${matching_runner}" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=runner-online" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Hardware runner available: ${matching_runner}"
+            exit 0
+          fi
+
+          echo "available=false" >> "${GITHUB_OUTPUT}"
+          echo "reason=runner-offline" >> "${GITHUB_OUTPUT}"
+          echo "::notice::No online self-hosted runner with label pocketgpt-android is available."
+
+  hardware-unavailable:
+    needs: runner-availability
+    runs-on: ubuntu-latest
+    if: needs.runner-availability.outputs.available != 'true'
+    steps:
+      - name: Report unavailable hardware runner
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "::error::Hardware Truth Lane unavailable: ${{ needs.runner-availability.outputs.reason }}. Start/register an online self-hosted runner with label pocketgpt-android, set repository variable POCKETGPT_HARDWARE_RUNNER_ENABLED=true, configure secret POCKETGPT_HARDWARE_RUNNER_ADMIN_TOKEN, then dispatch again."
+            exit 1
+          fi
+
+          echo "::notice::Skipping scheduled hardware truth lane: ${{ needs.runner-availability.outputs.reason }}."
+
   hardware-stage2:
+    needs: runner-availability
+    if: needs.runner-availability.outputs.available == 'true'
     runs-on: [self-hosted, pocketgpt-android]
     timeout-minutes: 180
     env:

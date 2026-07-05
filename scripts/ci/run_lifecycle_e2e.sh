@@ -100,6 +100,18 @@ capture_logcat() {
   fi
 }
 
+capture_failure_state() {
+  local out_dir="$1"
+  local screen_file="${out_dir}/failure-screen.png"
+  local hierarchy_device_path="/sdcard/pocketgpt-lifecycle-window.xml"
+  local hierarchy_file="${out_dir}/failure-window.xml"
+
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" exec-out screencap -p > "${screen_file}" 2>/dev/null || true
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell uiautomator dump "${hierarchy_device_path}" >/dev/null 2>&1 || true
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" pull "${hierarchy_device_path}" "${hierarchy_file}" >/dev/null 2>&1 || true
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell rm "${hierarchy_device_path}" >/dev/null 2>&1 || true
+}
+
 detect_app_crash_signatures() {
   local log_file="$1"
   local matches_file="$2"
@@ -186,9 +198,17 @@ run_attempt() {
     2> "${attempt_dir}/maestro-stderr.log"
   local rc=$?
   set -e
+  local failure_state_captured=false
+  if [[ ${rc} -ne 0 ]]; then
+    capture_failure_state "${attempt_dir}"
+    failure_state_captured=true
+  fi
   capture_logcat "${logcat_file}" || true
   if [[ -f "${logcat_file}" ]] && detect_app_crash_signatures "${logcat_file}" "${crash_file}"; then
     echo "::error::Lifecycle E2E attempt ${attempt} detected app crash signatures in logcat."
+    if [[ "${failure_state_captured}" != "true" ]]; then
+      capture_failure_state "${attempt_dir}"
+    fi
     rc=86
   fi
   if [[ ${rc} -eq 124 ]]; then

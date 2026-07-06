@@ -30,9 +30,9 @@ Engineering and quality excellence are mandatory.
 
 ## Current Status Snapshot
 
-`main` is clean and synchronized with `origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522` (`Guard hardware truth lane runner availability (#9)`). Latest main push CI passed at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), latest CodeQL passed at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and July 6 nightly validation passed at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). Treat the nightly Maestro Cloud job as skipped configuration coverage because `MAESTRO_CLOUD_API_KEY` was absent, not as hosted product proof.
+The July HF/CI branch stack is merged and published through PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4)-[#9](https://github.com/kapplicationing/pocket-gpt/pull/9). The code-bearing branch-stack baseline passed main push CI at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), CodeQL at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and July 6 nightly validation at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). Treat the nightly Maestro Cloud job as skipped configuration coverage because `MAESTRO_CLOUD_API_KEY` was absent, not as hosted product proof. Verify the live `main`/`origin/main` SHA with `git status --short --branch` and GitHub Actions before release action instead of hard-coding a moving docs-only tip here.
 
-Branch/publication hygiene is closed for the current `codex/simplify-model-selection` and post-merge CI cleanup stack: merged PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4), [#5](https://github.com/kapplicationing/pocket-gpt/pull/5), [#6](https://github.com/kapplicationing/pocket-gpt/pull/6), [#7](https://github.com/kapplicationing/pocket-gpt/pull/7), [#8](https://github.com/kapplicationing/pocket-gpt/pull/8), and [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) are all on `main`.
+Branch/publication hygiene is closed for the `codex/simplify-model-selection` and post-merge CI cleanup stack: merged PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4), [#5](https://github.com/kapplicationing/pocket-gpt/pull/5), [#6](https://github.com/kapplicationing/pocket-gpt/pull/6), [#7](https://github.com/kapplicationing/pocket-gpt/pull/7), [#8](https://github.com/kapplicationing/pocket-gpt/pull/8), and [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) are all on `main`.
 
 ## Work Packages
 
@@ -68,7 +68,7 @@ None.
 ### Done (Recent)
 
 - [x] Dynamic Hugging Face search/import and follow-up CI stabilization stack landed on `main` through PRs #4-#9.
-- [x] Branch/publication hygiene is closed for the current July stack: local `main` is clean and synchronized with `origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`.
+- [x] Branch/publication hygiene is closed for the July stack: PRs #4-#9 are merged and published on `main`.
 - [x] Latest main push CI and CodeQL are green at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466) and [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204).
 - [x] July 6 Nightly Validation is green at [run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147), with the Maestro Cloud lane explicitly skipped because `MAESTRO_CLOUD_API_KEY` was unavailable.
 - [x] Nightly hardware runner availability is guarded by PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9); missing self-hosted runner capacity is now reported as lane availability, not confused with product failure.
@@ -114,7 +114,7 @@ None.
 1. Stream A, closed: hosted/default machine-verifiable evidence closure (`QA-11`, `QA-14`, `QA-15`, `QA-13`) is sufficient for the controlled-MVP decision.
 2. Stream B, closed for controlled MVP: the disclosed `AI human-proxy` fallback packet now supplies the moderation-backed leg when moderators are unavailable.
 3. Stream C, active: support/claim/package readiness (`PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, `PROD-13`).
-4. Stream D, closed for the July branch stack: `main` and `origin/main` are synchronized at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`; future branch hygiene work only reopens when a new release branch or unmerged worktree appears.
+4. Stream D, closed for the July branch stack: PRs #4-#9 are merged and published on `main`; future branch hygiene work only reopens when a new release branch or unmerged worktree appears.
 
 ### Parallel Agent Support Topology
 

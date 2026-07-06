@@ -56,8 +56,6 @@ appId: com.pocketagent.android
 - runFlow:
     when:
       visible: "Get started"
-      notVisible:
-        id: "onboarding_get_started"
     commands:
       - runFlow: dismiss-system-overlays.yaml
       - hideKeyboard

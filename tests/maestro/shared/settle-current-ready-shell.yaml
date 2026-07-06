@@ -27,13 +27,9 @@ appId: com.pocketagent.android
 - runFlow: bootstrap-clean-start.yaml
 - runFlow: dismiss-system-overlays.yaml
 - extendedWaitUntil:
-    notVisible:
-      id: "onboarding_next"
-    timeout: 15000
-- extendedWaitUntil:
-    notVisible:
-      id: "onboarding_get_started"
-    timeout: 15000
+    visible:
+      id: "session_drawer_button"
+    timeout: 30000
 - runFlow: ensure-runtime-loaded.yaml
 - runFlow: dismiss-system-overlays.yaml
 - runFlow:

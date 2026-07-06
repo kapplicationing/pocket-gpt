@@ -49,8 +49,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
             with self.subTest(helper=helper_path.relative_to(REPO_ROOT).as_posix()):
                 text = helper_path.read_text(encoding="utf-8")
                 self.assertIn('visible: "Model library"', text)
-                self.assertIn('id: "onboarding_next"', text)
-                self.assertIn('id: "onboarding_get_started"', text)
+                self.assertIn('text: "Next"', text)
+                self.assertIn('text: "Get started"', text)
                 self.assertIn('visible: "Get ready"', text)
                 self.assertIn('id: "open_model_library"', text)
                 self.assertIn('id: "composer_input"', text)
@@ -65,8 +65,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
         self.assertIn("runFlow: dismiss-system-overlays.yaml", text)
-        self.assertIn('notVisible:\n      id: "onboarding_next"', text)
-        self.assertIn('notVisible:\n      id: "onboarding_get_started"', text)
+        self.assertIn('visible:\n      id: "session_drawer_button"', text)
         self.assertNotIn("runFlow: settle-top-bar-shell.yaml", text)
         self.assertNotIn('visible: "Pocket GPT"', text)
 
@@ -213,8 +212,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
         flow_path = REPO_ROOT / "tests/maestro/shared/assert-post-onboarding-chat-surface.yaml"
         text = flow_path.read_text(encoding="utf-8")
         self.assertNotIn("launchApp:", text)
-        self.assertIn('id: "onboarding_next"', text)
-        self.assertIn('id: "onboarding_get_started"', text)
+        self.assertNotIn('id: "onboarding_next"', text)
+        self.assertNotIn('id: "onboarding_get_started"', text)
         self.assertIn('id: "permission_allow_button"', text)
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertIn('visible: "Preparing PocketAgent"', text)
@@ -243,7 +242,6 @@ class MaestroFlowContractsTest(unittest.TestCase):
             'visible:\n        id: "onboarding_get_started"',
             'tapOn:\n          id: "onboarding_get_started"',
             'visible: "Get started"',
-            'notVisible:\n        id: "onboarding_get_started"',
             '- tapOn: "Get started"',
         )
         for marker in shared_markers:
@@ -273,7 +271,6 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('visible:\n        id: "onboarding_skip"', bootstrap_clean_text)
         self.assertIn('visible:\n        id: "onboarding_get_started"', bootstrap_clean_text)
         self.assertIn('tapOn:\n          id: "onboarding_get_started"', bootstrap_clean_text)
-        self.assertIn('notVisible:\n        id: "onboarding_get_started"', bootstrap_clean_text)
         self.assertIn('tapOn: "Get started"', bootstrap_clean_text)
         self.assertEqual(
             bootstrap_clean_text,
@@ -301,8 +298,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertGreaterEqual(text.count("runFlow: dismiss-system-overlays.yaml"), 3)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_next"', text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_get_started"', text)
+        self.assertIn('extendedWaitUntil:\n    visible:\n      id: "session_drawer_button"', text)
         self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
         self.assertIn('id: "permission_allow_button"', text)
         self.assertIn('visible: "Allow PocketAgent to send you notifications?"', text)
@@ -320,8 +316,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertGreaterEqual(text.count("runFlow: dismiss-system-overlays.yaml"), 3)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_next"', text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_get_started"', text)
+        self.assertIn('extendedWaitUntil:\n    visible:\n      id: "session_drawer_button"', text)
         self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
         self.assertIn('id: "unified_model_sheet"', text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", text)

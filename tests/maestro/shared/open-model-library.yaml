@@ -6,9 +6,9 @@ appId: com.pocketagent.android
     commands:
       - assertVisible: "Model library"
 - assertNotVisible:
-    id: "onboarding_next"
+    text: "Next"
 - assertNotVisible:
-    id: "onboarding_get_started"
+    text: "Get started"
 - runFlow:
     when:
       visible: "Setup"

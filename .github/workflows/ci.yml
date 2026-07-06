@@ -427,7 +427,7 @@ jobs:
           # action installs an API 33 system image. Keep only the packaged APK
           # and remove build/cache payloads that are no longer needed.
           rm -rf "${ANDROID_HOME}/ndk" "${ANDROID_HOME}/cmake"
-          rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
           rm -rf "${HOME}/.gradle/caches" "${HOME}/.gradle/daemon" "${HOME}/.gradle/native" "${HOME}/.gradle/workers"
           find packages -type d -name build -prune -exec rm -rf '{}' +
           find apps -mindepth 2 -type d -name build ! -path 'apps/mobile-android/build' -prune -exec rm -rf '{}' +

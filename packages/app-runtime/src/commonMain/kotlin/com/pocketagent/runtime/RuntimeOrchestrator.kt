@@ -1008,10 +1008,15 @@ class RuntimeGenerationFailureException(
     val errorCode: String? = null,
 ) : RuntimeException(message)
 
+internal interface GenerationTimeoutGuardHandle {
+    fun timedOut(): Boolean
+    fun finish()
+}
+
 internal class GenerationTimeoutGuard(
     timeoutMs: Long,
     onTimeout: () -> Unit,
-) {
+) : GenerationTimeoutGuardHandle {
     private val timedOutFlag = AtomicBoolean(false)
     private val finishedFlag = AtomicBoolean(false)
     private val timeoutJob = CoroutineScope(Dispatchers.Default).let { scope ->
@@ -1025,9 +1030,9 @@ internal class GenerationTimeoutGuard(
         }
     }
 
-    fun timedOut(): Boolean = timedOutFlag.get()
+    override fun timedOut(): Boolean = timedOutFlag.get()
 
-    fun finish() {
+    override fun finish() {
         finishedFlag.set(true)
         timeoutJob.cancel()
     }

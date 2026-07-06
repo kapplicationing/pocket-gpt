@@ -1,12 +1,7 @@
 appId: com.pocketagent.android
 ---
 - runFlow: dismiss-system-overlays.yaml
-- extendedWaitUntil:
-    visible:
-      id: "session_drawer_button"
-    timeout: 30000
 - runFlow: dismiss-system-overlays.yaml
-- hideKeyboard
 - runFlow:
     when:
       visible:
@@ -48,7 +43,6 @@ appId: com.pocketagent.android
     commands:
       - runFlow: close-model-library-if-open.yaml
 - runFlow: dismiss-system-overlays.yaml
-- hideKeyboard
 - extendedWaitUntil:
     visible:
       id: "session_drawer_button"

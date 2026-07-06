@@ -195,13 +195,15 @@ class SendMessageUseCaseTest {
 
     @Test
     fun `generation does not timeout after first token is emitted`() {
+        val timeoutGuard = RecordingGenerationTimeoutGuard()
         val fixture = createFixture(
             runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
             policyModule = permissivePolicy(),
             inferenceModule = SendRecordingInferenceModule(
                 generatedTokens = listOf("hello ", "world "),
-                busyWaitMsAfterFirstToken = 30L,
+                afterFirstToken = timeoutGuard::triggerTimeout,
             ),
+            generationTimeoutGuardFactory = timeoutGuard.factory(),
         )
 
         val response = fixture.useCase.execute(
@@ -212,19 +214,23 @@ class SendMessageUseCaseTest {
 
         assertEquals("hello world", response.text)
         assertEquals("completed", response.finishReason)
+        assertEquals(1, timeoutGuard.triggerAttempts)
+        assertTrue(timeoutGuard.finishCalls > 0)
         assertEquals(0, fixture.cancelByRequestCalls)
         assertEquals(0, fixture.cancelBySessionCalls)
     }
 
     @Test
     fun `generation only finishes timeout guard after first visible token`() {
+        val timeoutGuard = RecordingGenerationTimeoutGuard()
         val fixture = createFixture(
             runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
             policyModule = permissivePolicy(),
             inferenceModule = SendRecordingInferenceModule(
                 generatedTokens = listOf("<think>", "reasoning...", "</think>", "final answer"),
-                busyWaitMsAfterFirstToken = 30L,
+                afterFirstToken = timeoutGuard::triggerTimeout,
             ),
+            generationTimeoutGuardFactory = timeoutGuard.factory(),
         )
 
         val error = assertFailsWith<RuntimeGenerationTimeoutException> {
@@ -236,6 +242,8 @@ class SendMessageUseCaseTest {
         }
 
         assertEquals(5L, error.timeoutMs)
+        assertEquals(1, timeoutGuard.triggerAttempts)
+        assertTrue(timeoutGuard.timedOut())
         assertEquals(1, fixture.cancelByRequestCalls)
         assertEquals(0, fixture.cancelBySessionCalls)
     }
@@ -686,6 +694,9 @@ private fun createFixture(
     runtimePlanResolver: RuntimePlanResolver = RuntimePlanResolver(),
     memoryModule: MemoryModule = InMemoryMemoryModule(),
     interactionPlanner: InteractionPlanner = InteractionPlanner(interactionRegistry = ModelInteractionRegistry()),
+    generationTimeoutGuardFactory: (Long, () -> Unit) -> GenerationTimeoutGuardHandle = { timeoutMs, onTimeout ->
+        GenerationTimeoutGuard(timeoutMs = timeoutMs, onTimeout = onTimeout)
+    },
 ): SendMessageFixture {
     val modelLifecycle = ModelLifecycleCoordinator(
         inferenceModule = inferenceModule,
@@ -728,6 +739,7 @@ private fun createFixture(
             true
         },
         runtimeInferencePorts = runtimeInferencePorts,
+        generationTimeoutGuardFactory = generationTimeoutGuardFactory,
     )
     return fixture
 }
@@ -737,6 +749,8 @@ private class SendRecordingInferenceModule(
     private val generatedTokens: List<String> = listOf("hello ", "world "),
     private val busyWaitMsBeforeTokens: Long = 0L,
     private val busyWaitMsAfterFirstToken: Long = 0L,
+    private val beforeTokens: () -> Unit = {},
+    private val afterFirstToken: () -> Unit = {},
 ) : InferenceModule {
     var loadCalls: Int = 0
     var unloadCalls: Int = 0
@@ -755,10 +769,12 @@ private class SendRecordingInferenceModule(
     }
 
     override fun generateStream(request: InferenceRequest, onToken: (String) -> Unit) {
+        beforeTokens()
         busyWait(busyWaitMsBeforeTokens)
         generatedTokens.forEachIndexed { index, token ->
             onToken(token)
             if (index == 0) {
+                afterFirstToken()
                 busyWait(busyWaitMsAfterFirstToken)
             }
         }
@@ -776,6 +792,38 @@ private class SendRecordingInferenceModule(
         while ((System.currentTimeMillis() - start) < waitMs) {
             Thread.onSpinWait()
         }
+    }
+}
+
+private class RecordingGenerationTimeoutGuard : GenerationTimeoutGuardHandle {
+    private lateinit var onTimeout: () -> Unit
+    private var finished: Boolean = false
+    private var timedOut: Boolean = false
+
+    var finishCalls: Int = 0
+        private set
+    var triggerAttempts: Int = 0
+        private set
+
+    fun factory(): (Long, () -> Unit) -> GenerationTimeoutGuardHandle = { _, onTimeout ->
+        this.onTimeout = onTimeout
+        this
+    }
+
+    fun triggerTimeout() {
+        triggerAttempts += 1
+        if (finished) {
+            return
+        }
+        timedOut = true
+        onTimeout()
+    }
+
+    override fun timedOut(): Boolean = timedOut
+
+    override fun finish() {
+        finished = true
+        finishCalls += 1
     }
 }
 

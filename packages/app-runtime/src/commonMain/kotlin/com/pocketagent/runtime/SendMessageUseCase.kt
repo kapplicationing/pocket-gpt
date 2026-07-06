@@ -34,6 +34,9 @@ internal class SendMessageUseCase(
     private val cancelByRequest: (String) -> Boolean,
     private val cancelBySession: (SessionId) -> Boolean,
     private val runtimeInferencePorts: RuntimeInferencePorts = inferenceModule.runtimeInferencePorts(),
+    private val generationTimeoutGuardFactory: (timeoutMs: Long, onTimeout: () -> Unit) -> GenerationTimeoutGuardHandle = { timeoutMs, onTimeout ->
+        GenerationTimeoutGuard(timeoutMs = timeoutMs, onTimeout = onTimeout)
+    },
 ) {
     private val sessionMemorySnippetsBySessionId: MutableMap<String, List<String>> = mutableMapOf()
 
@@ -197,9 +200,9 @@ internal class SendMessageUseCase(
         var reasoningContent: String? = null
         var parsedToolCalls: List<InteractionToolCall> = emptyList()
         var executionResult: InferenceExecutionResult? = null
-        val timeoutGuard = GenerationTimeoutGuard(
-            timeoutMs = executionContext.requestTimeoutMs,
-            onTimeout = {
+        val timeoutGuard = generationTimeoutGuardFactory(
+            executionContext.requestTimeoutMs,
+            {
                 if (runtimeConfig.streamContractV2Enabled) {
                     cancelByRequest(executionContext.requestId)
                 } else {

@@ -12,6 +12,7 @@ appId: com.pocketagent.android
             id: "provisioning_bootstrap_loading"
           timeout: 30000
 - runFlow: bootstrap-clean-start.yaml
+- runFlow: complete-first-run-onboarding.yaml
 - runFlow: dismiss-system-overlays.yaml
 - extendedWaitUntil:
     visible:

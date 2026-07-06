@@ -23,6 +23,7 @@ _LIFECYCLE_HIGH_RISK_PATTERNS = (
     "scripts/ci/run_lifecycle_e2e.sh",
     "tests/maestro/scenario-first-run-download-chat.yaml",
     "tests/maestro/shared/**",
+    "tests/maestro-cloud/shared/**",
     ".github/workflows/ci.yml",
 )
 _STAGE2_QUICK_OPTIMIZATION_PATTERNS = (

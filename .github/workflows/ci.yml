@@ -44,6 +44,8 @@ jobs:
               - "packages/**"
               - "tools/**"
               - "scripts/**"
+              - "tests/maestro/**"
+              - "tests/maestro-cloud/**"
               - "config/**"
               - "settings.gradle.kts"
               - "build.gradle.kts"
@@ -74,6 +76,7 @@ jobs:
               - "scripts/ci/run_lifecycle_e2e.sh"
               - "tests/maestro/scenario-first-run-download-chat.yaml"
               - "tests/maestro/shared/**"
+              - "tests/maestro-cloud/shared/**"
               - ".github/workflows/ci.yml"
 
   lifecycle-risk:

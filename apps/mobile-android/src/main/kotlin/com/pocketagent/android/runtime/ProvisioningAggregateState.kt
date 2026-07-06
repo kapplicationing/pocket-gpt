@@ -3,6 +3,7 @@ package com.pocketagent.android.runtime
 import android.content.Context
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
+import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -42,6 +43,11 @@ internal class DefaultProvisioningAggregateStore(
             downloads.collect { tasks ->
                 mutate { current ->
                     current.copy(
+                        snapshot = if (tasks.hasNewSuccessfulTerminalDownload(current.downloads)) {
+                            runtimeBindings.currentProvisioningSnapshot()
+                        } else {
+                            current.snapshot
+                        },
                         downloads = tasks,
                     )
                 }
@@ -107,4 +113,25 @@ internal class DefaultProvisioningAggregateStore(
     ): ProvisioningAggregateState {
         return _state.updateAndGet(block)
     }
+}
+
+private fun List<DownloadTaskState>.hasNewSuccessfulTerminalDownload(
+    previousTasks: List<DownloadTaskState>,
+): Boolean {
+    val previousTasksById = previousTasks.associateBy { task -> task.taskId }
+    return any { task ->
+        task.isSuccessfulTerminalDownload() &&
+            previousTasksById[task.taskId].isDifferentSuccessfulTerminalStatusFrom(task)
+    }
+}
+
+private fun DownloadTaskState?.isDifferentSuccessfulTerminalStatusFrom(
+    current: DownloadTaskState,
+): Boolean {
+    return this == null || !isSuccessfulTerminalDownload() || status != current.status
+}
+
+private fun DownloadTaskState.isSuccessfulTerminalDownload(): Boolean {
+    return failureReason == null &&
+        (status == DownloadTaskStatus.COMPLETED || status == DownloadTaskStatus.INSTALLED_INACTIVE)
 }

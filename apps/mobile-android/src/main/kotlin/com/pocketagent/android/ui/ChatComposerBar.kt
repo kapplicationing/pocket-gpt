@@ -53,6 +53,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -96,20 +97,27 @@ internal fun ComposerBar(
     onToggleThinking: () -> Unit,
     onOpenCompletionSettings: () -> Unit,
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
+    autoFocusEnabled: Boolean = true,
 ) {
     val haptic = LocalHapticFeedback.current
     val isEditing = editingMessageId != null
     val launchSafeAttachedImages = launchSafeSingleImagePaths(attachedImages)
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    LaunchedEffect(activeSessionId) {
-        if (activeSessionId != null) {
+    LaunchedEffect(autoFocusEnabled) {
+        if (!autoFocusEnabled) {
+            focusManager.clearFocus(force = true)
+        }
+    }
+    LaunchedEffect(activeSessionId, autoFocusEnabled) {
+        if (autoFocusEnabled && activeSessionId != null) {
             focusRequester.requestFocus()
         }
     }
-    LaunchedEffect(editingMessageId) {
-        if (editingMessageId != null) {
+    LaunchedEffect(editingMessageId, autoFocusEnabled) {
+        if (autoFocusEnabled && editingMessageId != null) {
             focusRequester.requestFocus()
         }
     }

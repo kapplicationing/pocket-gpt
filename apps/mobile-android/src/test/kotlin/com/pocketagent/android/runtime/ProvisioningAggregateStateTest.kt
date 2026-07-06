@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.net.Uri
 import com.pocketagent.android.runtime.modelmanager.DownloadPreferencesState
+import com.pocketagent.android.runtime.modelmanager.DownloadFailureReason
 import com.pocketagent.android.runtime.modelmanager.DownloadRequestOptions
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
@@ -60,6 +61,118 @@ class ProvisioningAggregateStateTest {
         assertTrue(seeded.manifestLoaded)
         assertEquals(1, seeded.manifest.models.size)
         assertEquals(seeded, store.observeState().value)
+        storeScope.cancel()
+    }
+
+    @Test
+    fun `aggregate store refreshes snapshot when download reaches successful terminal state`() = runTest {
+        val dependency = AggregateProvisioningRuntime()
+        val storeScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val store = DefaultProvisioningAggregateStore(
+            context = AggregateStoreTestContext(),
+            coroutineScope = storeScope,
+            runtimeBindings = dependency.bindings,
+        )
+        runCurrent()
+
+        assertEquals("snapshot-0", store.currentState().snapshot.storageRootLabel)
+
+        dependency.snapshotResult = sampleSnapshot(storageRootLabel = "snapshot-installed")
+        dependency.downloads.value = listOf(
+            sampleDownloadTask(
+                taskId = "task-complete",
+                status = DownloadTaskStatus.COMPLETED,
+            ),
+        )
+        advanceUntilIdle()
+
+        val updated = store.observeState().value
+        assertEquals("snapshot-installed", updated.snapshot.storageRootLabel)
+        assertEquals(DownloadTaskStatus.COMPLETED, updated.downloads.single().status)
+        storeScope.cancel()
+    }
+
+    @Test
+    fun `aggregate store refreshes snapshot when download reaches installed inactive state`() = runTest {
+        val dependency = AggregateProvisioningRuntime()
+        val storeScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val store = DefaultProvisioningAggregateStore(
+            context = AggregateStoreTestContext(),
+            coroutineScope = storeScope,
+            runtimeBindings = dependency.bindings,
+        )
+        runCurrent()
+
+        dependency.snapshotResult = sampleSnapshot(storageRootLabel = "snapshot-installed-inactive")
+        dependency.downloads.value = listOf(
+            sampleDownloadTask(
+                taskId = "task-installed-inactive",
+                status = DownloadTaskStatus.INSTALLED_INACTIVE,
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals("snapshot-installed-inactive", store.observeState().value.snapshot.storageRootLabel)
+        storeScope.cancel()
+    }
+
+    @Test
+    fun `aggregate store does not refresh snapshot for terminal task with failure reason`() = runTest {
+        val dependency = AggregateProvisioningRuntime()
+        val storeScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val store = DefaultProvisioningAggregateStore(
+            context = AggregateStoreTestContext(),
+            coroutineScope = storeScope,
+            runtimeBindings = dependency.bindings,
+        )
+        runCurrent()
+
+        dependency.snapshotResult = sampleSnapshot(storageRootLabel = "snapshot-failed-terminal")
+        dependency.downloads.value = listOf(
+            sampleDownloadTask(
+                taskId = "task-complete-with-failure",
+                status = DownloadTaskStatus.COMPLETED,
+                failureReason = DownloadFailureReason.UNKNOWN,
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals("snapshot-0", store.observeState().value.snapshot.storageRootLabel)
+        storeScope.cancel()
+    }
+
+    @Test
+    fun `aggregate store does not refresh snapshot repeatedly for stale completed task`() = runTest {
+        val dependency = AggregateProvisioningRuntime()
+        dependency.downloads.value = listOf(
+            sampleDownloadTask(
+                taskId = "task-complete",
+                status = DownloadTaskStatus.COMPLETED,
+            ),
+        )
+        val storeScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val store = DefaultProvisioningAggregateStore(
+            context = AggregateStoreTestContext(),
+            coroutineScope = storeScope,
+            runtimeBindings = dependency.bindings,
+        )
+        runCurrent()
+
+        dependency.snapshotResult = sampleSnapshot(storageRootLabel = "snapshot-should-not-refresh")
+        dependency.downloads.value = listOf(
+            sampleDownloadTask(
+                taskId = "task-complete",
+                status = DownloadTaskStatus.COMPLETED,
+            ),
+            sampleDownloadTask(
+                taskId = "task-active",
+                status = DownloadTaskStatus.DOWNLOADING,
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals("snapshot-0", store.observeState().value.snapshot.storageRootLabel)
+        assertEquals(2, store.observeState().value.downloads.size)
         storeScope.cancel()
     }
 
@@ -229,7 +342,11 @@ private fun sampleDistributionVersion(): ModelDistributionVersion {
     )
 }
 
-private fun sampleDownloadTask(taskId: String = "task-1"): DownloadTaskState {
+private fun sampleDownloadTask(
+    taskId: String = "task-1",
+    status: DownloadTaskStatus = DownloadTaskStatus.DOWNLOADING,
+    failureReason: DownloadFailureReason? = null,
+): DownloadTaskState {
     return DownloadTaskState(
         taskId = taskId,
         modelId = "qwen3.5-0.8b-q4",
@@ -241,9 +358,10 @@ private fun sampleDownloadTask(taskId: String = "task-1"): DownloadTaskState {
         provenanceSignature = "sig",
         verificationPolicy = DownloadVerificationPolicy.INTEGRITY_ONLY,
         runtimeCompatibility = "android-arm64-v8a",
-        status = DownloadTaskStatus.DOWNLOADING,
+        status = status,
         progressBytes = 10L,
         totalBytes = 123L,
         updatedAtEpochMs = 1L,
+        failureReason = failureReason,
     )
 }

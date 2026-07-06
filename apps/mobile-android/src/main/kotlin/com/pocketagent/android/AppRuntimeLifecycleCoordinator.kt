@@ -192,6 +192,7 @@ internal class AppRuntimeLifecycleCoordinator(
                     updatedAtEpochMs = System.currentTimeMillis(),
                 )
                 val result = graph.runtimeFacade.loadModel(modelId = modelId, modelVersion = version)
+                    .withRequestedLoadedModelOnSuccessfulLoad(requestedModel)
                 if (token != lifecycleActionToken) {
                     if (result.success) {
                         graph.runtimeFacade.offloadModel(reason = "cancelled_by_newer_request")
@@ -494,6 +495,15 @@ private fun reconcileRequestedModel(
         ModelLifecycleState.UNLOADED,
         -> null
     }
+}
+
+internal fun RuntimeModelLifecycleCommandResult.withRequestedLoadedModelOnSuccessfulLoad(
+    requestedModel: RuntimeLoadedModel,
+): RuntimeModelLifecycleCommandResult {
+    if (!success || queued || loadedModel != null) {
+        return this
+    }
+    return copy(loadedModel = requestedModel)
 }
 
 private fun <T> keepFailedStateValue(reconciledState: ModelLifecycleState, value: T?): T? {

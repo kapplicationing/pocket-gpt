@@ -9,6 +9,25 @@ appId: com.pocketagent.android
       - runFlow: bootstrap-launch-default-model.yaml
 - runFlow:
     when:
+      visible: "Setup"
+    commands:
+      - tapOn:
+          id: "send_button"
+      - runFlow: bootstrap-launch-default-model.yaml
+- runFlow:
+    when:
+      visible: "Get ready"
+    commands:
+      - tapOn: "Get ready"
+      - runFlow: bootstrap-launch-default-model.yaml
+- runFlow:
+    when:
+      visible:
+        id: "chat_gate_inline_card"
+    commands:
+      - runFlow: bootstrap-launch-default-model.yaml
+- runFlow:
+    when:
       visible: "Unloaded"
     commands:
       - tapOn: "Unloaded"
@@ -31,25 +50,6 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000
-- runFlow:
-    when:
-      visible: "Setup"
-    commands:
-      - tapOn:
-          id: "send_button"
-      - runFlow: bootstrap-launch-default-model.yaml
-- runFlow:
-    when:
-      visible: "Get ready"
-    commands:
-      - tapOn: "Get ready"
-      - runFlow: bootstrap-launch-default-model.yaml
-- runFlow:
-    when:
-      visible:
-        id: "composer_input"
-    commands:
-      - runFlow: bootstrap-launch-default-model.yaml
 - runFlow:
     when:
       visible: "Loaded"

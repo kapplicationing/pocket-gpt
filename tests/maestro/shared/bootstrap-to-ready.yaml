@@ -1,4 +1,5 @@
 appId: com.pocketagent.android
 ---
 - runFlow: bootstrap-clean-start.yaml
+- runFlow: complete-first-run-onboarding.yaml
 - runFlow: settle-ready-shell.yaml

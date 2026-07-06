@@ -38,6 +38,7 @@ class GatesTest(unittest.TestCase):
         for path in (
             "scripts/ci/run_lifecycle_e2e.sh",
             "tests/maestro/shared/bootstrap-launch-default-model.yaml",
+            "tests/maestro-cloud/shared/bootstrap-cloud-startup.yaml",
         ):
             with self.subTest(path=path):
                 should_run, reason = gates._should_run_lifecycle(
@@ -56,6 +57,14 @@ class GatesTest(unittest.TestCase):
             encoding="utf-8"
         )
         for pattern in gates._LIFECYCLE_HIGH_RISK_PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertIn(f'- "{pattern}"', workflow_text)
+
+    def test_ci_tests_include_maestro_flow_contract_inputs(self) -> None:
+        workflow_text = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+        for pattern in ("tests/maestro/**", "tests/maestro-cloud/**"):
             with self.subTest(pattern=pattern):
                 self.assertIn(f'- "{pattern}"', workflow_text)
 

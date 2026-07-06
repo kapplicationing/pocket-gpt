@@ -5,8 +5,9 @@ Owner: Product + Tech Lead
 
 Mutable status stays in `docs/operations/execution-board.md`.
 Program learnings stay in `docs/operations/historical/launch-program-learnings.md`.
+Retained evidence baselines stay in `docs/operations/evidence/evidence-ledger.json`.
 
-Current status note: the controlled-MVP launch gate can advance, and the July branch/publication cleanup is now closed. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker was cleared in the May launch-gate evidence set. The July HF/CI branch stack through PRs #4-#9 is merged and published on `main`; its code-bearing baseline passed main push CI at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), CodeQL at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and July 6 nightly validation at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). The July nightly Maestro Cloud job skipped because `MAESTRO_CLOUD_API_KEY` was absent; that is an environment/configuration gap, not fresh hosted product evidence.
+Current status note: the controlled-MVP launch gate can advance. Publication readiness is separate and remains owned by the active execution board and generated launch readiness report. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker was cleared in the May launch-gate evidence set. Current CI/nightly status must be read from GitHub Actions; fixed baselines are retained in the evidence ledger.
 
 The freshest preserved May launch evidence remains the promoted controlled-MVP evidence set: S906N `android-instrumented` at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, S22 provisioning at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, hosted account 1 `send-after-ready` at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, hosted account 2 model-management at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`, and strict journey at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` with `phase=completed`, `placeholder_visible=false`, and `first_token_ms=180222`. Keep that long-prefill shape as rollout/perf caution, not as a blocker. The disclosed `AI human-proxy` WP-13 packet lands on `promote` for the controlled MVP.
 
@@ -59,11 +60,11 @@ This program is complete only when:
 3. Preserve the current-window strict `journey` proof and treat its near-timeout first-token behavior as perf/risk context only.
 4. Carry the disclosed `AI human-proxy` packet truthfully and only replace it with human-moderated evidence if promotion needs stronger non-proxy closure.
 5. Finalize the Play Store submission package and decision package from the promoted evidence set.
-6. Keep `main` synchronized with `origin/main`; the July branch-stack publication step is complete, and live release action should verify the current SHA through GitHub Actions rather than relying on this mutable status note.
+6. Keep `main` synchronized with `origin/main`; live release action should verify the current SHA through GitHub Actions rather than relying on this mutable status note.
 
 ## Current Evidence Anchors
 
-1. July branch-stack repository evidence: [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and green [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147).
+1. Fixed repository evidence baselines: `docs/operations/evidence/evidence-ledger.json`
 2. Preserved May local authoritative proof: `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`
 3. Current repo-side launch snapshot: regenerate it locally with `bash scripts/dev/launch-readiness.sh`
 4. Earlier hosted/default preserved passes: `tmp/maestro-cloud-first-run/junit.xml`, `tmp/maestro-cloud-s22/junit.xml`, `tmp/maestro-cloud-session-drawer/junit.xml`, `tmp/maestro-cloud-targeted/20260503T150550Z-scenario-model-management-split-smoke-account-1/status.json`, `tmp/maestro-cloud-targeted/20260503T150759Z-scenario-model-management-split-smoke-account-2/status.json`

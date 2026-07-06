@@ -4,13 +4,8 @@ Use the smallest standard command that proves the change.
 
 ## Default Evidence Matrix
 
-Default Android evidence in this repo is:
-
-1. **Emulator**: fast bootstrap/runtime proof and narrow repro loops.
-2. **Connected device**: real hardware proof for storage, permissions, transport, thermal, and OEM behaviour.
-3. **Cloud**: hosted supplemental proof for account/environment-specific hosted smoke.
-
-Unless the risk is already clearly isolated, do not stop after one surface. Startup, provisioning, runtime readiness, model-library, and release-path changes should be checked across the full matrix.
+The canonical emulator/device/cloud evidence policy lives in `docs/testing/test-strategy.md`.
+Use this skill map for command selection, not as a second copy of the policy.
 
 ## Canonical Ladder
 

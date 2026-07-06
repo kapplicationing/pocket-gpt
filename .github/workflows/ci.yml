@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -20,11 +23,11 @@ jobs:
       lifecycle_high_risk_paths: ${{ steps.filter.outputs.lifecycle_high_risk_paths }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect changed paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             ci_tests:
@@ -122,7 +125,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install devctl Python deps
         run: python3 -m pip install -r tools/devctl/requirements.txt
@@ -152,7 +155,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install devctl Python deps
         run: python3 -m pip install -r tools/devctl/requirements.txt
@@ -177,20 +180,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install devctl Python deps
         run: python3 -m pip install -r tools/devctl/requirements.txt
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Configure Android SDK env
         run: |
@@ -201,7 +204,7 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gradle-test-and-static-analysis-reports
           path: |
@@ -218,24 +221,24 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Android lint
         run: ./gradlew --no-daemon :apps:mobile-android:lintDebug
 
       - name: Upload lint reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-lint-reports
           path: |
@@ -250,20 +253,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Bootstrap vendored llama.cpp
         run: bash scripts/ci/bootstrap_llama_vendor.sh
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Assemble debug APK with native build enabled
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleDebug
@@ -289,17 +292,17 @@ jobs:
     timeout-minutes: 70
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Enable KVM
         run: |
@@ -357,7 +360,7 @@ jobs:
 
       - name: Upload instrumentation reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-instrumented-smoke-reports
           path: |
@@ -374,20 +377,20 @@ jobs:
     timeout-minutes: 110
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Bootstrap vendored llama.cpp
         run: bash scripts/ci/bootstrap_llama_vendor.sh
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Enable KVM
         run: |
@@ -456,9 +459,112 @@ jobs:
 
       - name: Upload lifecycle E2E artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lifecycle-e2e-first-run-artifacts
           path: |
             tmp/lifecycle-e2e-first-run/**
           if-no-files-found: warn
+
+  ci-required:
+    name: ci-required
+    needs:
+      - changes
+      - lifecycle-risk
+      - pr-governance
+      - docs-drift
+      - unit-and-host-tests
+      - android-lint
+      - native-build-package-check
+      - android-instrumented-smoke
+      - lifecycle-e2e-first-run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce required CI semantics
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          LIFECYCLE_RISK_RESULT: ${{ needs.lifecycle-risk.result }}
+          PR_GOVERNANCE_RESULT: ${{ needs.pr-governance.result }}
+          DOCS_DRIFT_RESULT: ${{ needs.docs-drift.result }}
+          CI_TESTS_REQUIRED: ${{ needs.changes.outputs.ci_tests }}
+          UNIT_AND_HOST_RESULT: ${{ needs.unit-and-host-tests.result }}
+          ANDROID_RUNTIME_REQUIRED: ${{ needs.changes.outputs.android_runtime }}
+          ANDROID_LINT_RESULT: ${{ needs.android-lint.result }}
+          NATIVE_BUILD_RESULT: ${{ needs.native-build-package-check.result }}
+          ANDROID_INSTRUMENTED_REQUIRED: ${{ needs.changes.outputs.android_instrumented }}
+          ANDROID_INSTRUMENTED_RESULT: ${{ needs.android-instrumented-smoke.result }}
+          LIFECYCLE_REQUIRED: ${{ needs.lifecycle-risk.outputs.should_run }}
+          LIFECYCLE_RESULT: ${{ needs.lifecycle-e2e-first-run.result }}
+        run: |
+          set -euo pipefail
+
+          failures=()
+          notices=()
+
+          require_success() {
+            local name="$1"
+            local result="$2"
+            if [[ "${result}" != "success" ]]; then
+              failures+=("${name}=${result}")
+            fi
+          }
+
+          require_when() {
+            local name="$1"
+            local required="$2"
+            local result="$3"
+            if [[ "${required}" == "true" ]]; then
+              require_success "${name}" "${result}"
+            else
+              if [[ "${result}" == "skipped" ]]; then
+                notices+=("${name}=skipped-by-policy")
+              elif [[ "${result}" == "success" ]]; then
+                notices+=("${name}=ran-despite-low-risk")
+              else
+                failures+=("${name}=${result} (expected skip or success for required=${required})")
+              fi
+            fi
+          }
+
+          require_success "changes" "${CHANGES_RESULT}"
+          require_success "lifecycle-risk" "${LIFECYCLE_RISK_RESULT}"
+          require_success "docs-drift" "${DOCS_DRIFT_RESULT}"
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            require_success "pr-governance" "${PR_GOVERNANCE_RESULT}"
+          elif [[ "${PR_GOVERNANCE_RESULT}" == "skipped" ]]; then
+            notices+=("pr-governance=skipped-non-pr")
+          else
+            failures+=("pr-governance=${PR_GOVERNANCE_RESULT} (expected skipped for ${EVENT_NAME})")
+          fi
+
+          require_when "unit-and-host-tests" "${CI_TESTS_REQUIRED}" "${UNIT_AND_HOST_RESULT}"
+          require_when "android-lint" "${ANDROID_RUNTIME_REQUIRED}" "${ANDROID_LINT_RESULT}"
+          require_when "native-build-package-check" "${ANDROID_RUNTIME_REQUIRED}" "${NATIVE_BUILD_RESULT}"
+          require_when "android-instrumented-smoke" "${ANDROID_INSTRUMENTED_REQUIRED}" "${ANDROID_INSTRUMENTED_RESULT}"
+          require_when "lifecycle-e2e-first-run" "${LIFECYCLE_REQUIRED}" "${LIFECYCLE_RESULT}"
+
+          {
+            echo "## Required CI Summary"
+            echo ""
+            echo "- event: \`${EVENT_NAME}\`"
+            echo "- ci_tests_required: \`${CI_TESTS_REQUIRED}\`"
+            echo "- android_runtime_required: \`${ANDROID_RUNTIME_REQUIRED}\`"
+            echo "- android_instrumented_required: \`${ANDROID_INSTRUMENTED_REQUIRED}\`"
+            echo "- lifecycle_required: \`${LIFECYCLE_REQUIRED}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ ${#notices[@]} -gt 0 ]]; then
+            printf -- '- %s\n' "${notices[@]}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          if [[ ${#failures[@]} -gt 0 ]]; then
+            printf 'Required CI failure(s): %s\n' "${failures[*]}" >&2
+            printf -- '- failure: %s\n' "${failures[@]}" >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          echo "Required CI semantics passed."

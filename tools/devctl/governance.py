@@ -58,6 +58,8 @@ STAGE_EVIDENCE_PATTERN = (
     r"- \[x\] If this is stage/work-package work, I added/updated evidence under `docs/operations/evidence/` "
     r"and linked it below\."
 )
+STAGE_CLOSE_LINE_REGEX = re.compile(r"(?im)^\s*-?\s*Stage close:\s*yes\s*$")
+WP_EVIDENCE_LINK_REGEX = re.compile(r"docs/operations/evidence/wp-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}[^ )]*\.md")
 
 CURRENT_DEVCTL_ARTIFACT_ROOT = "tmp/devctl-artifacts"
 LEGACY_BENCHMARK_ARTIFACT_ROOT = "scripts/benchmarks/runs"
@@ -77,6 +79,8 @@ DOCS_ACCURACY_MANIFEST_PATH = Path("docs/governance/docs-accuracy-manifest.json"
 DOCS_DRIFT_REPORT_PATH = Path("build/devctl/docs-drift-report.json")
 DOCS_DRIFT_REPORT_SCHEMA = "docs-drift-report-v1"
 DOCS_ACCURACY_MANIFEST_SCHEMA = "docs-accuracy-manifest-v1"
+EVIDENCE_LEDGER_PATH = Path("docs/operations/evidence/evidence-ledger.json")
+EVIDENCE_LEDGER_SCHEMA = "pocketgpt-evidence-ledger-v1"
 LAUNCH_READINESS_OUTPUT_DIR = Path("build/devctl/launch-readiness")
 LAUNCH_READINESS_REPORT_SCHEMA = "launch-readiness-report-v1"
 
@@ -476,6 +480,70 @@ def _docs_health_evidence_retention(repo_root: Path, config: dict[str, object]) 
     return violations
 
 
+def _docs_health_evidence_ledger(repo_root: Path) -> list[str]:
+    ledger_path = repo_root / EVIDENCE_LEDGER_PATH
+    if not ledger_path.exists():
+        return [f"Missing evidence ledger: {EVIDENCE_LEDGER_PATH.as_posix()}"]
+
+    try:
+        payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [f"Evidence ledger is not valid JSON: {EVIDENCE_LEDGER_PATH.as_posix()} ({exc})"]
+
+    if not isinstance(payload, dict):
+        return [f"Evidence ledger root must be an object: {EVIDENCE_LEDGER_PATH.as_posix()}"]
+
+    violations: list[str] = []
+    if payload.get("schema") != EVIDENCE_LEDGER_SCHEMA:
+        violations.append(f"Evidence ledger schema must be {EVIDENCE_LEDGER_SCHEMA}.")
+    if not isinstance(payload.get("last_updated"), str) or not payload["last_updated"].strip():
+        violations.append("Evidence ledger last_updated must be a non-empty string.")
+
+    entries = payload.get("entries")
+    if not isinstance(entries, list) or not entries:
+        violations.append("Evidence ledger entries must be a non-empty list.")
+        return violations
+
+    seen_ids: set[str] = set()
+    required_string_fields = ("id", "title", "surface", "status", "authority_level", "freshness", "notes")
+    for index, entry in enumerate(entries):
+        label = f"entries[{index}]"
+        if not isinstance(entry, dict):
+            violations.append(f"Evidence ledger {label} must be an object.")
+            continue
+
+        entry_id = entry.get("id")
+        if not isinstance(entry_id, str) or not entry_id.strip():
+            violations.append(f"Evidence ledger {label}.id must be a non-empty string.")
+        elif entry_id in seen_ids:
+            violations.append(f"Evidence ledger duplicate id: {entry_id}")
+        else:
+            seen_ids.add(entry_id)
+
+        for field in required_string_fields:
+            value = entry.get(field)
+            if not isinstance(value, str) or not value.strip():
+                violations.append(f"Evidence ledger {label}.{field} must be a non-empty string.")
+
+        if not isinstance(entry.get("release_gate_eligible"), bool):
+            violations.append(f"Evidence ledger {label}.release_gate_eligible must be boolean.")
+
+        artifact = entry.get("artifact")
+        if not isinstance(artifact, dict):
+            violations.append(f"Evidence ledger {label}.artifact must be an object.")
+        else:
+            artifact_type = artifact.get("type")
+            if not isinstance(artifact_type, str) or not artifact_type.strip():
+                violations.append(f"Evidence ledger {label}.artifact.type must be a non-empty string.")
+            has_url = isinstance(artifact.get("url"), str) and bool(artifact["url"].strip())
+            paths = artifact.get("paths")
+            has_paths = isinstance(paths, list) and bool(paths) and all(isinstance(item, str) and item.strip() for item in paths)
+            if not has_url and not has_paths:
+                violations.append(f"Evidence ledger {label}.artifact must include a non-empty url or paths list.")
+
+    return violations
+
+
 def docs_health_check(repo_root: Path = REPO_ROOT) -> None:
     config = _load_docs_governance_config(repo_root)
     violations: list[str] = []
@@ -483,6 +551,7 @@ def docs_health_check(repo_root: Path = REPO_ROOT) -> None:
     violations.extend(_docs_health_status_policy(repo_root))
     violations.extend(_docs_health_required_indexes(repo_root, config))
     violations.extend(_docs_health_evidence_retention(repo_root, config))
+    violations.extend(_docs_health_evidence_ledger(repo_root))
 
     if violations:
         raise DevctlError("CONFIG_ERROR", "\n".join(sorted(violations)))
@@ -973,13 +1042,19 @@ def validate_pr_body(pr_body_file: str, repo_root: Path = REPO_ROOT) -> None:
         if not re.search(pattern, text):
             raise DevctlError("CONFIG_ERROR", f"PR template requirement failed: {message}")
 
-    if re.search(r"(?i)wp-|work package|stage", text):
-        if not re.search(STAGE_EVIDENCE_PATTERN, text):
+    stage_close_requested = _stage_close_requested(text)
+    stage_evidence_checked = bool(re.search(STAGE_EVIDENCE_PATTERN, text))
+    if stage_close_requested or stage_evidence_checked:
+        if not stage_evidence_checked:
             raise DevctlError("CONFIG_ERROR", "PR template requirement failed: stage/work-package evidence checkbox must be checked")
-        if "docs/operations/evidence/" not in text:
-            raise DevctlError("CONFIG_ERROR", "Stage/work-package PR must include evidence note link.")
+        if not WP_EVIDENCE_LINK_REGEX.search(text):
+            raise DevctlError("CONFIG_ERROR", "Stage/work-package PR must include a WP evidence markdown link.")
 
     print("PR body validation passed.")
+
+
+def _stage_close_requested(text: str) -> bool:
+    return bool(STAGE_CLOSE_LINE_REGEX.search(text))
 
 
 def stage_close_gate(pr_body_file: str, repo_root: Path = REPO_ROOT) -> None:
@@ -989,11 +1064,11 @@ def stage_close_gate(pr_body_file: str, repo_root: Path = REPO_ROOT) -> None:
     path = repo_root / pr_body_file
     text = _read_file(path)
 
-    if not re.search(r"(?i)stage close:\s*yes", text):
+    if not _stage_close_requested(text):
         print("Stage close gate not requested; skipping.")
         return
 
-    evidence_match = re.search(r"docs/operations/evidence/wp-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}[^ )]*\.md", text)
+    evidence_match = WP_EVIDENCE_LINK_REGEX.search(text)
     if not evidence_match:
         raise DevctlError("CONFIG_ERROR", "Stage-close PR must link a WP evidence markdown file.")
 
@@ -1097,7 +1172,8 @@ def _launch_readiness_markdown(payload: dict[str, Any]) -> str:
         "# Launch Readiness Report",
         "",
         f"Generated: {payload['generated_at_utc']}",
-        f"Overall readiness: `{payload['overall_readiness']}`",
+        f"Controlled MVP gate readiness: `{payload['gate_readiness']}`",
+        f"Publication readiness: `{payload['publication_readiness']}`",
         f"Promotion status (`PROD-10`): `{payload['prod10_status']}`",
         f"Required launch rows passing: `{matrix['required_pass']}/{matrix['required_total']}`",
         "",
@@ -1190,11 +1266,14 @@ def launch_readiness_report(repo_root: Path = REPO_ROOT, output_dir: Path | None
         deduped_next_actions.append(normalized)
 
     prod10_status = _extract_status_line(matrix_text) or "Unknown"
-    overall_readiness = "ready" if prod10_status.lower() == "promote" and not matrix["required_not_passing"] else "blocked"
+    gate_readiness = "promoted" if prod10_status.lower() == "promote" and not matrix["required_not_passing"] else "blocked"
+    publication_readiness = "ready" if gate_readiness == "promoted" and not deduped_next_actions else "blocked"
     payload: dict[str, Any] = {
         "schema": LAUNCH_READINESS_REPORT_SCHEMA,
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "overall_readiness": overall_readiness,
+        "gate_readiness": gate_readiness,
+        "publication_readiness": publication_readiness,
+        "overall_readiness": publication_readiness,
         "prod10_status": prod10_status,
         "matrix": matrix,
         "execution_board": {
@@ -1220,8 +1299,9 @@ def launch_readiness_report(repo_root: Path = REPO_ROOT, output_dir: Path | None
     print(f"Launch readiness summary: {markdown_path.relative_to(repo_root)}")
     print(
         "Launch readiness snapshot: "
+        f"gate={gate_readiness}; publication={publication_readiness}; "
         f"PROD-10={prod10_status}; required_pass={matrix['required_pass']}/{matrix['required_total']}; "
-        f"blocked_items={len(board_sections['Blocked'])}"
+        f"next_actions={len(deduped_next_actions)}; blocked_items={len(board_sections['Blocked'])}"
     )
     return json_path, markdown_path
 

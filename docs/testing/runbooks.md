@@ -371,7 +371,7 @@ bash scripts/dev/test.sh merge
 python3 tools/devctl/main.py lane android-instrumented
 python3 tools/devctl/main.py lane maestro
 python3 tools/devctl/main.py lane journey --steps instrumentation,send-capture,maestro
-python3 tools/devctl/main.py lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml
+bash scripts/ci/run_lifecycle_e2e.sh --device <serial> risk-manual
 ```
 
 ## Runbook: Main-Push Blocking Lifecycle Check (CI Equivalent)
@@ -425,6 +425,7 @@ Use this as the hosted rerun path for machine-verifiable smoke coverage while `Q
 This runs only flows tagged `cloud-smoke` under `tests/maestro-cloud/`.
 Use this before widening to a physical-device canary. Keep one narrow physical-device canary for OEM/runtime issues and the final pre-promotion brush, and keep long-running hosted benchmarks in dedicated scripts such as `bash scripts/dev/maestro-cloud-gpu-benchmark.sh`.
 Prefer the wrappers over copying a raw `maestro cloud --api-key ...` command into shell history.
+The wrappers are the required path for nightly, CI-adjacent, and retained evidence runs because they produce `status.json`, `run-manifest.json`, CLI logs, and upload URLs. Use raw `maestro cloud` only for throwaway diagnostics that will not be cited later.
 
 When multiple Maestro Cloud API keys are available, pick the account explicitly:
 

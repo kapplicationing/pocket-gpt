@@ -75,6 +75,33 @@ class GovernanceTest(unittest.TestCase):
             "\n".join(["WP-01", "WP-02", "WP-03", "WP-04", "WP-05", "WP-06", "WP-07", "WP-08", "WP-11"]),
             encoding="utf-8",
         )
+        (root / "docs/operations/evidence/evidence-ledger.json").write_text(
+            json.dumps(
+                {
+                    "schema": governance.EVIDENCE_LEDGER_SCHEMA,
+                    "last_updated": "2026-07-06",
+                    "entries": [
+                        {
+                            "id": "test-ledger-entry",
+                            "title": "Test ledger entry",
+                            "surface": "unit-test",
+                            "artifact": {
+                                "type": "workflow-run",
+                                "url": "https://github.com/example/repo/actions/runs/1",
+                            },
+                            "status": "passed",
+                            "authority_level": "test",
+                            "freshness": "fixed-baseline",
+                            "release_gate_eligible": False,
+                            "notes": "Seeded by docs-health tests.",
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         (root / "docs/operations/evidence/wp-09/2026-03-04-note.md").write_text("# WP09\n", encoding="utf-8")
         (root / "docs/operations/evidence/wp-13/2026-03-05-note.md").write_text("# WP13\n", encoding="utf-8")
 
@@ -117,6 +144,63 @@ class GovernanceTest(unittest.TestCase):
             with self.assertRaises(DevctlError) as raised:
                 governance.validate_pr_body("pr.md", repo_root=root)
             self.assertEqual("CONFIG_ERROR", raised.exception.code)
+
+    def test_validate_pr_body_accepts_stage_close_no_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pr = root / "pr.md"
+            pr.write_text(
+                "- [x] I ran `bash scripts/dev/test.sh` (or `bash scripts/dev/test.sh ci`) and it passed.\n"
+                "- [x] I used canonical orchestrator lanes (`python3 tools/devctl/main.py lane ...`) directly or via the `scripts/dev/*` wrappers.\n"
+                "- [x] I updated docs affected by this change, or confirmed no docs changes are needed.\n"
+                "- [x] I ran `python3 tools/devctl/main.py governance docs-health` and it passed.\n"
+                "- [x] I ran `python3 tools/devctl/main.py governance docs-accuracy` and reviewed `build/devctl/docs-drift-report.json`.\n"
+                "- [x] For UI-touching changes, I ran `python3 tools/devctl/main.py lane screenshot-pack` and manually reviewed screenshots (or documented why not needed).\n\n"
+                "Stage close: no\n\n"
+                "Evidence note(s): not stage/work-package work; no docs/operations/evidence/ update required.\n",
+                encoding="utf-8",
+            )
+            governance.validate_pr_body("pr.md", repo_root=root)
+
+    def test_validate_pr_body_requires_evidence_for_stage_close_yes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pr = root / "pr.md"
+            pr.write_text(
+                "- [x] I ran `bash scripts/dev/test.sh` (or `bash scripts/dev/test.sh ci`) and it passed.\n"
+                "- [x] I used canonical orchestrator lanes (`python3 tools/devctl/main.py lane ...`) directly or via the `scripts/dev/*` wrappers.\n"
+                "- [x] I updated docs affected by this change, or confirmed no docs changes are needed.\n"
+                "- [x] I ran `python3 tools/devctl/main.py governance docs-health` and it passed.\n"
+                "- [x] I ran `python3 tools/devctl/main.py governance docs-accuracy` and reviewed `build/devctl/docs-drift-report.json`.\n"
+                "- [x] For UI-touching changes, I ran `python3 tools/devctl/main.py lane screenshot-pack` and manually reviewed screenshots (or documented why not needed).\n"
+                "- [x] If this is stage/work-package work, I added/updated evidence under `docs/operations/evidence/` and linked it below.\n\n"
+                "Stage close: yes\n\n"
+                "Evidence note(s): docs/operations/evidence/\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(DevctlError) as raised:
+                governance.validate_pr_body("pr.md", repo_root=root)
+            self.assertIn("WP evidence markdown link", raised.exception.message)
+
+    def test_validate_pr_body_requires_checked_stage_evidence_checkbox_for_stage_close_yes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pr = root / "pr.md"
+            pr.write_text(
+                "- [x] I ran `bash scripts/dev/test.sh` (or `bash scripts/dev/test.sh ci`) and it passed.\n"
+                "- [x] I used canonical orchestrator lanes (`python3 tools/devctl/main.py lane ...`) directly or via the `scripts/dev/*` wrappers.\n"
+                "- [x] I updated docs affected by this change, or confirmed no docs changes are needed.\n"
+                "- [x] I ran `python3 tools/devctl/main.py governance docs-health` and it passed.\n"
+                "- [x] I ran `python3 tools/devctl/main.py governance docs-accuracy` and reviewed `build/devctl/docs-drift-report.json`.\n"
+                "- [x] For UI-touching changes, I ran `python3 tools/devctl/main.py lane screenshot-pack` and manually reviewed screenshots (or documented why not needed).\n"
+                "- [ ] If this is stage/work-package work, I added/updated evidence under `docs/operations/evidence/` and linked it below.\n\n"
+                "Stage close: yes\n\n"
+                "Evidence note(s): docs/operations/evidence/wp-13/2026-07-06-note.md\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(DevctlError) as raised:
+                governance.validate_pr_body("pr.md", repo_root=root)
+            self.assertIn("evidence checkbox must be checked", raised.exception.message)
 
     def test_stage_close_gate_skip_when_not_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,6 +245,37 @@ class GovernanceTest(unittest.TestCase):
             with self.assertRaises(DevctlError) as raised:
                 governance.docs_health_check(root)
             self.assertEqual("CONFIG_ERROR", raised.exception.code)
+
+    def test_docs_health_rejects_invalid_evidence_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed_docs_health_repo(root)
+            (root / governance.EVIDENCE_LEDGER_PATH).write_text(
+                json.dumps(
+                    {
+                        "schema": governance.EVIDENCE_LEDGER_SCHEMA,
+                        "last_updated": "2026-07-06",
+                        "entries": [
+                            {
+                                "id": "bad-entry",
+                                "title": "Bad entry",
+                                "surface": "unit-test",
+                                "artifact": {"type": "workflow-run"},
+                                "status": "passed",
+                                "authority_level": "test",
+                                "freshness": "fixed-baseline",
+                                "release_gate_eligible": False,
+                                "notes": "Missing artifact URL or paths.",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(DevctlError) as raised:
+                governance.docs_health_check(root)
+            self.assertIn("artifact must include a non-empty url or paths list", raised.exception.message)
 
     def test_docs_health_rejects_broken_local_markdown_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -551,6 +666,8 @@ class GovernanceTest(unittest.TestCase):
             payload = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual("launch-readiness-report-v1", payload["schema"])
             self.assertEqual("Hold", payload["prod10_status"])
+            self.assertEqual("blocked", payload["gate_readiness"])
+            self.assertEqual("blocked", payload["publication_readiness"])
             self.assertEqual("blocked", payload["overall_readiness"])
             self.assertEqual(1, payload["matrix"]["required_pass"])
             self.assertEqual(3, payload["matrix"]["required_total"])

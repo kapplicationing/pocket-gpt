@@ -8,7 +8,7 @@ Canonical ownership by concern:
 4. Screenshot capture/manual regression workflow: `docs/testing/screenshot-regression-workflow.md`
 5. Weekly QA UI regression matrix (`UI-01..UI-15`): `docs/testing/wp-09-ui-regression-matrix.md`
 6. Maestro flow assets and lifecycle flow contract: `tests/maestro/`
-7. CI required lifecycle gate job: `lifecycle-e2e-first-run` in `.github/workflows/ci.yml`
+7. CI branch-protection aggregate: `ci-required` in `.github/workflows/ci.yml`; lifecycle job: `lifecycle-e2e-first-run`
 8. Agent-level testing policy and scoped debug loop guardrails: `AGENTS.md`
 9. `devctl gate` wrappers for merge-unblock/promotion policy: `tools/devctl/gates.py`
 10. Runtime tuning debug workflow and diagnostics interpretation: `docs/testing/runtime-tuning-debugging.md`

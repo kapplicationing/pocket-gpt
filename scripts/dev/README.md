@@ -377,14 +377,16 @@ Optional:
 unzip -Z1 "${APK_PATH}" | rg '^lib/'
 ```
 
-First-run flow gate command (writes JUnit report for CI/local triage):
+First-run flow gate command (writes `status.json`, a run manifest, CLI output, and JUnit for CI/local triage):
 
 ```bash
-maestro cloud --android-api-level 34 \
+bash scripts/dev/maestro-cloud-flow.sh \
+  --flow tests/maestro/scenario-first-run-download-chat.yaml \
   --app-file "${APK_PATH}" \
-  --flows tests/maestro/scenario-first-run-download-chat.yaml \
-  --format junit \
-  --output tmp/maestro-cloud-first-run.xml
+  --no-build \
+  --api-level 34 \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --run-root tmp/maestro-cloud-first-run
 ```
 
 Full hosted smoke suite on Maestro Cloud:
@@ -452,11 +454,13 @@ Run `scripts/dev/maestro-cloud-hf-fixture-smoke.sh` only with a fixture endpoint
 Focused model-management split smoke on Maestro Cloud:
 
 ```bash
-maestro cloud --android-api-level 34 \
+bash scripts/dev/maestro-cloud-flow.sh \
+  --flow tests/maestro-cloud/scenario-model-management-split-smoke.yaml \
   --app-file "${APK_PATH}" \
-  --flows tests/maestro-cloud/scenario-model-management-split-smoke.yaml \
-  --format junit \
-  --output tmp/maestro-cloud-model-management.xml
+  --no-build \
+  --api-level 34 \
+  --api-key-env MAESTRO_CLOUD_API_KEY \
+  --run-root tmp/maestro-cloud-model-management
 ```
 
 Poll a launched upload directly:
@@ -477,9 +481,9 @@ bash scripts/dev/maestro-cloud-gpu-model-matrix.sh --api-key-env MAESTRO_CLOUD_A
 
 Important:
 
-1. `maestro cloud` runs the Maestro flow files directly.
-2. It does not run `devctl` device health checks, real-runtime provisioning preflight, per-device lock handling, or local benchmark artifact/logcat capture contracts.
-3. Keep `devctl lane maestro`, `devctl lane journey`, and the physical-device canary as the current promotion/closure path until QA-14 artifact parity is complete.
+1. The cloud wrappers still run Maestro flow files directly; they do not run `devctl` device health checks, real-runtime provisioning preflight, per-device lock handling, or local benchmark artifact/logcat capture contracts.
+2. Keep `devctl lane maestro`, `devctl lane journey`, and the physical-device canary as the current promotion/closure path until QA-14 artifact parity is complete.
+3. Use wrapper-produced `status.json` and `run-manifest.json` as the retained evidence interface for hosted runs.
 4. Record the upload id, upload URL, project id, and app binary id for every hosted run you want to reference later.
 5. If hosted uploads are `launched=true` but still `PENDING`, treat that as hosted infrastructure latency until a real flow verdict exists.
 
@@ -496,15 +500,17 @@ bash scripts/dev/prune-devctl-artifacts.sh --days 7 --include-cloud
 
 Contract summary:
 
-1. Required CI lifecycle check name: `lifecycle-e2e-first-run`.
-2. For pull requests, lifecycle runs when risk labels or high-risk paths are detected.
-3. For every push to `main`, lifecycle runs and blocks on failure.
-4. Runtime risk labels:
+1. Required branch-protection check name: `ci-required`.
+2. `ci-required` verifies whether path-gated jobs ran or skipped by policy; do not require path-gated jobs directly.
+3. Required CI lifecycle job name: `lifecycle-e2e-first-run`.
+4. For pull requests, lifecycle runs when risk labels or high-risk paths are detected.
+5. For every push to `main`, lifecycle runs and blocks on failure.
+6. Runtime risk labels:
    - `risk:e2e-lifecycle`
    - `risk:runtime`
    - `risk:provisioning`
-5. Lifecycle flow under gate: `tests/maestro/scenario-first-run-download-chat.yaml`.
-6. Gate includes one clean-state retry with first-failure artifacts retained.
+7. Lifecycle flow under gate: `tests/maestro/scenario-first-run-download-chat.yaml`.
+8. Gate includes one clean-state retry with first-failure artifacts retained.
 
 Local commands to mirror the lifecycle gate:
 

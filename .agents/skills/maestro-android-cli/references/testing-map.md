@@ -1,6 +1,7 @@
 # PocketGPT Maestro Android Testing Map
 
 Use the smallest standard command that proves the change.
+The canonical emulator/device/cloud evidence policy lives in `docs/testing/test-strategy.md`.
 
 ## Canonical Ladder
 

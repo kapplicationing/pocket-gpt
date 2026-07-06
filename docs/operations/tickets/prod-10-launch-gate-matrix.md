@@ -11,9 +11,7 @@ Single promotion interface for release decisions. Every publishable claim must m
 
 ## Current Automation Baseline
 
-The controlled-MVP promotion decision from 2026-05-04 remains the latest launch-gate decision. The July HF/CI branch stack through PRs #4-#9 is merged and published on `main`; its code-bearing baseline passed main push CI at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466) and CodeQL at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204). Verify the live `main` SHA through GitHub Actions before release action instead of treating this mutable doc as a moving HEAD pointer.
-
-July 6 scheduled coverage passed at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). In that run, a missing `MAESTRO_CLOUD_API_KEY` caused the Maestro Cloud job to skip; that skip is an environment/configuration signal and must not be cited as hosted product evidence. Use it only to show the workflow reports missing cloud capacity explicitly.
+The controlled-MVP promotion decision from 2026-05-04 remains the retained launch-gate decision. Fixed CI, CodeQL, nightly, hardware-runner guard, and controlled-MVP evidence baselines are recorded in `docs/operations/evidence/evidence-ledger.json`. Verify the live `main` SHA through GitHub Actions before release action instead of treating this mutable doc as a moving HEAD pointer.
 
 ## Gate Modes
 

@@ -242,20 +242,18 @@ class GatesTest(unittest.TestCase):
             lifecycle_step = next(step for step in captured_steps if step.name == "lifecycle-e2e-first-run")
             self.assertEqual(
                 [
-                    "python3",
-                    "tools/devctl/main.py",
-                    "lane",
-                    "maestro",
-                    "--flows",
-                    str(gates._LIFECYCLE_FLOW_PATH),
+                    "bash",
+                    "scripts/ci/run_lifecycle_e2e.sh",
+                    "risk-label",
                 ],
                 lifecycle_step.command,
             )
             self.assertTrue(captured_metadata["lifecycle_required"])
             self.assertEqual(
-                "devctl lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml",
+                "scripts/ci/run_lifecycle_e2e.sh",
                 captured_metadata["lifecycle_execution_path"],
             )
+            self.assertEqual("ci-wrapper", captured_metadata["lifecycle_execution_kind"])
 
     def test_run_promotion_skips_stage2_quick_for_low_risk_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

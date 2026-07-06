@@ -98,13 +98,13 @@ jobs:
       POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH: ${{ vars.POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install devctl Python deps
         run: python3 -m pip install -r tools/devctl/requirements.txt
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload hardware lane artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hardware-stage2-${{ env.WORKFLOW_DEVICE }}-${{ env.RUN_DATE }}
           path: scripts/benchmarks/runs/${{ env.RUN_DATE }}/${{ env.WORKFLOW_DEVICE }}/

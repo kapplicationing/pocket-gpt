@@ -394,6 +394,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
         local_path = REPO_ROOT / "tests/maestro/shared/dismiss-system-overlays.yaml"
         cloud_path = REPO_ROOT / "tests/maestro-cloud/shared/dismiss-system-overlays.yaml"
         local_text = local_path.read_text(encoding="utf-8")
+        self.assertIn('visible: "Pixel Launcher isn\'t responding"', local_text)
+        self.assertIn('tapOn: "Wait"', local_text)
         self.assertIn('visible: "Try out your stylus"', local_text)
         self.assertIn('visible: "Write here"', local_text)
         self.assertIn('tapOn: "Cancel"', local_text)

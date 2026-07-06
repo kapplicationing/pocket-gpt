@@ -2,6 +2,11 @@ appId: com.pocketagent.android
 ---
 - runFlow:
     when:
+      visible: "Pixel Launcher isn't responding"
+    commands:
+      - tapOn: "Wait"
+- runFlow:
+    when:
       visible: "Try out your stylus"
     commands:
       - tapOn: "Cancel"

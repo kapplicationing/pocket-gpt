@@ -403,9 +403,8 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug
 
-      - name: Run first-run lifecycle E2E with bounded retry (attempt 1)
-        id: lifecycle_attempt_1
-        continue-on-error: true
+      - name: Run first-run lifecycle E2E with bounded script retry
+        id: lifecycle_run
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 33
@@ -417,35 +416,6 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-load -no-snapshot-save
           disable-animations: true
           script: bash scripts/ci/run_lifecycle_e2e.sh "${{ needs.lifecycle-risk.outputs.reason }}"
-
-      - name: Run first-run lifecycle E2E with bounded retry (attempt 2)
-        id: lifecycle_attempt_2
-        if: steps.lifecycle_attempt_1.outcome == 'failure'
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 33
-          arch: x86_64
-          profile: pixel_6
-          target: google_apis
-          emulator-boot-timeout: 900
-          force-avd-creation: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-load -no-snapshot-save
-          disable-animations: true
-          script: bash scripts/ci/run_lifecycle_e2e.sh "${{ needs.lifecycle-risk.outputs.reason }}"
-
-      - name: Enforce lifecycle E2E success after bounded retry
-        if: always()
-        run: |
-          set -euo pipefail
-          first="${{ steps.lifecycle_attempt_1.outcome }}"
-          second="${{ steps.lifecycle_attempt_2.outcome || 'skipped' }}"
-          if [[ "${first}" == "success" || "${second}" == "success" ]]; then
-            echo "Lifecycle E2E passed (first=${first}, second=${second})."
-            exit 0
-          fi
-          echo "::error::Lifecycle E2E failed after bounded retry (first=${first}, second=${second})."
-          exit 1
 
       - name: Summarize lifecycle crash signatures
         if: always()

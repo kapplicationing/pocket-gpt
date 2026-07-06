@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -48,9 +49,19 @@ class MaestroFlowContractsTest(unittest.TestCase):
         for helper_path in helper_paths:
             with self.subTest(helper=helper_path.relative_to(REPO_ROOT).as_posix()):
                 text = helper_path.read_text(encoding="utf-8")
+                local_text = (REPO_ROOT / "tests/maestro/shared/open-model-library.yaml").read_text(
+                    encoding="utf-8",
+                )
+                cloud_text = (REPO_ROOT / "tests/maestro-cloud/shared/open-model-library.yaml").read_text(
+                    encoding="utf-8",
+                )
+                self.assertEqual(local_text, cloud_text)
                 self.assertIn('visible: "Model library"', text)
-                self.assertIn('id: "onboarding_next"', text)
-                self.assertIn('id: "onboarding_get_started"', text)
+                self.assertNotIn('text: "Next"', text)
+                self.assertNotIn('text: "Get started"', text)
+                self.assertNotIn('id: "onboarding_next"', text)
+                self.assertNotIn('id: "onboarding_get_started"', text)
+                self.assertNotIn('visible: "Setup"', text)
                 self.assertIn('visible: "Get ready"', text)
                 self.assertIn('id: "open_model_library"', text)
                 self.assertIn('id: "composer_input"', text)
@@ -64,9 +75,9 @@ class MaestroFlowContractsTest(unittest.TestCase):
         text = helper_path.read_text(encoding="utf-8")
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
+        self.assertIn("runFlow: complete-first-run-onboarding.yaml", text)
         self.assertIn("runFlow: dismiss-system-overlays.yaml", text)
-        self.assertIn('notVisible:\n      id: "onboarding_next"', text)
-        self.assertIn('notVisible:\n      id: "onboarding_get_started"', text)
+        self.assertIn('visible:\n      id: "session_drawer_button"', text)
         self.assertNotIn("runFlow: settle-top-bar-shell.yaml", text)
         self.assertNotIn('visible: "Pocket GPT"', text)
 
@@ -109,8 +120,40 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 )
                 self.assertIn('inputText: "qwen3-0.6b-q4_k_m"', helper_chain_text)
                 self.assertIn('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
+                self.assertIn(
+                    'scrollUntilVisible:\n    centerElement: true\n    element:\n      text: "Qwen3 0.6B (Q4_K_M)"',
+                    helper_chain_text,
+                )
+                self.assertLess(
+                    helper_chain_text.index('text: "Qwen3 0.6B (Q4_K_M)"'),
+                    helper_chain_text.index('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"'),
+                    "launch-default helper must scroll to the stable model row before evaluating state-specific actions.",
+                )
                 self.assertIn('id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
+                self.assertRegex(
+                    recovery_text,
+                    re.compile(
+                        r'visible:\s*\n\s*id: "chat_gate_inline_card"\s*\n\s*commands:\s*\n\s*- runFlow: bootstrap-launch-default-model\.yaml',
+                    ),
+                )
+                self.assertNotRegex(
+                    recovery_text,
+                    re.compile(
+                        r'visible:\s*\n\s*id: "composer_input"\s*\n\s*commands:\s*\n\s*- runFlow: bootstrap-launch-default-model\.yaml',
+                    ),
+                    "runtime recovery must not re-bootstrap from an already-open chat composer.",
+                )
+                self.assertLess(
+                    recovery_text.index('visible: "Setup"'),
+                    recovery_text.index('visible: "Unloaded"'),
+                    "setup-gated recovery must run before opening Model Library from the Unloaded status.",
+                )
+                self.assertLess(
+                    recovery_text.index('id: "chat_gate_inline_card"'),
+                    recovery_text.index('visible: "Unloaded"'),
+                    "chat-gated recovery must run before opening Model Library from the Unloaded status.",
+                )
                 self.assertIn(
                     'id: "unified_model_sheet"\n    commands:\n      - runFlow: close-model-library-if-open.yaml\n      - runFlow: bootstrap-launch-default-model.yaml',
                     recovery_text,
@@ -205,19 +248,24 @@ class MaestroFlowContractsTest(unittest.TestCase):
         flow_path = REPO_ROOT / "tests/maestro/scenario-onboarding.yaml"
         text = flow_path.read_text(encoding="utf-8")
         self.assertIn("- runFlow: shared/bootstrap-clean-start.yaml", text)
+        self.assertIn("- runFlow: shared/complete-first-run-onboarding.yaml", text)
         self.assertIn("- runFlow: shared/assert-post-onboarding-chat-surface.yaml", text)
-        self.assertNotIn('visible:\n      id: "onboarding_next"', text)
+        self.assertLess(
+            text.index("shared/bootstrap-clean-start.yaml"),
+            text.index("shared/complete-first-run-onboarding.yaml"),
+        )
         self.assertNotIn('assertVisible:\n    id: "composer_input"', text)
 
     def test_post_onboarding_chat_surface_helper_accepts_clean_device_pre_runtime_state(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro/shared/assert-post-onboarding-chat-surface.yaml"
         text = flow_path.read_text(encoding="utf-8")
         self.assertNotIn("launchApp:", text)
-        self.assertIn('id: "onboarding_next"', text)
-        self.assertIn('id: "onboarding_get_started"', text)
+        self.assertNotIn('id: "onboarding_next"', text)
+        self.assertNotIn('id: "onboarding_get_started"', text)
         self.assertIn('id: "permission_allow_button"', text)
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertIn('visible: "Preparing PocketAgent"', text)
+        self.assertNotIn("hideKeyboard", text)
         self.assertIn('id: "unified_model_sheet"', text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", text)
         self.assertNotIn('visible: "Model library"', text)
@@ -225,6 +273,10 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "session_drawer_button"', text)
         self.assertIn('id: "send_button"', text)
         self.assertNotIn('id: "composer_input"', text)
+        self.assertLess(
+            text.index('id: "permission_allow_button"'),
+            text.index('visible:\n      id: "session_drawer_button"'),
+        )
 
     def test_bootstrap_helpers_keep_local_and_cloud_onboarding_contracts_in_sync(self) -> None:
         local_path = REPO_ROOT / "tests/maestro/shared/bootstrap-clean-start.yaml"
@@ -238,18 +290,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
             'visible: "Allow PocketAgent to send you notifications?"',
             'notVisible:\n        id: "permission_allow_button"',
             '- tapOn: "Allow"',
-            'visible:\n        id: "onboarding_next"',
-            'tapOn:\n          id: "onboarding_next"',
-            'visible:\n        id: "onboarding_get_started"',
-            'tapOn:\n          id: "onboarding_get_started"',
-            'visible: "Get started"',
-            'notVisible:\n        id: "onboarding_get_started"',
-            '- tapOn: "Get started"',
         )
         for marker in shared_markers:
             with self.subTest(marker=marker):
                 self.assertIn(marker, local_text)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", cloud_text)
+        self.assertIn("runFlow: complete-first-run-onboarding.yaml", cloud_text)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", REPO_ROOT.joinpath("tests/maestro/shared/bootstrap-to-ready.yaml").read_text(encoding="utf-8"))
         self.assertNotIn("hideKeyboard", cloud_text)
         self.assertEqual(
@@ -257,23 +303,21 @@ class MaestroFlowContractsTest(unittest.TestCase):
             REPO_ROOT.joinpath("tests/maestro-cloud/shared/bootstrap-clean-start.yaml").read_text(encoding="utf-8"),
         )
 
-    def test_local_bootstrap_to_ready_advances_onboarding_and_waits_for_chat_shell(self) -> None:
+    def test_local_bootstrap_to_ready_normalizes_startup_and_waits_for_chat_shell(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro/shared/bootstrap-to-ready.yaml"
         text = flow_path.read_text(encoding="utf-8")
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
+        self.assertIn("runFlow: complete-first-run-onboarding.yaml", text)
         self.assertIn("runFlow: settle-ready-shell.yaml", text)
         bootstrap_clean_text = REPO_ROOT.joinpath("tests/maestro/shared/bootstrap-clean-start.yaml").read_text(encoding="utf-8")
-        self.assertEqual(
-            1,
-            bootstrap_clean_text.count("hideKeyboard"),
-            "Clean-start onboarding should not hide the keyboard around Get started because onboarding has no text input.",
-        )
-        self.assertGreaterEqual(bootstrap_clean_text.count('visible:\n        id: "onboarding_next"'), 2)
-        self.assertIn('visible:\n        id: "onboarding_skip"', bootstrap_clean_text)
-        self.assertIn('visible:\n        id: "onboarding_get_started"', bootstrap_clean_text)
-        self.assertIn('tapOn:\n          id: "onboarding_get_started"', bootstrap_clean_text)
-        self.assertIn('notVisible:\n        id: "onboarding_get_started"', bootstrap_clean_text)
-        self.assertIn('tapOn: "Get started"', bootstrap_clean_text)
+        self.assertGreaterEqual(bootstrap_clean_text.count("runFlow: dismiss-system-overlays.yaml"), 3)
+        self.assertNotIn("hideKeyboard", bootstrap_clean_text)
+        self.assertNotIn('visible: "Next"', bootstrap_clean_text)
+        self.assertNotIn('visible: "Skip"', bootstrap_clean_text)
+        self.assertNotIn('visible: "Get started"', bootstrap_clean_text)
+        self.assertNotIn('id: "onboarding_next"', bootstrap_clean_text)
+        self.assertNotIn('id: "onboarding_skip"', bootstrap_clean_text)
+        self.assertNotIn('id: "onboarding_get_started"', bootstrap_clean_text)
         self.assertEqual(
             bootstrap_clean_text,
             REPO_ROOT.joinpath("tests/maestro-cloud/shared/bootstrap-clean-start.yaml").read_text(encoding="utf-8"),
@@ -300,8 +344,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertGreaterEqual(text.count("runFlow: dismiss-system-overlays.yaml"), 3)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_next"', text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_get_started"', text)
+        self.assertIn("runFlow: complete-first-run-onboarding.yaml", text)
+        self.assertIn('extendedWaitUntil:\n    visible:\n      id: "session_drawer_button"', text)
         self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
         self.assertIn('id: "permission_allow_button"', text)
         self.assertIn('visible: "Allow PocketAgent to send you notifications?"', text)
@@ -319,8 +363,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "provisioning_bootstrap_loading"', text)
         self.assertGreaterEqual(text.count("runFlow: dismiss-system-overlays.yaml"), 3)
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_next"', text)
-        self.assertIn('extendedWaitUntil:\n    notVisible:\n      id: "onboarding_get_started"', text)
+        self.assertIn("runFlow: complete-first-run-onboarding.yaml", text)
+        self.assertIn('extendedWaitUntil:\n    visible:\n      id: "session_drawer_button"', text)
         self.assertIn("runFlow: ensure-runtime-loaded.yaml", text)
         self.assertIn('id: "unified_model_sheet"', text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", text)
@@ -342,11 +386,30 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     else "runFlow: shared/bootstrap-clean-start.yaml"
                 )
                 self.assertIn(expected_bootstrap_ref, text)
+                expected_onboarding_ref = (
+                    "runFlow: complete-first-run-onboarding.yaml"
+                    if flow_path.parent.name == "shared"
+                    else "runFlow: shared/complete-first-run-onboarding.yaml"
+                )
+                self.assertIn(expected_onboarding_ref, text)
                 self.assertIn("assert-post-onboarding-chat-surface.yaml", text)
-                if flow_path.parent.name != "shared":
+                if flow_path.name == "scenario-first-run-download-chat.yaml":
+                    self.assertIn("runFlow: shared/ensure-runtime-loaded.yaml", text)
+                    self.assertNotIn("bootstrap-launch-default-model.yaml", text)
+                elif flow_path.parent.name != "shared":
                     self.assertIn("bootstrap-launch-default-model.yaml", text)
+                if flow_path.name == "scenario-first-run-download-chat.yaml":
+                    self.assertIn('visible: "Load last used"', text)
+                    self.assertIn("runFlow: shared/wait-runtime-transition-idle.yaml", text)
+                    self.assertNotIn(
+                        'notVisible:\n            id: "chat_gate_inline_card"',
+                        text,
+                    )
+                self.assertLess(
+                    text.index(expected_bootstrap_ref),
+                    text.index(expected_onboarding_ref),
+                )
                 self.assertNotIn('visible:\n        id: "onboarding_skip"', text)
-                self.assertNotIn('visible:\n        id: "onboarding_get_started"', text)
                 self.assertNotIn('visible: "Skip"', text)
                 self.assertNotIn('visible: "Get started"', text)
 
@@ -354,8 +417,11 @@ class MaestroFlowContractsTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', bootstrap_text)
+        self.assertGreaterEqual(bootstrap_text.count("enabled: true"), 5)
         self.assertNotIn('text: "Downloaded models"', bootstrap_text)
         self.assertIn('id: "chat_gate_inline_card"', bootstrap_text)
+        self.assertIn("runFlow: wait-runtime-transition-idle.yaml", bootstrap_text)
+        self.assertIn('inputText: "qwen3-0.6b-q4_k_m"\n- hideKeyboard', bootstrap_text)
         self.assertNotIn("\n      - back", bootstrap_text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", bootstrap_text)
         local_close_helper_text = (
@@ -369,9 +435,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
             REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-launch-default-model.yaml"
         ).read_text(encoding="utf-8")
         self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', cloud_bootstrap_text)
+        self.assertGreaterEqual(cloud_bootstrap_text.count("enabled: true"), 5)
         self.assertNotIn('text: "Downloaded models"', cloud_bootstrap_text)
         self.assertIn('id: "chat_gate_inline_card"', cloud_bootstrap_text)
+        self.assertIn("runFlow: wait-runtime-transition-idle.yaml", cloud_bootstrap_text)
         self.assertNotIn('id: "refresh_button"', cloud_bootstrap_text)
+        self.assertIn('inputText: "qwen3-0.6b-q4_k_m"\n- hideKeyboard', cloud_bootstrap_text)
         self.assertNotIn("\n      - back", cloud_bootstrap_text)
         self.assertIn("runFlow: close-model-library-if-open.yaml", cloud_bootstrap_text)
         cloud_close_helper_text = (
@@ -394,6 +463,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
         local_path = REPO_ROOT / "tests/maestro/shared/dismiss-system-overlays.yaml"
         cloud_path = REPO_ROOT / "tests/maestro-cloud/shared/dismiss-system-overlays.yaml"
         local_text = local_path.read_text(encoding="utf-8")
+        self.assertIn('visible: "Pixel Launcher isn\'t responding"', local_text)
+        self.assertIn('tapOn: "Wait"', local_text)
         self.assertIn('visible: "Try out your stylus"', local_text)
         self.assertIn('visible: "Write here"', local_text)
         self.assertIn('tapOn: "Cancel"', local_text)
@@ -418,9 +489,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('visible:\n        id: "permission_allow_button"', text)
         self.assertIn('visible: "Allow PocketAgent to send you notifications?"', text)
         self.assertIn('notVisible:\n        id: "permission_allow_button"', text)
-        self.assertGreaterEqual(text.count('visible:\n        id: "onboarding_next"'), 2)
-        self.assertIn('visible:\n        id: "onboarding_skip"', text)
-        self.assertIn('visible:\n        id: "onboarding_get_started"', text)
+        self.assertNotIn('visible: "Next"', text)
+        self.assertNotIn('visible: "Skip"', text)
+        self.assertNotIn('visible: "Get started"', text)
+        self.assertNotIn('id: "onboarding_next"', text)
+        self.assertNotIn('id: "onboarding_skip"', text)
+        self.assertNotIn('id: "onboarding_get_started"', text)
         self.assertNotIn('visible:\n        id: "refresh_button"', text)
         self.assertNotIn('visible: "Load last used"', text)
         self.assertNotIn('visible: "Setup"', text)
@@ -428,7 +502,47 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertNotIn('runFlow: open-model-library.yaml', text)
         self.assertNotIn('text: "Download model"', text)
         self.assertNotIn('text: "Downloading…"', text)
+
+    def test_first_run_onboarding_helper_uses_stable_ids_and_stays_in_sync(self) -> None:
+        local_path = REPO_ROOT / "tests/maestro/shared/complete-first-run-onboarding.yaml"
+        cloud_path = REPO_ROOT / "tests/maestro-cloud/shared/complete-first-run-onboarding.yaml"
+        text = local_path.read_text(encoding="utf-8")
+        self.assertEqual(text, cloud_path.read_text(encoding="utf-8"))
+        self.assertIn('id: "provisioning_bootstrap_loading"', text)
+        self.assertIn('visible: "Preparing PocketAgent"', text)
+        self.assertIn('visible: "Checking runtime and model availability..."', text)
+        self.assertNotIn('visible:\n      id: "composer_input"', text)
+        self.assertNotIn('notVisible:\n        id: "composer_input"', text)
+        self.assertIn('visible:\n        id: "onboarding_next"', text)
+        self.assertGreaterEqual(text.count("runFlow: dismiss-system-overlays.yaml"), 4)
+        self.assertEqual(6, text.count('id: "onboarding_next"'))
+        self.assertEqual(2, text.count('tapOn:\n          id: "onboarding_next"'))
+        self.assertEqual(4, text.count('id: "onboarding_get_started"'))
         self.assertIn('tapOn:\n          id: "onboarding_get_started"', text)
+        self.assertIn('assertNotVisible:\n    id: "onboarding_next"', text)
+        self.assertIn('assertNotVisible:\n    id: "onboarding_get_started"', text)
+        self.assertIn("runFlow: dismiss-system-overlays.yaml", text)
+        self.assertNotIn("hideKeyboard", text)
+
+    def test_clean_state_flows_drive_onboarding_explicitly_before_ready_helpers(self) -> None:
+        flow_paths = (
+            REPO_ROOT / "tests/maestro/scenario-onboarding.yaml",
+            REPO_ROOT / "tests/maestro/scenario-first-run-download-chat.yaml",
+            REPO_ROOT / "tests/maestro/scenario-first-run-gpu-chat.yaml",
+            REPO_ROOT / "tests/maestro/scenario-download-settings-smoke.yaml",
+            REPO_ROOT / "tests/maestro/scenario-session-drawer-smoke.yaml",
+            REPO_ROOT / "tests/maestro/scenario-hf-live-download-smoke.yaml",
+        )
+        for flow_path in flow_paths:
+            with self.subTest(flow=flow_path.relative_to(REPO_ROOT).as_posix()):
+                text = flow_path.read_text(encoding="utf-8")
+                self.assertIn("clearState: true", text)
+                self.assertIn("runFlow: shared/bootstrap-clean-start.yaml", text)
+                self.assertIn("runFlow: shared/complete-first-run-onboarding.yaml", text)
+                self.assertLess(
+                    text.index("shared/bootstrap-clean-start.yaml"),
+                    text.index("shared/complete-first-run-onboarding.yaml"),
+                )
 
 
 if __name__ == "__main__":

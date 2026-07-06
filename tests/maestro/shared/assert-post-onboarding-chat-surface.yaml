@@ -1,14 +1,7 @@
 appId: com.pocketagent.android
 ---
 - runFlow: dismiss-system-overlays.yaml
-- extendedWaitUntil:
-    notVisible:
-      id: "onboarding_next"
-    timeout: 15000
-- extendedWaitUntil:
-    notVisible:
-      id: "onboarding_get_started"
-    timeout: 15000
+- runFlow: dismiss-system-overlays.yaml
 - runFlow:
     when:
       visible:
@@ -49,6 +42,7 @@ appId: com.pocketagent.android
         id: "unified_model_sheet"
     commands:
       - runFlow: close-model-library-if-open.yaml
+- runFlow: dismiss-system-overlays.yaml
 - extendedWaitUntil:
     visible:
       id: "session_drawer_button"

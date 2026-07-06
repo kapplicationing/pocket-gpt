@@ -1,0 +1,44 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible: "Queuing…"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Queuing…"
+          timeout: 300000
+- runFlow:
+    when:
+      visible: "Pause"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Pause"
+          timeout: 300000
+- runFlow:
+    when:
+      visible: "Freeing memory"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Freeing memory"
+          timeout: 180000
+- runFlow:
+    when:
+      visible: "Offloading model..."
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Offloading model..."
+          timeout: 180000
+- runFlow:
+    when:
+      visible: "Loading..."
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Loading..."
+          timeout: 180000
+- runFlow:
+    when:
+      visible: "Loading…"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Loading…"
+          timeout: 180000

@@ -14,6 +14,8 @@ tags:
           notVisible:
             id: "provisioning_bootstrap_loading"
           timeout: 120000
+- runFlow: shared/bootstrap-clean-start.yaml
+- runFlow: shared/complete-first-run-onboarding.yaml
 - runFlow: shared/bootstrap-to-ready.yaml
 - tapOn:
     id: "session_drawer_button"

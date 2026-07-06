@@ -1,7 +1,7 @@
 appId: com.pocketagent.android
 ---
 - runFlow: dismiss-system-overlays.yaml
-- hideKeyboard
+- runFlow: dismiss-system-overlays.yaml
 - runFlow:
     when:
       visible:
@@ -16,38 +16,4 @@ appId: com.pocketagent.android
         id: "permission_allow_button"
     commands:
       - tapOn: "Allow"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_next"
-    commands:
-      - tapOn:
-          id: "onboarding_next"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_next"
-    commands:
-      - tapOn:
-          id: "onboarding_next"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_skip"
-    commands:
-      - tapOn:
-          id: "onboarding_skip"
-- runFlow:
-    when:
-      visible:
-        id: "onboarding_get_started"
-    commands:
-      - tapOn:
-          id: "onboarding_get_started"
-- runFlow:
-    when:
-      visible: "Get started"
-      notVisible:
-        id: "onboarding_get_started"
-    commands:
-      - tapOn: "Get started"
+- runFlow: dismiss-system-overlays.yaml

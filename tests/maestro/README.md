@@ -19,7 +19,7 @@ Source of truth for execution commands and cloud guidance:
 7. `scenario-first-run-download-chat.yaml`: clean install -> first-run download -> runtime ready -> send smoke
 8. `scenario-first-run-gpu-chat.yaml`: clean install -> first-run setup -> enable GPU acceleration -> send smoke
 9. `scenario-gpu-probe-status.yaml`: open Advanced controls and drive GPU probe status updates for log-based reason validation
-10. `scenario-session-drawer-smoke.yaml`: onboarding skip -> session drawer delete/replacement smoke
+10. `scenario-session-drawer-smoke.yaml`: first-run onboarding completion -> session drawer delete/replacement smoke
 11. `scenario-hf-url-validation-smoke.yaml` (`smoke`, `model-management`, `hf-validation`): debug-open model library -> invalid HF URL -> blocked reason contract. This is in the default `devctl lane maestro` list.
 12. `scenario-hf-search-to-candidate-smoke.yaml` (`smoke`, `model-management`, `hf-search`): debug-open model library -> fixture search -> file result -> candidate preview.
 13. `scenario-hf-fixture-download-smoke.yaml` (`fixture-hf`, `model-management`, `downloads`): optional local fake-HF queue-status regression. Run it through `bash scripts/dev/maestro-hf-fixture-smoke.sh --serial <device>` so the APK is built with `-Ppocketgpt.hfFixtureBaseUrl`. Install is proven by `ModelDownloadManagerInstrumentationTest`, not Maestro.

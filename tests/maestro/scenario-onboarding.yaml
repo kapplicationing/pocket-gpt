@@ -17,6 +17,7 @@ tags:
             id: "provisioning_bootstrap_loading"
           timeout: 30000
 - runFlow: shared/bootstrap-clean-start.yaml
+- runFlow: shared/complete-first-run-onboarding.yaml
 - runFlow: shared/assert-post-onboarding-chat-surface.yaml
 - assertNotVisible:
     text: "Next"

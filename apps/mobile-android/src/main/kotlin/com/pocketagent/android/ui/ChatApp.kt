@@ -394,6 +394,8 @@ fun PocketAgentApp(
                     chatGateState = chatGateState,
                     canAttachImages = canAttachImages,
                     showThinkingToggle = showThinkingToggle,
+                    autoFocusEnabled = activeSurface == ModalSurface.None &&
+                        chatGateState.status == ChatGateStatus.READY,
                     onAttachImage = chatAppLaunchers.launchImageAttachmentPicker,
                     onBlockedAction = onBlockedAction,
                 )
@@ -492,6 +494,7 @@ private fun ChatComposerDock(
     chatGateState: ChatGateState,
     canAttachImages: Boolean,
     showThinkingToggle: Boolean,
+    autoFocusEnabled: Boolean,
     onAttachImage: () -> Unit,
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
 ) {
@@ -520,6 +523,7 @@ private fun ChatComposerDock(
         onToggleThinking = viewModel::toggleSessionThinking,
         onOpenCompletionSettings = { viewModel.showSurface(ModalSurface.CompletionSettings) },
         onBlockedAction = onBlockedAction,
+        autoFocusEnabled = autoFocusEnabled,
     )
 }
 

@@ -51,6 +51,18 @@ class ChatAppDerivedStateAuditTest {
         )
     }
 
+    @Test
+    fun `composer auto focus is disabled while chat gate is blocked`() {
+        val source = chatAppSourceFile().readText()
+        val dockCall = source.substringAfter("ChatComposerDock(")
+            .substringBefore("onAttachImage = chatAppLaunchers.launchImageAttachmentPicker")
+
+        assertTrue(
+            "chatGateState.status == ChatGateStatus.READY" in dockCall,
+            "Composer auto focus must stay disabled while the first-run setup gate is blocking chat.",
+        )
+    }
+
     private fun chatAppSourceFile(): File {
         return listOf(
             File("src/main/kotlin/com/pocketagent/android/ui/ChatApp.kt"),

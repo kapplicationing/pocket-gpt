@@ -1,0 +1,64 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible:
+        id: "provisioning_bootstrap_loading"
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- runFlow:
+    when:
+      visible: "Preparing PocketAgent"
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Preparing PocketAgent"
+          timeout: 60000
+- runFlow:
+    when:
+      visible: "Checking runtime and model availability..."
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Checking runtime and model availability..."
+          timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_next"
+    commands:
+      - tapOn:
+          id: "onboarding_next"
+      - runFlow: dismiss-system-overlays.yaml
+- runFlow: dismiss-system-overlays.yaml
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_next"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "onboarding_next"
+          timeout: 10000
+      - tapOn:
+          id: "onboarding_next"
+      - runFlow: dismiss-system-overlays.yaml
+- runFlow: dismiss-system-overlays.yaml
+- runFlow:
+    when:
+      visible:
+        id: "onboarding_get_started"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "onboarding_get_started"
+          timeout: 10000
+      - tapOn:
+          id: "onboarding_get_started"
+      - runFlow: dismiss-system-overlays.yaml
+- runFlow: dismiss-system-overlays.yaml
+- assertNotVisible:
+    id: "onboarding_next"
+- assertNotVisible:
+    id: "onboarding_get_started"

@@ -5,6 +5,13 @@ appId: com.pocketagent.android
 - eraseText
 - inputText: "qwen3-0.6b-q4_k_m"
 - hideKeyboard
+- tapOn: "Model library"
+- scrollUntilVisible:
+    centerElement: true
+    element:
+      text: "Qwen3 0.6B (Q4_K_M)"
+    direction: DOWN
+    timeout: 60000
 - runFlow:
     when:
       visible:
@@ -21,22 +28,8 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           notVisible:
             id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"
-            enabled: true
           timeout: 300000
-- runFlow:
-    when:
-      visible: "Queuing…"
-    commands:
-      - extendedWaitUntil:
-          notVisible: "Queuing…"
-          timeout: 300000
-- runFlow:
-    when:
-      visible: "Pause"
-    commands:
-      - extendedWaitUntil:
-          notVisible: "Pause"
-          timeout: 300000
+- runFlow: wait-runtime-transition-idle.yaml
 - runFlow:
     when:
       visible: "Large download on metered network"
@@ -69,17 +62,7 @@ appId: com.pocketagent.android
             - tapOn:
                 id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
       - runFlow: close-model-library-if-open.yaml
-- runFlow:
-    when:
-      visible:
-        id: "chat_gate_inline_card"
-    commands:
-      - tapOn:
-          id: "send_button"
-      - extendedWaitUntil:
-          notVisible:
-            id: "chat_gate_inline_card"
-          timeout: 180000
+- runFlow: wait-runtime-transition-idle.yaml
 - runFlow:
     when:
       visible:
@@ -90,6 +73,7 @@ appId: com.pocketagent.android
       - eraseText
       - inputText: "qwen3-0.6b-q4_k_m"
       - hideKeyboard
+      - tapOn: "Model library"
       - scrollUntilVisible:
           element:
             id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"

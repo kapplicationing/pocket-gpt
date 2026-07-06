@@ -5,16 +5,6 @@ appId: com.pocketagent.android
       visible: "Model library"
     commands:
       - assertVisible: "Model library"
-- assertNotVisible:
-    id: "onboarding_next"
-- assertNotVisible:
-    id: "onboarding_get_started"
-- runFlow:
-    when:
-      visible: "Setup"
-    commands:
-      - tapOn:
-          id: "send_button"
 - runFlow:
     when:
       visible: "Get ready"
@@ -23,6 +13,26 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000
+- runFlow:
+    when:
+      visible:
+        id: "open_model_library"
+    commands:
+      - tapOn:
+          id: "open_model_library"
+      - runFlow:
+          when:
+            visible: "More models…"
+          commands:
+            - tapOn: "More models…"
+      - runFlow:
+          when:
+            visible: "More models..."
+          commands:
+            - tapOn: "More models..."
+      - extendedWaitUntil:
+          visible: "Model library"
+          timeout: 30000
 - runFlow:
     when:
       visible:

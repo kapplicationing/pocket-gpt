@@ -194,15 +194,12 @@ def _should_run_stage2_quick(*, risk_labels: Sequence[str], changed_files: Seque
     return True, ",".join(reasons)
 
 
-def _lifecycle_lane_command() -> list[str]:
-    return [
-        "python3",
-        "tools/devctl/main.py",
-        "lane",
-        "maestro",
-        "--flows",
-        str(_LIFECYCLE_FLOW_PATH),
-    ]
+def _lifecycle_wrapper_command(*, serial: str, reason: str) -> list[str]:
+    command = ["bash", "scripts/ci/run_lifecycle_e2e.sh"]
+    if serial:
+        command.extend(["--device", serial])
+    command.append(reason)
+    return command
 
 
 def _classify_journey_failure(output: str) -> tuple[str, str | None]:
@@ -386,7 +383,7 @@ def _run_merge_unblock(parsed: argparse.Namespace) -> None:
         )
     )
 
-    lifecycle_command = _lifecycle_lane_command()
+    lifecycle_command = _lifecycle_wrapper_command(serial=parsed.serial, reason=lifecycle_reason)
     if lifecycle_required:
         steps.append(
             _run_gate_command(
@@ -420,7 +417,8 @@ def _run_merge_unblock(parsed: argparse.Namespace) -> None:
             "risk_labels": parsed.risk_label,
             "lifecycle_required": lifecycle_required,
             "lifecycle_reason": lifecycle_reason,
-            "lifecycle_execution_path": "devctl lane maestro --flows tests/maestro/scenario-first-run-download-chat.yaml",
+            "lifecycle_execution_path": "scripts/ci/run_lifecycle_e2e.sh",
+            "lifecycle_execution_kind": "ci-wrapper",
             "changed_files_count": len(changed_files),
         },
     )

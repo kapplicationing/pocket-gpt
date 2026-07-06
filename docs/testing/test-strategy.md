@@ -1,6 +1,6 @@
 # Test Strategy (Canonical Playbook)
 
-Last updated: 2026-05-03
+Last updated: 2026-07-06
 
 ## Source Of Truth
 
@@ -27,6 +27,8 @@ For Android UI/runtime changes, default evidence is:
 3. Cloud for hosted fan-out and hosted-contract confirmation.
 
 Do not silently substitute one surface for another when startup, provisioning, runtime readiness, selectors, or release confidence changed.
+
+This is the canonical device/emulator/cloud evidence policy. Other docs should point here instead of restating the full matrix.
 
 Operator shortcut:
 
@@ -111,6 +113,16 @@ Stop-and-pivot rule:
 9. `bash scripts/dev/maestro-cloud-upload-status.sh`
    - explicit upload polling by `label:upload-id` and `project-id`.
 
+## Hosted Cloud Wrapper Policy
+
+Use repo wrappers for CI, nightly, and retained evidence runs:
+
+1. `bash scripts/dev/maestro-cloud-flow.sh` for one named flow.
+2. `bash scripts/dev/maestro-cloud-smoke.sh` for the tagged hosted smoke suite.
+3. `bash scripts/dev/maestro-cloud-hf-fixture-smoke.sh` for hosted HF fixture validation when the fixture URL is public and preflighted.
+
+Wrappers are preferred because they add account selection, run manifests, parsed `status.json`, upload URLs, and consistent artifact roots around the same underlying `maestro cloud` call. Raw `maestro cloud` is acceptable only for throwaway local diagnostics where no evidence will be cited later.
+
 ## Agent Skills Used In Practice
 
 1. `testing-android-maestro`
@@ -193,12 +205,12 @@ Flow-truth rule in practice:
 
 Primary workflow: `.github/workflows/ci.yml`
 
-1. Hosted required checks: `unit-and-host-tests`, `android-lint`, `native-build-package-check`, `android-instrumented-smoke`, `lifecycle-e2e-first-run` (risk-conditional on PRs, always-on for `main`).
-2. `android-instrumented-smoke` is intentionally scoped to two deterministic checks: onboarding completion (`MainActivityUiSmokeTest#onboardingFlowCanProgressAndComplete`) plus the focused model-management Compose contract (`ModelManagementSheetComposeContractTest`). Full first-run/download/send behavior stays in lifecycle E2E.
-3. Governance checks run docs drift/health/accuracy and governance self-tests.
-4. Nightly workflows provide emulator matrix coverage and attempt cloud-first hosted coverage (including first-run lifecycle and the model-management split smoke). If `MAESTRO_CLOUD_API_KEY` is absent, the hosted job must report an explicit skip; that skip is configuration coverage, not hosted product evidence. Hosted runs should stay tag-scoped and short.
-5. The scheduled hosted Maestro smoke intentionally runs a direct onboarding flow instead of `devctl lane maestro`. `devctl` remains the local/promotion gate because it owns storage/model-cache preflights; hosted emulators are better suited to narrow app-launch and onboarding contracts.
-6. Required checks for branch protection should include `lifecycle-e2e-first-run`.
+1. Branch protection should require the always-running aggregate check `ci-required`.
+2. `ci-required` enforces whether path-gated jobs ran, skipped by policy, or failed. Do not require path-gated jobs directly; GitHub reports skipped jobs as successful for required-check purposes.
+3. Individual CI jobs remain visible for diagnosis: `unit-and-host-tests`, `android-lint`, `native-build-package-check`, `android-instrumented-smoke`, and `lifecycle-e2e-first-run`.
+4. `android-instrumented-smoke` is intentionally scoped to two deterministic checks: onboarding completion (`MainActivityUiSmokeTest#onboardingFlowCanProgressAndComplete`) plus the focused model-management Compose contract (`ModelManagementSheetComposeContractTest`). Full first-run/download/send behavior stays in lifecycle E2E.
+5. Governance checks run docs drift/health/accuracy and governance self-tests.
+6. Nightly workflows provide emulator matrix coverage and attempt cloud-first hosted coverage through the wrapper scripts. If `MAESTRO_CLOUD_API_KEY` is absent, the hosted job must report an explicit skip; that skip is configuration coverage, not hosted product evidence. Hosted runs should stay tag-scoped and short.
 
 ## Engineering Principles (Applied)
 

@@ -30,7 +30,7 @@ Engineering and quality excellence are mandatory.
 
 ## Current Status Snapshot
 
-The July HF/CI branch stack is merged and published through PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4)-[#9](https://github.com/kapplicationing/pocket-gpt/pull/9). The code-bearing branch-stack baseline passed main push CI at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), CodeQL at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and July 6 nightly validation at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). Treat the nightly Maestro Cloud job as skipped configuration coverage because `MAESTRO_CLOUD_API_KEY` was absent, not as hosted product proof. Verify the live `main`/`origin/main` SHA with `git status --short --branch` and GitHub Actions before release action instead of hard-coding a moving docs-only tip here.
+The July HF/CI branch stack is merged and published through PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4)-[#9](https://github.com/kapplicationing/pocket-gpt/pull/9). Fixed CI, CodeQL, nightly, hardware-runner guard, and controlled-MVP baselines are retained in `docs/operations/evidence/evidence-ledger.json`. Verify the live `main`/`origin/main` SHA with `git status --short --branch` and GitHub Actions before release action instead of hard-coding a moving docs-only tip here.
 
 Branch/publication hygiene is closed for the `codex/simplify-model-selection` and post-merge CI cleanup stack: merged PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4), [#5](https://github.com/kapplicationing/pocket-gpt/pull/5), [#6](https://github.com/kapplicationing/pocket-gpt/pull/6), [#7](https://github.com/kapplicationing/pocket-gpt/pull/7), [#8](https://github.com/kapplicationing/pocket-gpt/pull/8), and [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) are all on `main`.
 
@@ -39,7 +39,7 @@ Branch/publication hygiene is closed for the `codex/simplify-model-selection` an
 | ID | Work Package | Status | Notes |
 |---|---|---|---|
 | WP-00 .. WP-08 | Foundation through launch prep packages | Done | Historical evidence summarized in `docs/operations/evidence/index.md` |
-| WP-09 | Distribution plan and beta operations | In Progress | Active full evidence retained in `docs/operations/evidence/wp-09/`; current CI/nightly run links live in `docs/operations/evidence/index.md` |
+| WP-09 | Distribution plan and beta operations | In Progress | Active full evidence retained in `docs/operations/evidence/wp-09/`; fixed repository baselines live in `docs/operations/evidence/evidence-ledger.json` |
 | WP-10 | Voice limited-beta rail | Ready | Kept in locked launch scope for controlled/closed-track use; broad public claims remain excluded pending evidence + claim parity |
 | WP-11 | Android MVP UX package | Done | Historical evidence summarized in `docs/operations/evidence/index.md` |
 | WP-12 | Backend production runtime closure | Done | Production-claim-critical evidence retained in `docs/operations/evidence/wp-12/` |
@@ -69,8 +69,8 @@ None.
 
 - [x] Dynamic Hugging Face search/import and follow-up CI stabilization stack landed on `main` through PRs #4-#9.
 - [x] Branch/publication hygiene is closed for the July stack: PRs #4-#9 are merged and published on `main`.
-- [x] Latest main push CI and CodeQL are green at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466) and [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204).
-- [x] July 6 Nightly Validation is green at [run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147), with the Maestro Cloud lane explicitly skipped because `MAESTRO_CLOUD_API_KEY` was unavailable.
+- [x] Fixed July CI, CodeQL, and nightly baselines are recorded in `docs/operations/evidence/evidence-ledger.json`.
+- [x] Live CI/nightly status is no longer hand-maintained in this board; use GitHub Actions for current run state.
 - [x] Nightly hardware runner availability is guarded by PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9); missing self-hosted runner capacity is now reported as lane availability, not confused with product failure.
 - [x] PROD-09 soft-gate pilot policy published
 - [x] UX-12 recovery journey spec published
@@ -144,5 +144,5 @@ Full owner/dependency split: `docs/operations/play-store-launch-program.md`
 
 1. Active package evidence belongs in `docs/operations/evidence/wp-09/` and `docs/operations/evidence/wp-13/`.
 2. Production-claim-critical WP-12 evidence remains in `docs/operations/evidence/wp-12/`.
-3. Current CI/nightly evidence and historical package detail are summarized in `docs/operations/evidence/index.md`.
-4. Older May local artifact paths remain provenance when present, but they are not the current repository sync signal. Use the latest GitHub CI, CodeQL, nightly, hardware-runner, and targeted device/cloud artifacts for any new promotion or release decision.
+3. Fixed CI/nightly/hardware baselines and historical package detail are summarized in `docs/operations/evidence/index.md` and `docs/operations/evidence/evidence-ledger.json`.
+4. Older May local artifact paths remain provenance when present, but they are not the current repository sync signal. Use GitHub Actions for live CI/nightly/hardware status and wrapper-generated `status.json` files for any new targeted device/cloud evidence.

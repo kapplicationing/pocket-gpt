@@ -1,0 +1,92 @@
+{
+  "schema": "pocketgpt-evidence-ledger-v1",
+  "last_updated": "2026-07-06",
+  "entries": [
+    {
+      "id": "ci-july-2026-branch-stack-main-baseline",
+      "title": "July 2026 HF/CI branch stack main-push baseline",
+      "sha": "0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522",
+      "surface": "github-actions",
+      "artifact": {
+        "type": "workflow-run",
+        "url": "https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466",
+        "run_id": "28741453466"
+      },
+      "status": "passed",
+      "authority_level": "merge-baseline",
+      "freshness": "fixed-baseline",
+      "release_gate_eligible": true,
+      "notes": "Fixed evidence for the branch stack merged through PR #9. Do not treat this entry as the latest main status."
+    },
+    {
+      "id": "codeql-july-2026-branch-stack-baseline",
+      "title": "July 2026 CodeQL branch-stack baseline",
+      "sha": "0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522",
+      "surface": "github-actions",
+      "artifact": {
+        "type": "workflow-run",
+        "url": "https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204",
+        "run_id": "28741453204"
+      },
+      "status": "passed",
+      "authority_level": "merge-baseline",
+      "freshness": "fixed-baseline",
+      "release_gate_eligible": true,
+      "notes": "Fixed security-analysis evidence for the July branch stack baseline."
+    },
+    {
+      "id": "nightly-july-2026-emulator-baseline",
+      "title": "July 6 scheduled nightly emulator baseline",
+      "sha": "4015b85a91c4662c55b67bd70b61711561f74f07",
+      "surface": "github-actions",
+      "artifact": {
+        "type": "workflow-run",
+        "url": "https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147",
+        "run_id": "28769302147"
+      },
+      "status": "passed-with-cloud-skip",
+      "authority_level": "nightly-baseline",
+      "freshness": "fixed-baseline",
+      "release_gate_eligible": false,
+      "notes": "Emulator nightly coverage passed. Maestro Cloud skipped because MAESTRO_CLOUD_API_KEY was absent, so this entry is not hosted product evidence."
+    },
+    {
+      "id": "hardware-runner-guard-july-2026",
+      "title": "Hardware Truth Lane runner-availability guard",
+      "sha": "0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522",
+      "surface": "github-actions",
+      "artifact": {
+        "type": "pull-request",
+        "url": "https://github.com/kapplicationing/pocket-gpt/pull/9",
+        "run_id": null
+      },
+      "status": "guard-landed",
+      "authority_level": "harness-policy",
+      "freshness": "fixed-baseline",
+      "release_gate_eligible": false,
+      "notes": "The lane now reports runner availability before claiming hardware evidence. Use live workflow runs for current hardware availability."
+    },
+    {
+      "id": "controlled-mvp-may-2026-promoted-evidence",
+      "title": "Controlled MVP promoted May evidence set",
+      "sha": null,
+      "surface": "mixed-local-device-hosted-proxy",
+      "artifact": {
+        "type": "retained-paths",
+        "paths": [
+          "tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/",
+          "tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/",
+          "tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json",
+          "tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json",
+          "tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json",
+          "docs/operations/evidence/wp-13/2026-05-03-wp13-packet-ai-human-proxy.md"
+        ]
+      },
+      "status": "promoted",
+      "authority_level": "controlled-mvp-gate",
+      "freshness": "retained-historical",
+      "release_gate_eligible": true,
+      "notes": "Retained controlled-MVP promotion evidence. Missing local tmp paths in a fresh checkout should be treated as retention availability, not as live CI status."
+    }
+  ]
+}

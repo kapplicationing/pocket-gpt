@@ -23,7 +23,7 @@ usage() {
 Usage: bash scripts/dev/maestro-cloud-flow.sh --flow <path.yaml> [options]
 
 Options:
-  --flow <path.yaml>          Flow file under tests/maestro-cloud/.
+  --flow <path.yaml>          Maestro flow file to run.
   --no-build                  Reuse the existing debug APK when needed.
   --api-level <level>         Android API level. Default: 34.
   --api-key-env <env>         Use MAESTRO_CLOUD_API_KEY, MAESTRO_CLOUD_API_KEY_2, or MAESTRO_CLOUD_API_KEY_3.
@@ -150,7 +150,7 @@ mkdir -p "${RUN_ROOT}"
 started_at="$(timestamp_utc)"
 git_commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
-manifest_payload="$(FLOW_VALUE="${FLOW}" API_LEVEL_VALUE="${API_LEVEL}" API_KEY_ENV_VALUE="${API_KEY_ENV}" APP_BINARY_ID_VALUE="${APP_BINARY_ID}" APP_FILE_VALUE="${APP_FILE}" DEVICE_LOCALE_VALUE="${DEVICE_LOCALE}" PROJECT_ID_VALUE="${PROJECT_ID}" RUN_ROOT_VALUE="${RUN_ROOT}" GIT_COMMIT_VALUE="${git_commit}" STARTED_AT_VALUE="${started_at}" python3 - <<'PY'
+manifest_payload="$(FLOW_VALUE="${FLOW}" API_LEVEL_VALUE="${API_LEVEL}" API_KEY_ENV_VALUE="${API_KEY_ENV}" APP_BINARY_ID_VALUE="${APP_BINARY_ID}" APP_FILE_VALUE="${APP_FILE}" BUILD_APK_VALUE="${BUILD_APK}" DEVICE_LOCALE_VALUE="${DEVICE_LOCALE}" PROJECT_ID_VALUE="${PROJECT_ID}" RUN_ROOT_VALUE="${RUN_ROOT}" GIT_COMMIT_VALUE="${git_commit}" STARTED_AT_VALUE="${started_at}" python3 - <<'PY'
 import json
 import os
 
@@ -159,7 +159,7 @@ print(json.dumps({
     "api_key_env": os.environ["API_KEY_ENV_VALUE"],
     "app_binary_id": os.environ["APP_BINARY_ID_VALUE"] or None,
     "app_file": os.environ["APP_FILE_VALUE"] or None,
-    "build_apk": not bool(os.environ["APP_BINARY_ID_VALUE"]),
+    "build_apk": os.environ["BUILD_APK_VALUE"] == "1" and not bool(os.environ["APP_BINARY_ID_VALUE"]),
     "command": "bash scripts/dev/maestro-cloud-flow.sh",
     "device_locale": os.environ["DEVICE_LOCALE_VALUE"],
     "flow": os.environ["FLOW_VALUE"],
@@ -210,7 +210,7 @@ status_payload="$(python3 -m tools.devctl.cloud_artifacts status \
   --junit "${RUN_ROOT}/junit.xml")"
 write_json_file "${RUN_ROOT}/status.json" "${status_payload}"
 
-updated_manifest="$(FLOW_VALUE="${FLOW}" API_LEVEL_VALUE="${API_LEVEL}" API_KEY_ENV_VALUE="${API_KEY_ENV}" APP_BINARY_ID_VALUE="${APP_BINARY_ID}" APP_FILE_VALUE="${APP_FILE}" DEVICE_LOCALE_VALUE="${DEVICE_LOCALE}" PROJECT_ID_VALUE="${PROJECT_ID}" RUN_ROOT_VALUE="${RUN_ROOT}" GIT_COMMIT_VALUE="${git_commit}" STARTED_AT_VALUE="${started_at}" STATUS_PAYLOAD_VALUE="${status_payload}" python3 - <<'PY'
+updated_manifest="$(FLOW_VALUE="${FLOW}" API_LEVEL_VALUE="${API_LEVEL}" API_KEY_ENV_VALUE="${API_KEY_ENV}" APP_BINARY_ID_VALUE="${APP_BINARY_ID}" APP_FILE_VALUE="${APP_FILE}" BUILD_APK_VALUE="${BUILD_APK}" DEVICE_LOCALE_VALUE="${DEVICE_LOCALE}" PROJECT_ID_VALUE="${PROJECT_ID}" RUN_ROOT_VALUE="${RUN_ROOT}" GIT_COMMIT_VALUE="${git_commit}" STARTED_AT_VALUE="${started_at}" STATUS_PAYLOAD_VALUE="${status_payload}" python3 - <<'PY'
 import json
 import os
 
@@ -220,6 +220,7 @@ print(json.dumps({
     "api_key_env": os.environ["API_KEY_ENV_VALUE"],
     "app_binary_id": status_payload.get("app_binary_id") or os.environ["APP_BINARY_ID_VALUE"] or None,
     "app_file": os.environ["APP_FILE_VALUE"] or None,
+    "build_apk": os.environ["BUILD_APK_VALUE"] == "1" and not bool(os.environ["APP_BINARY_ID_VALUE"]),
     "cli_exit_code": status_payload.get("cli_exit_code"),
     "command": "bash scripts/dev/maestro-cloud-flow.sh",
     "completed_at_utc": status_payload.get("completed_at_utc"),

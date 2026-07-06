@@ -3,6 +3,8 @@
 Last updated: 2026-07-06
 
 This index is the canonical retained evidence inventory after prune.
+Machine-readable retained baselines live in `docs/operations/evidence/evidence-ledger.json`.
+Live CI/nightly/hardware status belongs in GitHub Actions, not in this mutable index.
 
 ## Retention Policy
 
@@ -13,13 +15,11 @@ This index is the canonical retained evidence inventory after prune.
 
 ## Retained Evidence Sets
 
-### July CI And Nightly Baseline (`main`, 2026-07)
+### Fixed Baselines (`main`, 2026-07)
 
-- The July HF/CI branch stack through PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) landed on `main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522` (`Guard hardware truth lane runner availability (#9)`). Treat this as the code-bearing baseline for the merged branch stack, not as a self-updating pointer to the latest docs-only status commit.
-- Main push CI passed for that baseline: [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), created 2026-07-05T12:54:11Z.
-- CodeQL passed for that baseline: [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), created 2026-07-05T12:54:11Z.
-- July 6 scheduled nightly passed at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147), created 2026-07-06T05:11:22Z. Emulator instrumentation, Maestro smoke, and first-run lifecycle jobs passed on API 30/33/34 coverage as configured. Treat the Maestro Cloud job in this run as configuration coverage only because `MAESTRO_CLOUD_API_KEY` was absent; a skipped cloud lane is not hosted product evidence.
-- Latest hardware-truth scheduled run before the runner guard landed was cancelled at [Hardware Truth Lane run 28731184944](https://github.com/kapplicationing/pocket-gpt/actions/runs/28731184944). PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) changed that lane to report runner availability explicitly before claiming hardware evidence.
+- Retained CI, CodeQL, nightly, hardware-runner guard, and controlled-MVP promotion baselines are recorded in `docs/operations/evidence/evidence-ledger.json`.
+- Treat those entries as fixed evidence references, not as a moving pointer to current `main`.
+- For current run status, inspect GitHub Actions or regenerate local readiness output with `bash scripts/dev/launch-readiness.sh`.
 
 ### WP-09 (`docs/operations/evidence/wp-09/`)
 

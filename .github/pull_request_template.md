@@ -15,12 +15,12 @@
 ## Stage Closure
 
 - Stage close: no
-- If yes, include the latest successful physical-device evidence link.
+- If yes, check the stage/work-package evidence box above and link a retained WP evidence note below.
 
 ## Evidence Links (required for stage/work-package changes)
 
 - Evidence note(s):
-- Raw run artifacts (`scripts/benchmarks/runs/...`):
+- Raw run artifacts (`tmp/devctl-artifacts/...` or `scripts/benchmarks/runs/...`):
 
 ## Ops Alignment
 

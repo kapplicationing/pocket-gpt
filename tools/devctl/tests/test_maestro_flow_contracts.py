@@ -237,10 +237,10 @@ class MaestroFlowContractsTest(unittest.TestCase):
             'visible: "Allow PocketAgent to send you notifications?"',
             'notVisible:\n        id: "permission_allow_button"',
             '- tapOn: "Allow"',
-            'visible:\n        id: "onboarding_next"',
-            'tapOn:\n          id: "onboarding_next"',
-            'visible:\n        id: "onboarding_get_started"',
-            'tapOn:\n          id: "onboarding_get_started"',
+            'visible: "Next"',
+            '- tapOn: "Next"',
+            'visible: "Skip"',
+            '- tapOn: "Skip"',
             'visible: "Get started"',
             '- tapOn: "Get started"',
         )
@@ -267,10 +267,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
             "Clean-start onboarding must normalize late IME/system overlays around onboarding actions.",
         )
         self.assertGreaterEqual(bootstrap_clean_text.count("runFlow: dismiss-system-overlays.yaml"), 5)
-        self.assertGreaterEqual(bootstrap_clean_text.count('visible:\n        id: "onboarding_next"'), 2)
-        self.assertIn('visible:\n        id: "onboarding_skip"', bootstrap_clean_text)
-        self.assertIn('visible:\n        id: "onboarding_get_started"', bootstrap_clean_text)
-        self.assertIn('tapOn:\n          id: "onboarding_get_started"', bootstrap_clean_text)
+        self.assertGreaterEqual(bootstrap_clean_text.count('visible: "Next"'), 2)
+        self.assertIn('visible: "Skip"', bootstrap_clean_text)
+        self.assertIn('visible: "Get started"', bootstrap_clean_text)
+        self.assertNotIn('id: "onboarding_next"', bootstrap_clean_text)
+        self.assertNotIn('id: "onboarding_skip"', bootstrap_clean_text)
+        self.assertNotIn('id: "onboarding_get_started"', bootstrap_clean_text)
         self.assertIn('tapOn: "Get started"', bootstrap_clean_text)
         self.assertEqual(
             bootstrap_clean_text,
@@ -416,9 +418,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('visible:\n        id: "permission_allow_button"', text)
         self.assertIn('visible: "Allow PocketAgent to send you notifications?"', text)
         self.assertIn('notVisible:\n        id: "permission_allow_button"', text)
-        self.assertGreaterEqual(text.count('visible:\n        id: "onboarding_next"'), 2)
-        self.assertIn('visible:\n        id: "onboarding_skip"', text)
-        self.assertIn('visible:\n        id: "onboarding_get_started"', text)
+        self.assertGreaterEqual(text.count('visible: "Next"'), 2)
+        self.assertIn('visible: "Skip"', text)
+        self.assertIn('visible: "Get started"', text)
+        self.assertNotIn('id: "onboarding_next"', text)
+        self.assertNotIn('id: "onboarding_skip"', text)
+        self.assertNotIn('id: "onboarding_get_started"', text)
         self.assertNotIn('visible:\n        id: "refresh_button"', text)
         self.assertNotIn('visible: "Load last used"', text)
         self.assertNotIn('visible: "Setup"', text)
@@ -426,7 +431,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertNotIn('runFlow: open-model-library.yaml', text)
         self.assertNotIn('text: "Download model"', text)
         self.assertNotIn('text: "Downloading…"', text)
-        self.assertIn('tapOn:\n          id: "onboarding_get_started"', text)
+        self.assertIn('tapOn: "Get started"', text)
 
 
 if __name__ == "__main__":

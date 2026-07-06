@@ -196,7 +196,7 @@ Primary workflow: `.github/workflows/ci.yml`
 1. Hosted required checks: `unit-and-host-tests`, `android-lint`, `native-build-package-check`, `android-instrumented-smoke`, `lifecycle-e2e-first-run` (risk-conditional on PRs, always-on for `main`).
 2. `android-instrumented-smoke` is intentionally scoped to two deterministic checks: onboarding completion (`MainActivityUiSmokeTest#onboardingFlowCanProgressAndComplete`) plus the focused model-management Compose contract (`ModelManagementSheetComposeContractTest`). Full first-run/download/send behavior stays in lifecycle E2E.
 3. Governance checks run docs drift/health/accuracy and governance self-tests.
-4. Nightly workflows provide emulator matrix coverage and cloud-first hosted coverage (including first-run lifecycle and the model-management split smoke); hosted runs should stay tag-scoped and short.
+4. Nightly workflows provide emulator matrix coverage and attempt cloud-first hosted coverage (including first-run lifecycle and the model-management split smoke). If `MAESTRO_CLOUD_API_KEY` is absent, the hosted job must report an explicit skip; that skip is configuration coverage, not hosted product evidence. Hosted runs should stay tag-scoped and short.
 5. The scheduled hosted Maestro smoke intentionally runs a direct onboarding flow instead of `devctl lane maestro`. `devctl` remains the local/promotion gate because it owns storage/model-cache preflights; hosted emulators are better suited to narrow app-launch and onboarding contracts.
 6. Required checks for branch protection should include `lifecycle-e2e-first-run`.
 

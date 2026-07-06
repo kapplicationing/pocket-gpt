@@ -1,6 +1,6 @@
 # Evidence Index
 
-Last updated: 2026-03-10
+Last updated: 2026-07-06
 
 This index is the canonical retained evidence inventory after prune.
 
@@ -12,6 +12,14 @@ This index is the canonical retained evidence inventory after prune.
 4. Full history remains recoverable via git.
 
 ## Retained Evidence Sets
+
+### Current CI And Nightly Baseline (`main`, 2026-07)
+
+- `main` is synchronized with `origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522` (`Guard hardware truth lane runner availability (#9)`).
+- Latest main push CI passed: [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), created 2026-07-05T12:54:11Z.
+- Latest CodeQL run passed: [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), created 2026-07-05T12:54:11Z.
+- July 6 scheduled nightly passed at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147), created 2026-07-06T05:11:22Z. Emulator instrumentation, Maestro smoke, and first-run lifecycle jobs passed on API 30/33/34 coverage as configured. Treat the Maestro Cloud job in this run as configuration coverage only because `MAESTRO_CLOUD_API_KEY` was absent; a skipped cloud lane is not hosted product evidence.
+- Latest hardware-truth scheduled run before the runner guard landed was cancelled at [Hardware Truth Lane run 28731184944](https://github.com/kapplicationing/pocket-gpt/actions/runs/28731184944). PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) changed that lane to report runner availability explicitly before claiming hardware evidence.
 
 ### WP-09 (`docs/operations/evidence/wp-09/`)
 

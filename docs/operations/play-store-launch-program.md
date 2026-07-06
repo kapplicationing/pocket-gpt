@@ -1,12 +1,14 @@
 # PocketAgent Play Store Launch Program
 
-Last updated: 2026-05-04  
+Last updated: 2026-07-06
 Owner: Product + Tech Lead
 
 Mutable status stays in `docs/operations/execution-board.md`.
 Program learnings stay in `docs/operations/historical/launch-program-learnings.md`.
 
-Current status note: the controlled-MVP launch gate can now advance. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker has been cleared. The freshest preserved authoritative proof is still the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, and the freshest physical canary is the S22 provisioning pass at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`. Wireless Samsung `maestro` remains harness-class supporting evidence only. Hosted/default coverage is now current and green on the required targeted surfaces: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`. Strict `journey` still preserves a current-window S22 send-capture completion at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` with `phase=completed`, `placeholder_visible=false`, and `first_token_ms=180222`; keep that long-prefill shape as rollout/perf caution, not as a blocker. The emulator and A51 strict runs remain diagnostic-only. The disclosed `AI human-proxy` WP-13 packet now lands on `promote` for the controlled MVP. Branch-wise, local `main` is already fast-forwarded to the same tip as `codex/launch-readiness-implementation`; the remaining branch-closeout work is publication from local `main` to `origin/main`, not an internal merge between those two local refs.
+Current status note: the controlled-MVP launch gate can advance, and the July branch/publication cleanup is now closed. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker was cleared in the May launch-gate evidence set. `main` is clean and synchronized with `origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`; latest main push CI passed at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), latest CodeQL passed at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and July 6 nightly validation passed at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). The July nightly Maestro Cloud job skipped because `MAESTRO_CLOUD_API_KEY` was absent; that is an environment/configuration gap, not fresh hosted product evidence.
+
+The freshest preserved May launch evidence remains the promoted controlled-MVP evidence set: S906N `android-instrumented` at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, S22 provisioning at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, hosted account 1 `send-after-ready` at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, hosted account 2 model-management at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`, and strict journey at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` with `phase=completed`, `placeholder_visible=false`, and `first_token_ms=180222`. Keep that long-prefill shape as rollout/perf caution, not as a blocker. The disclosed `AI human-proxy` WP-13 packet lands on `promote` for the controlled MVP.
 
 Execution policy for the active program:
 
@@ -57,15 +59,16 @@ This program is complete only when:
 3. Preserve the current-window strict `journey` proof and treat its near-timeout first-token behavior as perf/risk context only.
 4. Carry the disclosed `AI human-proxy` packet truthfully and only replace it with human-moderated evidence if promotion needs stronger non-proxy closure.
 5. Finalize the Play Store submission package and decision package from the promoted evidence set.
-6. Publish local `main` to `origin/main` only from a clean worktree.
+6. Keep `main` synchronized with `origin/main`; the July publication step is complete at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`.
 
 ## Current Evidence Anchors
 
-1. Current local authoritative proof: `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`
-2. Current repo-side launch snapshot: regenerate it locally with `bash scripts/dev/launch-readiness.sh`
-3. Earlier hosted/default preserved passes: `tmp/maestro-cloud-first-run/junit.xml`, `tmp/maestro-cloud-s22/junit.xml`, `tmp/maestro-cloud-session-drawer/junit.xml`, `tmp/maestro-cloud-targeted/20260503T150550Z-scenario-model-management-split-smoke-account-1/status.json`, `tmp/maestro-cloud-targeted/20260503T150759Z-scenario-model-management-split-smoke-account-2/status.json`
-4. Current targeted cloud proof: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 current model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`. Older account-2 runtime-ready reruns that remain `PENDING` without app launch stay classified as infra noise rather than blocker evidence.
-5. Current strict `journey` authority note: `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` remains the preserved physical strict-journey proof even though the first token only appears at `180222ms` with `runtime_status=LOADING` and `model_status_detail=Prefill...`; `tmp/devctl-artifacts/2026-05-03/emulator-5554/journey/20260503-235023/journey-report.json` remains a diagnostic prefill-stall artifact; and the A51 is still non-authoritative because `tmp/devctl-artifacts/2026-05-04/A51_TCPIP/journey/20260504-004041/` still times out in send-capture after a 180s budget with `phase=timeout`, `runtime_status=LOADING`, and `model_status_detail=Prefill...`.
+1. Current repository baseline: `main`/`origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`, [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and green [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147).
+2. Preserved May local authoritative proof: `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`
+3. Current repo-side launch snapshot: regenerate it locally with `bash scripts/dev/launch-readiness.sh`
+4. Earlier hosted/default preserved passes: `tmp/maestro-cloud-first-run/junit.xml`, `tmp/maestro-cloud-s22/junit.xml`, `tmp/maestro-cloud-session-drawer/junit.xml`, `tmp/maestro-cloud-targeted/20260503T150550Z-scenario-model-management-split-smoke-account-1/status.json`, `tmp/maestro-cloud-targeted/20260503T150759Z-scenario-model-management-split-smoke-account-2/status.json`
+5. Current targeted cloud proof: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 current model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`. Older account-2 runtime-ready reruns that remain `PENDING` without app launch stay classified as infra noise rather than blocker evidence.
+6. Current strict `journey` authority note: `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` remains the preserved physical strict-journey proof even though the first token only appears at `180222ms` with `runtime_status=LOADING` and `model_status_detail=Prefill...`; `tmp/devctl-artifacts/2026-05-03/emulator-5554/journey/20260503-235023/journey-report.json` remains a diagnostic prefill-stall artifact; and the A51 is still non-authoritative because `tmp/devctl-artifacts/2026-05-04/A51_TCPIP/journey/20260504-004041/` still times out in send-capture after a 180s budget with `phase=timeout`, `runtime_status=LOADING`, and `model_status_detail=Prefill...`.
 
 ## Current Execution Graph
 
@@ -152,9 +155,9 @@ Dependencies:
 
 Current work:
 
-1. Keep local `main` and `codex/launch-readiness-implementation` recognized as the same launch tip.
-2. Keep `cursor/cloud-agent-1775007300791-5ig66` out of the launch path unless a specific change is deliberately extracted.
-3. Publish by pushing local `main` to `origin/main` after final gate review from a clean worktree.
+1. Closed for the July branch stack: local `main` and `origin/main` are synchronized at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`.
+2. Keep any future non-main branches out of the launch path unless a specific change is deliberately extracted and reviewed.
+3. Reopen this stream only when a new release branch, unmerged worktree, or publication delta appears.
 
 ## Parallel Agent Support Topology
 

@@ -1,6 +1,6 @@
 # Execution Board
 
-Last updated: 2026-05-04
+Last updated: 2026-07-06
 
 This is the single mutable board for planning and delivery.
 
@@ -28,12 +28,18 @@ Engineering and quality excellence are mandatory.
 - Program learnings: `docs/operations/historical/launch-program-learnings.md`
 - Command/process canon: `scripts/dev/README.md`, `docs/testing/test-strategy.md`, `docs/testing/runbooks.md`
 
+## Current Status Snapshot
+
+`main` is clean and synchronized with `origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522` (`Guard hardware truth lane runner availability (#9)`). Latest main push CI passed at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466), latest CodeQL passed at [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204), and July 6 nightly validation passed at [Nightly Validation run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147). Treat the nightly Maestro Cloud job as skipped configuration coverage because `MAESTRO_CLOUD_API_KEY` was absent, not as hosted product proof.
+
+Branch/publication hygiene is closed for the current `codex/simplify-model-selection` and post-merge CI cleanup stack: merged PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4), [#5](https://github.com/kapplicationing/pocket-gpt/pull/5), [#6](https://github.com/kapplicationing/pocket-gpt/pull/6), [#7](https://github.com/kapplicationing/pocket-gpt/pull/7), [#8](https://github.com/kapplicationing/pocket-gpt/pull/8), and [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) are all on `main`.
+
 ## Work Packages
 
 | ID | Work Package | Status | Notes |
 |---|---|---|---|
 | WP-00 .. WP-08 | Foundation through launch prep packages | Done | Historical evidence summarized in `docs/operations/evidence/index.md` |
-| WP-09 | Distribution plan and beta operations | In Progress | Active full evidence retained in `docs/operations/evidence/wp-09/` |
+| WP-09 | Distribution plan and beta operations | In Progress | Active full evidence retained in `docs/operations/evidence/wp-09/`; current CI/nightly run links live in `docs/operations/evidence/index.md` |
 | WP-10 | Voice limited-beta rail | Ready | Kept in locked launch scope for controlled/closed-track use; broad public claims remain excluded pending evidence + claim parity |
 | WP-11 | Android MVP UX package | Done | Historical evidence summarized in `docs/operations/evidence/index.md` |
 | WP-12 | Backend production runtime closure | Done | Production-claim-critical evidence retained in `docs/operations/evidence/wp-12/` |
@@ -61,6 +67,11 @@ None.
 
 ### Done (Recent)
 
+- [x] Dynamic Hugging Face search/import and follow-up CI stabilization stack landed on `main` through PRs #4-#9.
+- [x] Branch/publication hygiene is closed for the current July stack: local `main` is clean and synchronized with `origin/main` at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`.
+- [x] Latest main push CI and CodeQL are green at [CI run 28741453466](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453466) and [CodeQL run 28741453204](https://github.com/kapplicationing/pocket-gpt/actions/runs/28741453204).
+- [x] July 6 Nightly Validation is green at [run 28769302147](https://github.com/kapplicationing/pocket-gpt/actions/runs/28769302147), with the Maestro Cloud lane explicitly skipped because `MAESTRO_CLOUD_API_KEY` was unavailable.
+- [x] Nightly hardware runner availability is guarded by PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9); missing self-hosted runner capacity is now reported as lane availability, not confused with product failure.
 - [x] PROD-09 soft-gate pilot policy published
 - [x] UX-12 recovery journey spec published
 - [x] ENG-21 interaction architecture refactor landed
@@ -95,7 +106,7 @@ None.
 2. Preserve the current hosted/default pass roots and the S22 physical canary/journey artifacts as the publication evidence set.
 3. Use the narrow Samsung canary only for OEM/runtime confirmation; do not reopen local wireless Maestro as launch authority.
 4. Carry the disclosed `AI human-proxy` packet as the closed moderation-backed leg for the controlled MVP.
-5. Execute final publication/package steps from the now-promoted evidence set, then publish local `main` to `origin/main` from a clean worktree.
+5. Execute final publication/package steps from the now-promoted evidence set. The July branch publication step is already complete; keep future publication changes on reviewed PRs unless the release owner explicitly authorizes direct-main docs-only maintenance.
 6. Keep the approved `AI human-proxy` bundle documented as a fallback closure path only; it never substitutes for machine-verifiable evidence.
 
 ### Parallel Streams
@@ -103,7 +114,7 @@ None.
 1. Stream A, closed: hosted/default machine-verifiable evidence closure (`QA-11`, `QA-14`, `QA-15`, `QA-13`) is sufficient for the controlled-MVP decision.
 2. Stream B, closed for controlled MVP: the disclosed `AI human-proxy` fallback packet now supplies the moderation-backed leg when moderators are unavailable.
 3. Stream C, active: support/claim/package readiness (`PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, `PROD-13`).
-4. Stream D, active: branch/publication hygiene. Audit `origin/main..main`, keep `cursor/cloud-agent-1775007300791-5ig66` out of the launch closeout path unless a specific change is deliberately extracted, and publish `main` from the promoted evidence state.
+4. Stream D, closed for the July branch stack: `main` and `origin/main` are synchronized at `0ce97c7f37fdf115d0d4ad2c1f0f71a9e2443522`; future branch hygiene work only reopens when a new release branch or unmerged worktree appears.
 
 ### Parallel Agent Support Topology
 
@@ -133,5 +144,5 @@ Full owner/dependency split: `docs/operations/play-store-launch-program.md`
 
 1. Active package evidence belongs in `docs/operations/evidence/wp-09/` and `docs/operations/evidence/wp-13/`.
 2. Production-claim-critical WP-12 evidence remains in `docs/operations/evidence/wp-12/`.
-3. Historical package detail is summarized in `docs/operations/evidence/index.md`.
-4. Current local authoritative lane evidence is anchored at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, and the launch-readiness snapshot should be regenerated locally with `bash scripts/dev/launch-readiness.sh` before publication.
+3. Current CI/nightly evidence and historical package detail are summarized in `docs/operations/evidence/index.md`.
+4. Older May local artifact paths remain provenance when present, but they are not the current repository sync signal. Use the latest GitHub CI, CodeQL, nightly, hardware-runner, and targeted device/cloud artifacts for any new promotion or release decision.

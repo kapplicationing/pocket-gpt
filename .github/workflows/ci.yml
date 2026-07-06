@@ -417,6 +417,28 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug
 
+      - name: Free disk before lifecycle emulator
+        run: |
+          set -euo pipefail
+          echo "Disk before lifecycle emulator cleanup:"
+          df -h
+
+          # The lifecycle job builds the native x86_64 APK before the emulator
+          # action installs an API 33 system image. Keep only the packaged APK
+          # and remove build/cache payloads that are no longer needed.
+          rm -rf "${ANDROID_HOME}/ndk" "${ANDROID_HOME}/cmake"
+          rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          rm -rf "${HOME}/.gradle/caches" "${HOME}/.gradle/daemon" "${HOME}/.gradle/native" "${HOME}/.gradle/workers"
+          find packages -type d -name build -prune -exec rm -rf '{}' +
+          find apps -mindepth 2 -type d -name build ! -path 'apps/mobile-android/build' -prune -exec rm -rf '{}' +
+          rm -rf build
+          find apps/mobile-android/build -mindepth 1 -maxdepth 1 ! -name outputs -exec rm -rf '{}' +
+          find apps/mobile-android/build/outputs -mindepth 1 -maxdepth 1 ! -name apk -exec rm -rf '{}' +
+          find apps/mobile-android/build/outputs/apk -mindepth 1 -maxdepth 1 ! -name debug -exec rm -rf '{}' +
+
+          echo "Disk after lifecycle emulator cleanup:"
+          df -h
+
       - name: Run first-run lifecycle E2E with bounded script retry
         id: lifecycle_run
         uses: reactivecircus/android-emulator-runner@v2

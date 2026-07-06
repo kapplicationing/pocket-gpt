@@ -205,16 +205,16 @@ run_attempt() {
   fi
   capture_logcat "${logcat_file}" || true
   if [[ -f "${logcat_file}" ]] && detect_app_crash_signatures "${logcat_file}" "${crash_file}"; then
-    echo "::error::Lifecycle E2E attempt ${attempt} detected app crash signatures in logcat."
+    echo "Lifecycle E2E attempt ${attempt} detected app crash signatures in logcat."
     if [[ "${failure_state_captured}" != "true" ]]; then
       capture_failure_state "${attempt_dir}"
     fi
     rc=86
   fi
   if [[ ${rc} -eq 124 ]]; then
-    echo "::warning::Lifecycle E2E attempt ${attempt} timed out after ${ATTEMPT_TIMEOUT_SEC}s."
+    echo "Lifecycle E2E attempt ${attempt} timed out after ${ATTEMPT_TIMEOUT_SEC}s."
   elif [[ ${rc} -eq 86 ]]; then
-    echo "::warning::Lifecycle E2E attempt ${attempt} failed due to crash signature detection."
+    echo "Lifecycle E2E attempt ${attempt} failed due to crash signature detection."
   fi
   return ${rc}
 }
@@ -225,7 +225,7 @@ if run_attempt 1; then
   exit 0
 fi
 
-echo "::warning::First lifecycle E2E attempt failed; retrying once after clean-state reset."
+echo "::notice::First lifecycle E2E attempt failed; retrying once after clean-state reset."
 printf "decision=%s\nreason=%s\nfirst_attempt_failed=%s\n" \
   "run" "${RISK_REASON}" "true" > "${OUT_DIR}/retry-summary.txt"
 
@@ -243,4 +243,5 @@ if run_attempt 2; then
 fi
 
 echo "final_attempt=none" >> "${OUT_DIR}/retry-summary.txt"
+echo "::error::Lifecycle E2E failed after one clean-state retry. See ${OUT_DIR}/attempt-* artifacts."
 exit 1

@@ -2,6 +2,7 @@ appId: com.pocketagent.android
 ---
 - runFlow: dismiss-system-overlays.yaml
 - hideKeyboard
+- runFlow: dismiss-system-overlays.yaml
 - runFlow:
     when:
       visible:
@@ -21,6 +22,8 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_next"
     commands:
+      - runFlow: dismiss-system-overlays.yaml
+      - hideKeyboard
       - tapOn:
           id: "onboarding_next"
 - runFlow:
@@ -28,6 +31,8 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_next"
     commands:
+      - runFlow: dismiss-system-overlays.yaml
+      - hideKeyboard
       - tapOn:
           id: "onboarding_next"
 - runFlow:
@@ -35,6 +40,8 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_skip"
     commands:
+      - runFlow: dismiss-system-overlays.yaml
+      - hideKeyboard
       - tapOn:
           id: "onboarding_skip"
 - runFlow:
@@ -42,6 +49,8 @@ appId: com.pocketagent.android
       visible:
         id: "onboarding_get_started"
     commands:
+      - runFlow: dismiss-system-overlays.yaml
+      - hideKeyboard
       - tapOn:
           id: "onboarding_get_started"
 - runFlow:
@@ -50,4 +59,8 @@ appId: com.pocketagent.android
       notVisible:
         id: "onboarding_get_started"
     commands:
+      - runFlow: dismiss-system-overlays.yaml
+      - hideKeyboard
       - tapOn: "Get started"
+- runFlow: dismiss-system-overlays.yaml
+- hideKeyboard

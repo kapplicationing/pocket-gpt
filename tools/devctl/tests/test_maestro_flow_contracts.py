@@ -263,11 +263,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn("runFlow: bootstrap-clean-start.yaml", text)
         self.assertIn("runFlow: settle-ready-shell.yaml", text)
         bootstrap_clean_text = REPO_ROOT.joinpath("tests/maestro/shared/bootstrap-clean-start.yaml").read_text(encoding="utf-8")
-        self.assertEqual(
-            1,
+        self.assertGreaterEqual(
             bootstrap_clean_text.count("hideKeyboard"),
-            "Clean-start onboarding should not hide the keyboard around Get started because onboarding has no text input.",
+            3,
+            "Clean-start onboarding must normalize late IME/system overlays around onboarding actions.",
         )
+        self.assertGreaterEqual(bootstrap_clean_text.count("runFlow: dismiss-system-overlays.yaml"), 5)
         self.assertGreaterEqual(bootstrap_clean_text.count('visible:\n        id: "onboarding_next"'), 2)
         self.assertIn('visible:\n        id: "onboarding_skip"', bootstrap_clean_text)
         self.assertIn('visible:\n        id: "onboarding_get_started"', bootstrap_clean_text)

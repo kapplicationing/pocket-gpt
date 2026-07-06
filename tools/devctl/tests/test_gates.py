@@ -205,6 +205,10 @@ class GatesTest(unittest.TestCase):
                     str(Path(tmp) / "merge-unblock-report.json"),
                     "--risk-label",
                     "risk:runtime",
+                    "--event-name",
+                    "pull_request",
+                    "--ref-name",
+                    "feature",
                 ]
             )
             original_collect_changed_files = gates._collect_changed_files

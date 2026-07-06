@@ -1,6 +1,6 @@
 # Testing Runbooks
 
-Last updated: 2026-05-04
+Last updated: 2026-07-06
 
 These runbooks are short task guides. Strategy and gates stay in `docs/testing/test-strategy.md`.
 

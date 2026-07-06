@@ -20,7 +20,9 @@ _LIFECYCLE_HIGH_RISK_PATTERNS = (
     "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/**",
     "packages/app-runtime/**",
     "packages/native-bridge/**",
+    "scripts/ci/run_lifecycle_e2e.sh",
     "tests/maestro/scenario-first-run-download-chat.yaml",
+    "tests/maestro/shared/**",
     ".github/workflows/ci.yml",
 )
 _STAGE2_QUICK_OPTIMIZATION_PATTERNS = (

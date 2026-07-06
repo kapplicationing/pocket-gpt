@@ -34,6 +34,31 @@ class GatesTest(unittest.TestCase):
         self.assertTrue(should_run)
         self.assertIn("risk-label", reason)
 
+    def test_lifecycle_risk_paths_include_ci_wrapper_and_shared_flows(self) -> None:
+        for path in (
+            "scripts/ci/run_lifecycle_e2e.sh",
+            "tests/maestro/shared/bootstrap-launch-default-model.yaml",
+        ):
+            with self.subTest(path=path):
+                should_run, reason = gates._should_run_lifecycle(
+                    event_name="pull_request",
+                    ref_name="feature",
+                    risk_labels=[],
+                    changed_files=[path],
+                    force=False,
+                    skip=False,
+                )
+                self.assertTrue(should_run)
+                self.assertIn("high-risk-path", reason)
+
+    def test_ci_lifecycle_risk_paths_stay_in_sync_with_devctl(self) -> None:
+        workflow_text = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+        for pattern in gates._LIFECYCLE_HIGH_RISK_PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertIn(f'- "{pattern}"', workflow_text)
+
     def test_should_run_stage2_quick_for_optimization_sensitive_path(self) -> None:
         should_run, reason = gates._should_run_stage2_quick(
             risk_labels=[],

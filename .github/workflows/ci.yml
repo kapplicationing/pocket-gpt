@@ -2,6 +2,14 @@ name: CI
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - edited
+      - labeled
+      - unlabeled
   push:
     branches:
       - main
@@ -63,7 +71,9 @@ jobs:
               - "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/**"
               - "packages/app-runtime/**"
               - "packages/native-bridge/**"
+              - "scripts/ci/run_lifecycle_e2e.sh"
               - "tests/maestro/scenario-first-run-download-chat.yaml"
+              - "tests/maestro/shared/**"
               - ".github/workflows/ci.yml"
 
   lifecycle-risk:

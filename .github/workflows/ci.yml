@@ -282,6 +282,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
+      - name: Install native Android SDK components
+        run: bash scripts/ci/install_android_sdk_components.sh "cmake;3.22.1"
+
       - name: Assemble debug APK with native build enabled
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleDebug
 
@@ -416,6 +419,9 @@ jobs:
         run: |
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "${HOME}/.maestro/bin" >> "${GITHUB_PATH}"
+
+      - name: Install native Android SDK components
+        run: bash scripts/ci/install_android_sdk_components.sh "cmake;3.22.1"
 
       - name: Assemble debug APK
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug

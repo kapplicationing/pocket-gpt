@@ -470,6 +470,21 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('tapOn: "Cancel"', local_text)
         self.assertEqual(local_text, cloud_path.read_text(encoding="utf-8"))
 
+    def test_lifecycle_ci_wrapper_recovers_known_non_app_system_overlays(self) -> None:
+        script_text = (REPO_ROOT / "scripts/ci/run_lifecycle_e2e.sh").read_text(encoding="utf-8")
+        self.assertIn("LIFECYCLE_E2E_SYSTEM_OVERLAY_RETRIES", script_text)
+        self.assertIn("com.google.android.apps.nexuslauncher", script_text)
+        self.assertIn("Pixel Launcher isn't responding", script_text)
+        self.assertIn("android:id/aerr_wait", script_text)
+        self.assertIn("stabilize_system_ui", script_text)
+        self.assertIn("am force-stop", script_text)
+        self.assertIn("non-app system overlay", script_text)
+        self.assertNotIn(" rg ", script_text)
+        self.assertNotIn("rg -", script_text)
+        self.assertIn("launcher_overlay_detected=$?", script_text)
+        self.assertIn("crash_detected=$?", script_text)
+        self.assertIn("second_rc=$?", script_text)
+
     def test_settle_top_bar_shell_normalizes_ime_before_asserting_top_bar(self) -> None:
         helper_paths = (
             REPO_ROOT / "tests/maestro/shared/settle-top-bar-shell.yaml",

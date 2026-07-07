@@ -11,6 +11,9 @@ ATTEMPT_TIMEOUT_SEC="${LIFECYCLE_E2E_ATTEMPT_TIMEOUT_SEC:-1200}"
 ADB_TIMEOUT_SEC="${LIFECYCLE_E2E_ADB_TIMEOUT_SEC:-120}"
 TIMEOUT_KILL_AFTER="${LIFECYCLE_E2E_KILL_AFTER_SEC:-30}"
 CRASH_SIGNATURE_REGEX="${LIFECYCLE_E2E_CRASH_SIGNATURE_REGEX:-SIGSEGV|Abort message|nativeLoadModel failed|UI-RUNTIME-001|FATAL EXCEPTION}"
+SYSTEM_OVERLAY_RETRIES="${LIFECYCLE_E2E_SYSTEM_OVERLAY_RETRIES:-1}"
+SYSTEM_OVERLAY_RC=87
+LAUNCHER_PACKAGE="${LIFECYCLE_E2E_LAUNCHER_PACKAGE:-com.google.android.apps.nexuslauncher}"
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 
 usage() {
@@ -118,7 +121,7 @@ detect_app_crash_signatures() {
   local candidate_file="${matches_file}.candidate"
   : > "${matches_file}"
 
-  if ! rg -n "${CRASH_SIGNATURE_REGEX}" "${log_file}" > "${candidate_file}" 2>/dev/null; then
+  if ! grep -E -n "${CRASH_SIGNATURE_REGEX}" "${log_file}" > "${candidate_file}" 2>/dev/null; then
     return 1
   fi
 
@@ -167,6 +170,29 @@ detect_app_crash_signatures() {
   return 0
 }
 
+stabilize_system_ui() {
+  # Fresh Google APIs emulators occasionally surface Pixel Launcher ANR dialogs
+  # over the app during first-run Maestro waits. Keep this scoped to known
+  # non-app system UI so real product failures still fail the lifecycle gate.
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell am force-stop "${LAUNCHER_PACKAGE}" >/dev/null 2>&1 || true
+}
+
+failure_has_launcher_anr_overlay() {
+  local attempt_dir="$1"
+  local hierarchy_file="${attempt_dir}/failure-window.xml"
+  local log_file="${attempt_dir}/logcat.txt"
+
+  if [[ -f "${hierarchy_file}" ]] && grep -E -q "Pixel Launcher isn't responding|android:id/aerr_wait|android:id/aerr_close" "${hierarchy_file}"; then
+    return 0
+  fi
+  if [[ -f "${log_file}" ]] && grep -E -q "Application Not Responding: ${LAUNCHER_PACKAGE}|ANR in ${LAUNCHER_PACKAGE}" "${log_file}"; then
+    return 0
+  fi
+  return 1
+}
+
 mkdir -p "${OUT_DIR}"
 if [[ -z "${TIMEOUT_BIN}" ]]; then
   echo "::warning::No timeout binary found (timeout/gtimeout); lifecycle script will run without hard time bounds."
@@ -184,51 +210,88 @@ if ! with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" install -r "${A
   echo "Failed to install APK on ${DEVICE_SERIAL} within ${ADB_TIMEOUT_SEC}s." >&2
   exit 1
 fi
+stabilize_system_ui
 
 run_attempt() {
   local attempt="$1"
   local attempt_dir="${OUT_DIR}/attempt-${attempt}"
   local logcat_file="${attempt_dir}/logcat.txt"
   local crash_file="${attempt_dir}/crash-signatures.txt"
+  set +e
   mkdir -p "${attempt_dir}"
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" logcat -c >/dev/null || true
-  set +e
   with_timeout "${ATTEMPT_TIMEOUT_SEC}" maestro --device "${DEVICE_SERIAL}" test "${FLOW_PATH}" --format junit --debug-output "${attempt_dir}/debug" \
     > "${attempt_dir}/junit.xml" \
     2> "${attempt_dir}/maestro-stderr.log"
   local rc=$?
-  set -e
   local failure_state_captured=false
   if [[ ${rc} -ne 0 ]]; then
     capture_failure_state "${attempt_dir}"
     failure_state_captured=true
   fi
   capture_logcat "${logcat_file}" || true
-  if [[ -f "${logcat_file}" ]] && detect_app_crash_signatures "${logcat_file}" "${crash_file}"; then
+  local crash_detected=1
+  if [[ -f "${logcat_file}" ]]; then
+    detect_app_crash_signatures "${logcat_file}" "${crash_file}"
+    crash_detected=$?
+  fi
+  if [[ ${crash_detected} -eq 0 ]]; then
     echo "Lifecycle E2E attempt ${attempt} detected app crash signatures in logcat."
     if [[ "${failure_state_captured}" != "true" ]]; then
       capture_failure_state "${attempt_dir}"
     fi
     rc=86
   fi
+  if [[ ${rc} -ne 0 && ${rc} -ne 86 ]]; then
+    local launcher_overlay_detected=1
+    failure_has_launcher_anr_overlay "${attempt_dir}"
+    launcher_overlay_detected=$?
+    if [[ ${launcher_overlay_detected} -eq 0 ]]; then
+      echo "Lifecycle E2E attempt ${attempt} was blocked by a ${LAUNCHER_PACKAGE} system ANR overlay."
+      rc=${SYSTEM_OVERLAY_RC}
+    fi
+  fi
   if [[ ${rc} -eq 124 ]]; then
     echo "Lifecycle E2E attempt ${attempt} timed out after ${ATTEMPT_TIMEOUT_SEC}s."
   elif [[ ${rc} -eq 86 ]]; then
     echo "Lifecycle E2E attempt ${attempt} failed due to crash signature detection."
+  elif [[ ${rc} -eq ${SYSTEM_OVERLAY_RC} ]]; then
+    echo "Lifecycle E2E attempt ${attempt} failed due to non-app system overlay interference."
   fi
   return ${rc}
 }
 
-if run_attempt 1; then
+set +e
+run_attempt 1
+first_rc=$?
+set -e
+if [[ ${first_rc} -eq 0 ]]; then
   printf "decision=%s\nreason=%s\nfirst_attempt_failed=%s\nfinal_attempt=%s\n" \
     "run" "${RISK_REASON}" "false" "1" > "${OUT_DIR}/retry-summary.txt"
   exit 0
 fi
 
-echo "::notice::First lifecycle E2E attempt failed; retrying once after clean-state reset."
+echo "::notice::First lifecycle E2E attempt failed; classifying retry path."
 printf "decision=%s\nreason=%s\nfirst_attempt_failed=%s\n" \
   "run" "${RISK_REASON}" "true" > "${OUT_DIR}/retry-summary.txt"
 
+system_overlay_retry_count=0
+while [[ ${first_rc} -eq ${SYSTEM_OVERLAY_RC} && ${system_overlay_retry_count} -lt ${SYSTEM_OVERLAY_RETRIES} ]]; do
+  system_overlay_retry_count=$((system_overlay_retry_count + 1))
+  echo "::notice::Lifecycle E2E was blocked by a non-app system overlay; retrying after emulator UI stabilization (${system_overlay_retry_count}/${SYSTEM_OVERLAY_RETRIES})."
+  printf "system_overlay_retry_%s=%s\n" "${system_overlay_retry_count}" "true" >> "${OUT_DIR}/retry-summary.txt"
+  stabilize_system_ui
+  set +e
+  run_attempt "1-system-overlay-${system_overlay_retry_count}"
+  first_rc=$?
+  set -e
+  if [[ ${first_rc} -eq 0 ]]; then
+    echo "final_attempt=1-system-overlay-${system_overlay_retry_count}" >> "${OUT_DIR}/retry-summary.txt"
+    exit 0
+  fi
+done
+
+echo "::notice::Retrying lifecycle E2E once after clean-state reset."
 with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell pm clear "${APP_ID}" >/dev/null || true
 with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" uninstall "${APP_ID}" >/dev/null || true
 with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" uninstall "${APP_TEST_ID}" >/dev/null || true
@@ -236,8 +299,13 @@ if ! with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" install -r "${A
   echo "Failed to reinstall APK on ${DEVICE_SERIAL} within ${ADB_TIMEOUT_SEC}s." >&2
   exit 1
 fi
+stabilize_system_ui
 
-if run_attempt 2; then
+set +e
+run_attempt 2
+second_rc=$?
+set -e
+if [[ ${second_rc} -eq 0 ]]; then
   echo "final_attempt=2" >> "${OUT_DIR}/retry-summary.txt"
   exit 0
 fi

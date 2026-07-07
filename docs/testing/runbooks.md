@@ -407,7 +407,10 @@ bash scripts/ci/run_lifecycle_e2e.sh --device <serial> local-manual
 
 `scripts/ci/run_lifecycle_e2e.sh` is the CI retry/artifact/crash-signature wrapper. It
 honors `--device`, `ADB_SERIAL`, `ANDROID_SERIAL`, and `DEVICE_SERIAL`; without one of
-those, exactly one authorized adb target must be attached.
+those, exactly one authorized adb target must be attached. The wrapper preserves
+first-failure artifacts, detects app crash signatures, and performs a bounded retry for
+known non-app emulator overlays such as Pixel Launcher ANR dialogs before treating the
+failure as product evidence.
 
 For a broader local lane without exact CI emulator parity, run:
 

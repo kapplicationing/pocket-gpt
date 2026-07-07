@@ -370,9 +370,11 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
+        val rowTag = modelLibraryModelRowTag("qwen3.5-0.8b-q4", "q4_0")
         val loadTag = modelLibraryLoadButtonTag("qwen3.5-0.8b-q4", "q4_0")
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag(loadTag))
+            .performScrollToNode(hasTestTag(rowTag))
+        composeRule.onNodeWithTag(rowTag).assertIsDisplayed()
         composeRule.onNodeWithTag(loadTag).assertIsDisplayed()
         composeRule.onNodeWithTag(loadTag).performClick()
         composeRule.runOnIdle {
@@ -403,9 +405,11 @@ class ModelManagementSheetComposeContractTest {
             }
         }
 
+        val rowTag = modelLibraryModelRowTag("qwen3-0.6b-q4_k_m", "q4_k_m")
         val downloadTag = modelLibraryDownloadButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag(downloadTag))
+            .performScrollToNode(hasTestTag(rowTag))
+        composeRule.onNodeWithTag(rowTag).assertIsDisplayed()
         composeRule.onNodeWithTag(downloadTag).assertIsDisplayed()
         composeRule.onNodeWithTag(downloadTag).performClick()
         composeRule.runOnIdle {

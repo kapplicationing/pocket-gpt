@@ -15,3 +15,41 @@ appId: com.pocketagent.android
 - extendedWaitUntil:
     notVisible: "Loading…"
     timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Loading..."
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Cancel"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Cancelling"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Cancelling..."
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Sending"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible: "Update"
+    timeout: 180000
+- extendedWaitUntil:
+    visible:
+      id: "composer_input"
+    timeout: 180000
+- extendedWaitUntil:
+    visible:
+      id: "send_button"
+    timeout: 180000
+- assertNotVisible: "Setup"
+- assertNotVisible: "Retry"
+- assertNotVisible: "Refresh"
+- assertNotVisible: "Loading…"
+- assertNotVisible: "Loading..."
+- assertNotVisible: "Cancel"
+- assertNotVisible: "Cancelling"
+- assertNotVisible: "Cancelling..."
+- assertNotVisible: "Sending"
+- assertNotVisible: "Update"
+- assertNotVisible:
+    id: "chat_gate_inline_card"

@@ -119,13 +119,14 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     f"{helper_path.relative_to(REPO_ROOT)} must keep a runtime recovery path.",
                 )
                 self.assertIn('inputText: "qwen3-0.6b-q4_k_m"', helper_chain_text)
+                self.assertIn('id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertIn('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertIn(
-                    'scrollUntilVisible:\n    centerElement: true\n    element:\n      text: "Qwen3 0.6B (Q4_K_M)"',
+                    'scrollUntilVisible:\n    centerElement: true\n    element:\n      id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"',
                     helper_chain_text,
                 )
                 self.assertLess(
-                    helper_chain_text.index('text: "Qwen3 0.6B (Q4_K_M)"'),
+                    helper_chain_text.index('id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"'),
                     helper_chain_text.index('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"'),
                     "launch-default helper must scroll to the stable model row before evaluating state-specific actions.",
                 )
@@ -173,6 +174,25 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 self.assertIn('notVisible: "Retry"', text)
                 self.assertIn('notVisible: "Refresh"', text)
                 self.assertIn('notVisible: "Loading…"', text)
+                self.assertIn('notVisible: "Loading..."', text)
+                self.assertIn('notVisible: "Cancel"', text)
+                self.assertIn('notVisible: "Cancelling"', text)
+                self.assertIn('notVisible: "Cancelling..."', text)
+                self.assertIn('notVisible: "Sending"', text)
+                self.assertIn('notVisible: "Update"', text)
+                self.assertIn('visible:\n      id: "composer_input"', text)
+                self.assertIn('visible:\n      id: "send_button"', text)
+                self.assertNotIn('visible: "Send"', text)
+                self.assertLess(
+                    text.index('visible:\n      id: "send_button"'),
+                    text.rindex('assertNotVisible: "Setup"'),
+                    "runtime readiness must re-check blocked labels after the id-scoped send button appears.",
+                )
+                self.assertLess(
+                    text.index('visible:\n      id: "send_button"'),
+                    text.rindex('assertNotVisible: "Refresh"'),
+                    "runtime readiness must re-check blocked labels after the id-scoped send button appears.",
+                )
                 self.assertIn('visible: "Large download on metered network"', helper_chain_text)
                 self.assertIn('tapOn: "Continue download"', helper_chain_text)
                 self.assertNotIn('notVisible: "No downloaded models yet"', helper_chain_text)

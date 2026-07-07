@@ -154,6 +154,9 @@ jobs:
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "${HOME}/.maestro/bin" >> "${GITHUB_PATH}"
 
+      - name: Install native Android SDK components
+        run: bash scripts/ci/install_android_sdk_components.sh "cmake;3.22.1"
+
       - name: Assemble debug APK
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug
 
@@ -214,6 +217,10 @@ jobs:
             echo "Maestro Cloud key missing; cloud supplemental coverage skipped by configuration." >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
+
+      - name: Install native Android SDK components
+        if: env.MAESTRO_CLOUD_API_KEY != ''
+        run: bash scripts/ci/install_android_sdk_components.sh "cmake;3.22.1"
 
       - name: Assemble debug APK
         if: env.MAESTRO_CLOUD_API_KEY != ''

@@ -1,0 +1,17 @@
+appId: com.pocketagent.android
+---
+- tapOn:
+    id: "composer_input"
+- longPressOn:
+    id: "composer_input"
+- runFlow:
+    when:
+      visible: "Select all"
+    commands:
+      - tapOn: "Select all"
+- runFlow:
+    when:
+      visible: "Select All"
+    commands:
+      - tapOn: "Select All"
+- eraseText: 100

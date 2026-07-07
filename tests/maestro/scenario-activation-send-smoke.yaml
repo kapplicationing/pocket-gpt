@@ -14,9 +14,7 @@ tags:
     timeout: 10000
 - tapOn:
     id: "create_session_button"
-- tapOn:
-    id: "composer_input"
-- eraseText
+- runFlow: shared/clear-composer-input.yaml
 - inputText: "Reply with exactly: ACTIVATION_SMOKE_OK"
 - extendedWaitUntil:
     notVisible: "Loading…"

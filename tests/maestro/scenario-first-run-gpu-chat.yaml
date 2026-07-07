@@ -32,9 +32,7 @@ tags:
 - extendedWaitUntil:
     visible: "Send"
     timeout: 60000
-- tapOn:
-    id: "composer_input"
-- eraseText
+- runFlow: shared/clear-composer-input.yaml
 - inputText: "gpu flow smoke"
 - tapOn:
     id: "send_button"

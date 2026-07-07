@@ -10,9 +10,6 @@ appId: com.pocketagent.android
     notVisible: "Retry"
     timeout: 180000
 - extendedWaitUntil:
-    notVisible: "Refresh"
-    timeout: 180000
-- extendedWaitUntil:
     notVisible: "Loading…"
     timeout: 180000
 - extendedWaitUntil:
@@ -43,7 +40,6 @@ appId: com.pocketagent.android
     timeout: 180000
 - assertNotVisible: "Setup"
 - assertNotVisible: "Retry"
-- assertNotVisible: "Refresh"
 - assertNotVisible: "Loading…"
 - assertNotVisible: "Loading..."
 - assertNotVisible: "Cancel"

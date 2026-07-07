@@ -9,7 +9,7 @@ appId: com.pocketagent.android
 - scrollUntilVisible:
     centerElement: true
     element:
-      text: "qwen3-0.6b-q4_k_m"
+      id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"
     direction: DOWN
     timeout: 60000
 - runFlow:

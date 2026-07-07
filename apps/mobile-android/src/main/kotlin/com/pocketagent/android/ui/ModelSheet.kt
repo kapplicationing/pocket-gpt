@@ -1510,7 +1510,14 @@ private fun DownloadedModelCard(
         busy -> stringResource(id = R.string.ui_load_button_disabled_busy)
         else -> null
     }
-    Card {
+    Card(
+        modifier = Modifier.testTag(
+            modelLibraryModelRowTag(
+                modelId = version.modelId,
+                version = version.version,
+            ),
+        ),
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
             verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
@@ -1616,7 +1623,14 @@ private fun AvailableModelCard(
     val reducedMotion = LocalReduceMotion.current
     val haptic = rememberHaptic()
     val hapticConfirm = rememberLongPressHaptic()
-    Card {
+    Card(
+        modifier = Modifier.testTag(
+            modelLibraryModelRowTag(
+                modelId = version.modelId,
+                version = version.version,
+            ),
+        ),
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
             verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
@@ -2054,6 +2068,13 @@ internal fun modelLibraryLoadButtonTag(modelId: String, version: String): String
 
 internal fun modelLibraryDownloadButtonTag(modelId: String, version: String): String =
     "model_library_download_${modelId}_${version}"
+
+internal fun modelLibraryModelRowTag(modelId: String, version: String): String =
+    if (isLaunchDefaultModelVersion(modelId, version)) {
+        "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"
+    } else {
+        "model_library_model_${modelId}_${version}"
+    }
 
 private fun modelLibraryLoadButtonModifier(modelId: String, version: String): Modifier {
     return if (isLaunchDefaultModelVersion(modelId, version)) {

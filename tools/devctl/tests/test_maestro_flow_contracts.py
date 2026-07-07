@@ -172,7 +172,6 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     self.assertIn('visible: "Get ready"', helper_chain_text)
                 self.assertIn('notVisible: "Setup"', text)
                 self.assertIn('notVisible: "Retry"', text)
-                self.assertIn('notVisible: "Refresh"', text)
                 self.assertIn('notVisible: "Loading…"', text)
                 self.assertIn('notVisible: "Loading..."', text)
                 self.assertIn('notVisible: "Cancel"', text)
@@ -188,11 +187,12 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     text.rindex('assertNotVisible: "Setup"'),
                     "runtime readiness must re-check blocked labels after the id-scoped send button appears.",
                 )
-                self.assertLess(
-                    text.index('visible:\n      id: "send_button"'),
-                    text.rindex('assertNotVisible: "Refresh"'),
-                    "runtime readiness must re-check blocked labels after the id-scoped send button appears.",
+                self.assertIn(
+                    'assertNotVisible:\n    id: "chat_gate_inline_card"',
+                    text,
                 )
+                self.assertNotIn('notVisible: "Refresh"', text)
+                self.assertNotIn('assertNotVisible: "Refresh"', text)
                 self.assertIn('visible: "Large download on metered network"', helper_chain_text)
                 self.assertIn('tapOn: "Continue download"', helper_chain_text)
                 self.assertNotIn('notVisible: "No downloaded models yet"', helper_chain_text)

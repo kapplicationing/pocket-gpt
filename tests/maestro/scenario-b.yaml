@@ -14,9 +14,7 @@ tags:
     visible: "Send"
     timeout: 180000
 - takeScreenshot: "scenario-b-03-after-diagnostics"
-- tapOn:
-    id: "composer_input"
-- eraseText
+- runFlow: shared/clear-composer-input.yaml
 - inputText: "Reply with exactly: CORE_B_OK"
 - tapOn:
     id: "send_button"

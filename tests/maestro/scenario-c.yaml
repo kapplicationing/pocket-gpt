@@ -8,9 +8,7 @@ tags:
 - runFlow: shared/bootstrap-runtime-ready.yaml
 - takeScreenshot: "ui-15-image-entry-visible-maestro"
 - assertVisible: "Attach image"
-- tapOn:
-    id: "composer_input"
-- eraseText
+- runFlow: shared/clear-composer-input.yaml
 - inputText: "Reply with exactly: CORE_C_OK"
 - tapOn:
     id: "send_button"

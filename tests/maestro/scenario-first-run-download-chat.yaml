@@ -17,9 +17,7 @@ tags:
       - runFlow: shared/wait-runtime-transition-idle.yaml
 - runFlow: shared/ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"
-- tapOn:
-    id: "composer_input"
-- eraseText
+- runFlow: shared/clear-composer-input.yaml
 - inputText: "download flow smoke"
 - tapOn:
     id: "send_button"

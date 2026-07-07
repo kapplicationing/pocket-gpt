@@ -7,9 +7,7 @@ tags:
 ---
 - runFlow: shared/bootstrap-runtime-ready.yaml
 - takeScreenshot: "ui-04-chat-ready-empty-maestro"
-- tapOn:
-    id: "composer_input"
-- eraseText
+- runFlow: shared/clear-composer-input.yaml
 - inputText: "Reply with exactly: CORE_A_OK"
 - takeScreenshot: "scenario-a-02-typed"
 - tapOn:

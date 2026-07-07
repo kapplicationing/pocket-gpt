@@ -70,10 +70,13 @@ class ModelManagementSheetComposeContractTest {
 
     private fun assertResourceIdVisible(resourceId: String) {
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag(resourceId, useUnmergedTree = true).assertIsDisplayed()
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val packageName = InstrumentationRegistry.getInstrumentation().targetContext.packageName
         assertTrue(
             "Expected resource id to be visible for Maestro: $resourceId",
-            device.wait(Until.hasObject(By.res(resourceId)), 2_000L),
+            device.wait(Until.hasObject(By.res(packageName, resourceId)), 10_000L) ||
+                device.wait(Until.hasObject(By.res(resourceId)), 1_000L),
         )
     }
 

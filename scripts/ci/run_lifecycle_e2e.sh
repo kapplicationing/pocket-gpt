@@ -11,7 +11,7 @@ ATTEMPT_TIMEOUT_SEC="${LIFECYCLE_E2E_ATTEMPT_TIMEOUT_SEC:-1200}"
 ADB_TIMEOUT_SEC="${LIFECYCLE_E2E_ADB_TIMEOUT_SEC:-120}"
 TIMEOUT_KILL_AFTER="${LIFECYCLE_E2E_KILL_AFTER_SEC:-30}"
 CRASH_SIGNATURE_REGEX="${LIFECYCLE_E2E_CRASH_SIGNATURE_REGEX:-SIGSEGV|Abort message|nativeLoadModel failed|UI-RUNTIME-001|FATAL EXCEPTION}"
-SYSTEM_OVERLAY_RETRIES="${LIFECYCLE_E2E_SYSTEM_OVERLAY_RETRIES:-1}"
+SYSTEM_OVERLAY_RETRIES="${LIFECYCLE_E2E_SYSTEM_OVERLAY_RETRIES:-3}"
 SYSTEM_OVERLAY_RC=87
 LAUNCHER_PACKAGE="${LIFECYCLE_E2E_LAUNCHER_PACKAGE:-com.google.android.apps.nexuslauncher}"
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
@@ -172,25 +172,72 @@ detect_app_crash_signatures() {
 
 stabilize_system_ui() {
   # Fresh Google APIs emulators occasionally surface Pixel Launcher ANR dialogs
-  # over the app during first-run Maestro waits. Keep this scoped to known
-  # non-app system UI so real product failures still fail the lifecycle gate.
+  # or System UI ANR dialogs over the app during first-run Maestro waits. Keep
+  # this scoped to known non-app system UI so real product failures still fail
+  # the lifecycle gate.
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+  tap_non_app_anr_wait_if_present || true
   with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell am force-stop "${LAUNCHER_PACKAGE}" >/dev/null 2>&1 || true
+  tap_non_app_anr_wait_if_present || true
 }
 
-failure_has_launcher_anr_overlay() {
+tap_non_app_anr_wait_if_present() {
+  local hierarchy_device_path="/sdcard/pocketgpt-lifecycle-current-window.xml"
+  local hierarchy_file="${OUT_DIR}/current-window.xml"
+  mkdir -p "${OUT_DIR}"
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell uiautomator dump "${hierarchy_device_path}" >/dev/null 2>&1 || return 1
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" pull "${hierarchy_device_path}" "${hierarchy_file}" >/dev/null 2>&1 || return 1
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell rm "${hierarchy_device_path}" >/dev/null 2>&1 || true
+  if ! grep -E -q "System UI isn't responding|Pixel Launcher isn't responding" "${hierarchy_file}"; then
+    return 1
+  fi
+  local bounds
+  bounds="$(grep -o 'resource-id="android:id/aerr_wait"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' "${hierarchy_file}" | head -n 1 | sed -E 's/.*bounds="\[([0-9]*),([0-9]*)\]\[([0-9]*),([0-9]*)\]".*/\1 \2 \3 \4/')"
+  if [[ -z "${bounds}" ]]; then
+    bounds="$(grep -o 'text="Wait"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' "${hierarchy_file}" | head -n 1 | sed -E 's/.*bounds="\[([0-9]*),([0-9]*)\]\[([0-9]*),([0-9]*)\]".*/\1 \2 \3 \4/')"
+  fi
+  if [[ -z "${bounds}" ]]; then
+    return 1
+  fi
+  read -r x1 y1 x2 y2 <<< "${bounds}"
+  with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell input tap "$(((x1 + x2) / 2))" "$(((y1 + y2) / 2))" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+failure_has_non_app_system_anr_overlay() {
   local attempt_dir="$1"
   local hierarchy_file="${attempt_dir}/failure-window.xml"
   local log_file="${attempt_dir}/logcat.txt"
 
-  if [[ -f "${hierarchy_file}" ]] && grep -E -q "Pixel Launcher isn't responding|android:id/aerr_wait|android:id/aerr_close" "${hierarchy_file}"; then
+  if [[ -f "${hierarchy_file}" ]] && grep -E -q "System UI isn't responding|Pixel Launcher isn't responding" "${hierarchy_file}"; then
     return 0
   fi
-  if [[ -f "${log_file}" ]] && grep -E -q "Application Not Responding: ${LAUNCHER_PACKAGE}|ANR in ${LAUNCHER_PACKAGE}" "${log_file}"; then
+  if [[ -f "${log_file}" ]] && grep -E -q "Application Not Responding: ${LAUNCHER_PACKAGE}|ANR in ${LAUNCHER_PACKAGE}|Application Not Responding: com.android.systemui|ANR in com.android.systemui" "${log_file}"; then
     return 0
   fi
   return 1
+}
+
+retry_system_overlay_attempts() {
+  local rc="$1"
+  local attempt_prefix="$2"
+  local retry_count=0
+  while [[ ${rc} -eq ${SYSTEM_OVERLAY_RC} && ${retry_count} -lt ${SYSTEM_OVERLAY_RETRIES} ]]; do
+    retry_count=$((retry_count + 1))
+    echo "::notice::Lifecycle E2E was blocked by a non-app system overlay; retrying after emulator UI stabilization (${attempt_prefix}-${retry_count}/${SYSTEM_OVERLAY_RETRIES})."
+    printf "system_overlay_retry_%s_%s=%s\n" "${attempt_prefix}" "${retry_count}" "true" >> "${OUT_DIR}/retry-summary.txt"
+    stabilize_system_ui
+    set +e
+    run_attempt "${attempt_prefix}-system-overlay-${retry_count}"
+    rc=$?
+    set -e
+    if [[ ${rc} -eq 0 ]]; then
+      echo "final_attempt=${attempt_prefix}-system-overlay-${retry_count}" >> "${OUT_DIR}/retry-summary.txt"
+      exit 0
+    fi
+  done
+  return "${rc}"
 }
 
 mkdir -p "${OUT_DIR}"
@@ -243,11 +290,11 @@ run_attempt() {
     rc=86
   fi
   if [[ ${rc} -ne 0 && ${rc} -ne 86 ]]; then
-    local launcher_overlay_detected=1
-    failure_has_launcher_anr_overlay "${attempt_dir}"
-    launcher_overlay_detected=$?
-    if [[ ${launcher_overlay_detected} -eq 0 ]]; then
-      echo "Lifecycle E2E attempt ${attempt} was blocked by a ${LAUNCHER_PACKAGE} system ANR overlay."
+    local system_overlay_detected=1
+    failure_has_non_app_system_anr_overlay "${attempt_dir}"
+    system_overlay_detected=$?
+    if [[ ${system_overlay_detected} -eq 0 ]]; then
+      echo "Lifecycle E2E attempt ${attempt} was blocked by a non-app system ANR overlay."
       rc=${SYSTEM_OVERLAY_RC}
     fi
   fi
@@ -275,21 +322,10 @@ echo "::notice::First lifecycle E2E attempt failed; classifying retry path."
 printf "decision=%s\nreason=%s\nfirst_attempt_failed=%s\n" \
   "run" "${RISK_REASON}" "true" > "${OUT_DIR}/retry-summary.txt"
 
-system_overlay_retry_count=0
-while [[ ${first_rc} -eq ${SYSTEM_OVERLAY_RC} && ${system_overlay_retry_count} -lt ${SYSTEM_OVERLAY_RETRIES} ]]; do
-  system_overlay_retry_count=$((system_overlay_retry_count + 1))
-  echo "::notice::Lifecycle E2E was blocked by a non-app system overlay; retrying after emulator UI stabilization (${system_overlay_retry_count}/${SYSTEM_OVERLAY_RETRIES})."
-  printf "system_overlay_retry_%s=%s\n" "${system_overlay_retry_count}" "true" >> "${OUT_DIR}/retry-summary.txt"
-  stabilize_system_ui
-  set +e
-  run_attempt "1-system-overlay-${system_overlay_retry_count}"
-  first_rc=$?
-  set -e
-  if [[ ${first_rc} -eq 0 ]]; then
-    echo "final_attempt=1-system-overlay-${system_overlay_retry_count}" >> "${OUT_DIR}/retry-summary.txt"
-    exit 0
-  fi
-done
+set +e
+retry_system_overlay_attempts "${first_rc}" "1"
+first_rc=$?
+set -e
 
 echo "::notice::Retrying lifecycle E2E once after clean-state reset."
 with_timeout "${ADB_TIMEOUT_SEC}" adb -s "${DEVICE_SERIAL}" shell pm clear "${APP_ID}" >/dev/null || true
@@ -309,6 +345,10 @@ if [[ ${second_rc} -eq 0 ]]; then
   echo "final_attempt=2" >> "${OUT_DIR}/retry-summary.txt"
   exit 0
 fi
+set +e
+retry_system_overlay_attempts "${second_rc}" "2"
+second_rc=$?
+set -e
 
 echo "final_attempt=none" >> "${OUT_DIR}/retry-summary.txt"
 echo "::error::Lifecycle E2E failed after one clean-state retry. See ${OUT_DIR}/attempt-* artifacts."

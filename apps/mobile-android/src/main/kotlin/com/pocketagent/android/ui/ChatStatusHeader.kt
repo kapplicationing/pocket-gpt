@@ -62,6 +62,7 @@ import java.util.Locale
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
+@Suppress("LongMethod", "CyclomaticComplexMethod")
 internal fun OfflineAndStatusHeader(
     runtime: RuntimeUiState,
     modelLoadingState: ModelLoadingState,
@@ -98,7 +99,10 @@ internal fun OfflineAndStatusHeader(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = PocketAgentDimensions.cardPadding, vertical = PocketAgentDimensions.sectionSpacing)
+                        .padding(
+                            horizontal = PocketAgentDimensions.cardPadding,
+                            vertical = PocketAgentDimensions.sectionSpacing,
+                        )
                         .semantics { liveRegion = LiveRegionMode.Polite },
                     horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
                     verticalAlignment = Alignment.CenterVertically,
@@ -270,8 +274,16 @@ internal fun OfflineAndStatusHeader(
                         exit = fadeOut() + shrinkVertically(),
                     ) {
                         if (!lastUsedModelLabel.isNullOrBlank()) {
-                            TextButton(onClick = onLoadLastUsedModel) {
-                                Text(stringResource(id = R.string.ui_model_runtime_load_last_used_short, lastUsedModelLabel))
+                            TextButton(
+                                onClick = onLoadLastUsedModel,
+                                modifier = Modifier.testTag("chat_load_last_used_button"),
+                            ) {
+                                Text(
+                                    stringResource(
+                                        id = R.string.ui_model_runtime_load_last_used_short,
+                                        lastUsedModelLabel,
+                                    ),
+                                )
                             }
                         }
                     }

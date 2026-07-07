@@ -208,6 +208,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # Unit/host tests compile Android code but do not boot an emulator.
+          # Avoid the action default package set, which may download emulator payloads.
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
       - name: Configure Android SDK env
         run: |

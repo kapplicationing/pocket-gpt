@@ -9,12 +9,7 @@ tags:
 - runFlow: shared/bootstrap-clean-start.yaml
 - runFlow: shared/complete-first-run-onboarding.yaml
 - runFlow: shared/assert-post-onboarding-chat-surface.yaml
-- runFlow:
-    when:
-      visible: "Load last used"
-    commands:
-      - tapOn: "Load last used"
-      - runFlow: shared/wait-runtime-transition-idle.yaml
+- runFlow: shared/bootstrap-launch-default-model.yaml
 - runFlow: shared/ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"
 - runFlow: shared/clear-composer-input.yaml

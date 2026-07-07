@@ -78,6 +78,36 @@ class ChatStatusHeaderComposeContractTest {
         composeRule.onNodeWithTag("refresh_button").assertIsDisplayed()
     }
 
+    @Test
+    fun loadLastUsedActionExportsStableAutomationId() {
+        composeRule.setContent {
+            MaterialTheme {
+                OfflineAndStatusHeader(
+                    runtime = RuntimeUiState(
+                        startupProbeState = StartupProbeState.READY,
+                        modelRuntimeStatus = ModelRuntimeStatus.NOT_READY,
+                    ),
+                    modelLoadingState = ModelLoadingState.Idle(
+                        loadedModel = null,
+                        lastUsedModel = RuntimeLoadedModel(
+                            modelId = "qwen3-0.6b-q4_k_m",
+                            modelVersion = "q4_k_m",
+                        ),
+                    ),
+                    onOpenModels = {},
+                    canLoadLastUsedModel = true,
+                    lastUsedModelLabel = "Qwen3 0.6B q4_k_m",
+                    onLoadLastUsedModel = {},
+                    activeRuntimeModelLabel = null,
+                    onRefresh = {},
+                    isOffline = false,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("chat_load_last_used_button").assertIsDisplayed()
+    }
+
     private fun loadedModelState(): ModelLoadingState.Loaded {
         return ModelLoadingState.Loaded(
             model = RuntimeLoadedModel(

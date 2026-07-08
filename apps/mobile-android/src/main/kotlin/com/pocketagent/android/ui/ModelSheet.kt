@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.ModelEligibilityReason
 import com.pocketagent.android.runtime.ModelSupportLevel
@@ -106,7 +107,8 @@ internal fun ModelSheet(
     hiddenVersionKeys: Set<String> = emptySet(),
     onEvent: (ModelSheetEvent) -> Unit,
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQueryValue by remember { mutableStateOf(TextFieldValue("")) }
+    val searchQuery = searchQueryValue.text
     var huggingFaceInput by remember { mutableStateOf("") }
     var huggingFaceSearchQuery by remember { mutableStateOf("") }
     var selectedHuggingFaceTargetId by remember { mutableStateOf("") }
@@ -115,7 +117,7 @@ internal fun ModelSheet(
     val resolvedHuggingFaceTargetId = selectedHuggingFaceTargetId
         .takeIf { selected -> libraryState.huggingFaceTargets.any { it.modelId == selected } }
         ?: libraryState.huggingFaceTargets.firstOrNull()?.modelId.orEmpty()
-    val installedVersions by remember(libraryState, searchQuery, hiddenVersionKeys) {
+    val installedVersions by remember(libraryState.snapshot, searchQuery, hiddenVersionKeys) {
         derivedStateOf {
             libraryState.snapshot.models.flatMap { model ->
                 model.installedVersions.map { version -> model to version }
@@ -137,7 +139,7 @@ internal fun ModelSheet(
                 .toSet()
         }
     }
-    val availableVersions by remember(libraryState, searchQuery, installedKeys) {
+    val availableVersions by remember(libraryState.manifest, libraryState.eligibility, searchQuery, installedKeys) {
         derivedStateOf {
             libraryState.manifest.models.flatMap { model ->
                 model.versions.map { version ->
@@ -178,7 +180,7 @@ internal fun ModelSheet(
                 .sortedByDescending { task -> task.updatedAtEpochMs }
         }
     }
-    val downloadTasksByKey by remember(libraryState) {
+    val downloadTasksByKey by remember(libraryState.downloads) {
         derivedStateOf {
             libraryState.downloads.associateBy { task ->
                 versionIdentityKey(task.modelId, task.version)
@@ -211,9 +213,11 @@ internal fun ModelSheet(
         }
         item {
             OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
+                value = searchQueryValue,
+                onValueChange = { searchQueryValue = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("model_search_input"),
                 singleLine = true,
                 placeholder = { Text(stringResource(id = R.string.ui_search_models)) },
             )

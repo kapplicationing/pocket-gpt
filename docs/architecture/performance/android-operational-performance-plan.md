@@ -300,7 +300,7 @@ chat interaction.
 Relevant files:
 
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/OnboardingScreen.kt`
-- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ModalOrchestrator.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatApp.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/DownloadTransitionHandler.kt`
 - `tests/maestro/scenario-onboarding.yaml`
 - `tests/maestro/scenario-first-run-download-chat.yaml`

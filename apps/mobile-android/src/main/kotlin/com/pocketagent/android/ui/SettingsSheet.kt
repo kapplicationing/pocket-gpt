@@ -44,7 +44,6 @@ import com.pocketagent.android.runtime.GpuProbeStatus
 import com.pocketagent.android.ui.components.SectionHeader
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
-import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
@@ -58,7 +57,8 @@ import com.pocketagent.runtime.RuntimePerformanceProfile
 
 @Composable
 internal fun AdvancedSettingsSheet(
-    state: ChatUiState,
+    runtime: RuntimeUiState,
+    defaultThinkingEnabled: Boolean,
     voiceState: VoiceActivationUiState,
     wifiOnlyDownloadsEnabled: Boolean,
     onDefaultThinkingEnabledChanged: (Boolean) -> Unit,
@@ -76,7 +76,7 @@ internal fun AdvancedSettingsSheet(
     onExportDiagnostics: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
-    val gpuToggleEnabled = state.runtime.gpuAccelerationSupported || state.runtime.gpuManualOverrideAllowed
+    val gpuToggleEnabled = runtime.gpuAccelerationSupported || runtime.gpuManualOverrideAllowed
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Column(
@@ -118,7 +118,8 @@ internal fun AdvancedSettingsSheet(
 
         when (selectedTab) {
             0 -> GeneralTabContent(
-                state = state,
+                runtime = runtime,
+                defaultThinkingEnabled = defaultThinkingEnabled,
                 voiceState = voiceState,
                 wifiOnlyDownloadsEnabled = wifiOnlyDownloadsEnabled,
                 haptic = haptic,
@@ -132,7 +133,7 @@ internal fun AdvancedSettingsSheet(
                 onOpenAppSettings = onOpenAppSettings,
             )
             1 -> ModelTabContent(
-                state = state,
+                runtime = runtime,
                 gpuToggleEnabled = gpuToggleEnabled,
                 haptic = haptic,
                 presetBackingStore = presetBackingStore,
@@ -141,7 +142,7 @@ internal fun AdvancedSettingsSheet(
                 onGpuAccelerationEnabledChanged = onGpuAccelerationEnabledChanged,
             )
             2 -> AboutTabContent(
-                state = state,
+                runtime = runtime,
                 haptic = haptic,
                 onExportDiagnostics = onExportDiagnostics,
             )
@@ -151,7 +152,8 @@ internal fun AdvancedSettingsSheet(
 
 @Composable
 private fun GeneralTabContent(
-    state: ChatUiState,
+    runtime: RuntimeUiState,
+    defaultThinkingEnabled: Boolean,
     voiceState: VoiceActivationUiState,
     wifiOnlyDownloadsEnabled: Boolean,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
@@ -182,7 +184,7 @@ private fun GeneralTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .selectable(
-                        selected = state.runtime.performanceProfile == profile,
+                        selected = runtime.performanceProfile == profile,
                         onClick = { haptic.tickLightThen { onPerformanceProfileSelected(profile) } },
                         role = Role.RadioButton,
                     )
@@ -190,7 +192,7 @@ private fun GeneralTabContent(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(
-                    selected = state.runtime.performanceProfile == profile,
+                    selected = runtime.performanceProfile == profile,
                     onClick = null,
                 )
                 Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
@@ -243,14 +245,14 @@ private fun GeneralTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .selectable(
-                        selected = state.runtime.keepAlivePreference == preference,
+                        selected = runtime.keepAlivePreference == preference,
                         onClick = { haptic.tickLightThen { onKeepAlivePreferenceSelected(preference) } },
                         role = Role.RadioButton,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(
-                    selected = state.runtime.keepAlivePreference == preference,
+                    selected = runtime.keepAlivePreference == preference,
                     onClick = null,
                 )
                 Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
@@ -428,7 +430,7 @@ private fun GeneralTabContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .toggleable(
-                    value = state.defaultThinkingEnabled,
+                    value = defaultThinkingEnabled,
                     role = Role.Switch,
                     onValueChange = { checked ->
                         haptic.tickLight()
@@ -438,7 +440,7 @@ private fun GeneralTabContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             androidx.compose.material3.Switch(
-                checked = state.defaultThinkingEnabled,
+                checked = defaultThinkingEnabled,
                 onCheckedChange = null,
             )
             Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
@@ -461,7 +463,7 @@ private fun GeneralTabContent(
 
 @Composable
 private fun ModelTabContent(
-    state: ChatUiState,
+    runtime: RuntimeUiState,
     gpuToggleEnabled: Boolean,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
     presetBackingStore: PresetBackingStore,
@@ -481,7 +483,7 @@ private fun ModelTabContent(
             subtitle = stringResource(id = R.string.ui_model_selection_subtitle),
         )
 
-        val matchedPreset = presetBackingStore.presetMatchingRoutingMode(state.runtime.routingMode)
+        val matchedPreset = presetBackingStore.presetMatchingRoutingMode(runtime.routingMode)
         ModelPreset.selectablePresets.forEach { preset ->
             val (label, description) = modelPresetLabels(preset)
             val backingId = PresetRoutingResolver.effectiveBackingModelId(
@@ -539,7 +541,7 @@ private fun ModelTabContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .toggleable(
-                    value = state.runtime.gpuAccelerationEnabled,
+                    value = runtime.gpuAccelerationEnabled,
                     enabled = gpuToggleEnabled,
                     role = Role.Switch,
                     onValueChange = { checked ->
@@ -550,23 +552,23 @@ private fun ModelTabContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             androidx.compose.material3.Switch(
-                checked = state.runtime.gpuAccelerationEnabled,
+                checked = runtime.gpuAccelerationEnabled,
                 enabled = gpuToggleEnabled,
                 onCheckedChange = null,
             )
             Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
             Text(
                 text = when {
-                    state.runtime.gpuProbeStatus == GpuProbeStatus.PENDING ->
+                    runtime.gpuProbeStatus == GpuProbeStatus.PENDING ->
                         stringResource(id = R.string.ui_gpu_acceleration_validating)
-                    state.runtime.gpuAccelerationSupported ->
+                    runtime.gpuAccelerationSupported ->
                         stringResource(id = R.string.ui_gpu_acceleration_toggle)
-                    state.runtime.gpuManualOverrideAllowed ->
+                    runtime.gpuManualOverrideAllowed ->
                         stringResource(id = R.string.ui_gpu_acceleration_toggle_debug_override)
                     else ->
                         stringResource(
                             id = R.string.ui_gpu_acceleration_unavailable_with_reason,
-                            gpuProbeFailureReasonLabel(state.runtime.gpuProbeFailureReason),
+                            gpuProbeFailureReasonLabel(runtime.gpuProbeFailureReason),
                         )
                 },
             )
@@ -576,18 +578,18 @@ private fun ModelTabContent(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (!state.runtime.gpuProbeDetail.isNullOrBlank()) {
+        if (!runtime.gpuProbeDetail.isNullOrBlank()) {
             Text(
-                text = state.runtime.gpuProbeDetail.orEmpty(),
+                text = runtime.gpuProbeDetail.orEmpty(),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (state.runtime.gpuAccelerationSupported) {
+                color = if (runtime.gpuAccelerationSupported) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.error
                 },
             )
         }
-        if (shouldShowOpenClQuantizationWarning(state)) {
+        if (shouldShowOpenClQuantizationWarning(runtime)) {
             Text(
                 text = stringResource(id = R.string.ui_gpu_acceleration_opencl_quant_warning),
                 style = MaterialTheme.typography.bodySmall,
@@ -599,7 +601,7 @@ private fun ModelTabContent(
 
 @Composable
 private fun AboutTabContent(
-    state: ChatUiState,
+    runtime: RuntimeUiState,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
     onExportDiagnostics: () -> Unit,
 ) {
@@ -621,7 +623,7 @@ private fun AboutTabContent(
         HorizontalDivider()
 
         DiagnosticsSection(
-            runtime = state.runtime,
+            runtime = runtime,
             haptic = haptic,
         )
 
@@ -852,10 +854,6 @@ private fun keepAlivePreferenceLabel(preference: RuntimeKeepAlivePreference): St
 }
 
 // --- GPU Quantization Compatibility Utilities ---
-
-private fun shouldShowOpenClQuantizationWarning(state: ChatUiState): Boolean {
-    return shouldShowOpenClQuantizationWarning(runtime = state.runtime)
-}
 
 internal fun shouldShowOpenClQuantizationWarning(runtime: RuntimeUiState): Boolean {
     if (!runtime.gpuAccelerationEnabled) {

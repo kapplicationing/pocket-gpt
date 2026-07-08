@@ -86,6 +86,32 @@ Examples:
 
 For runtime tuning analysis after repeated device runs, use `docs/testing/runtime-tuning-debugging.md`. It explains how to read `RUNTIME_TUNING|...` diagnostics lines, where the generated `runtime-log-signals.{json,md}` artifacts land, and how to correlate them with benchmark artifacts under `scripts/benchmarks/runs/...` or `devctl` lane artifacts under `tmp/devctl-artifacts/...`.
 
+## UI Smoothness Benchmarks
+
+Use benchmark-variant wrappers for frame-budget evidence. Do not use `debug` for
+smoothness claims.
+
+Composer typing:
+
+```bash
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
+```
+
+Non-generation UI journeys:
+
+```bash
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav --build
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario model-sheet
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario drawer-search
+```
+
+Use `--build` on the first sample for the APK under test, then run two more
+samples per scenario without rebuilding if the installed APK did not change.
+Compare medians and capture Perfetto for the worst journey when medians miss the
+targets in `docs/testing/test-strategy.md`.
+
 ## Stage-2 Benchmark Wrapper
 
 ```bash
@@ -250,7 +276,9 @@ ANDROID_SERIAL=emulator-5554 ADB_SERIAL=emulator-5554 python3 tools/devctl/main.
 maestro-android lane smoke --device emulator-5554
 ```
 
-Use this for the emulator leg of the default evidence matrix. Then run one connected-device lane and one hosted cloud path.
+Use this for emulator proof when the changed risk needs bootstrap/runtime parity.
+Add connected-device and hosted cloud evidence only when `docs/testing/test-strategy.md`
+classifies the change as needing those surfaces.
 
 ## Gate Wrappers (Policy)
 

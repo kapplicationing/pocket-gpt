@@ -14,7 +14,7 @@ Use this skill map for command selection, not as a second copy of the policy.
    - Use first when you are not on-device.
 2. `bash scripts/dev/test.sh merge`
    - Merge-equivalent confidence for broader unit/contract coverage.
-   - Use before pushing if the change is not device-only.
+   - Use before integration when merge-equivalent confidence is needed.
 3. `python3 tools/devctl/main.py doctor`
    - Confirms the local environment and lane prerequisites.
 4. `python3 tools/devctl/main.py lane android-instrumented`
@@ -97,7 +97,7 @@ while still catching visual regressions and selector breakage.
 - Keep scoped repros in `tmp/` and promote recurring risks into stable flows under `tests/maestro/`.
 - Use report helpers before digging through raw artifact folders.
 - Prefer stable selectors (`id:`/resource-id) over fragile text when the app exposes them.
-- Default to emulator + connected device + cloud as complementary evidence, not mutually exclusive options.
+- Use emulator, connected device, and cloud as complementary evidence when the changed risk needs all three surfaces.
 - Treat cloud coverage as supplemental. Do not use it as the only merge gate.
 - Preserve first-failure artifacts when a bounded retry is part of the gate.
 - Treat `--clear-state` as an opt-in reset for app-private data only; keep large model downloads in shared/external storage so normal runs do not re-download them.
@@ -129,11 +129,15 @@ Run `maestro-android audit-testtags` to verify these against the live build.
 | `chat_gate_inline_card` | Gate status card | ChatComposerBar.kt |
 | `session_drawer_button` | Drawer toggle in top bar | ChatApp.kt |
 | `advanced_sheet_button` | Settings gear in top bar | ChatApp.kt |
+| `completion_settings_button` | Completion settings in composer | ChatComposerBar.kt |
+| `completion_system_prompt_input` | System prompt editor | CompletionSettingsSheet.kt |
 | `chat_message_list` | Message LazyColumn | ChatScreen.kt |
 | `unified_model_sheet` | Model bottom sheet | ModelSheet.kt |
+| `model_search_input` | Model-library search field | ModelSheet.kt |
 | `onboarding_skip` | Skip button | OnboardingScreen.kt |
 | `onboarding_next` | Next button | OnboardingScreen.kt |
 | `onboarding_get_started` | Get Started button | OnboardingScreen.kt |
-| `open_models_button` | Open Models in StatusHeader | ChatStatusHeader.kt |
+| `open_model_library` | Open Models in top bar | PocketAgentTopBar.kt |
 | `refresh_button` | Refresh in StatusHeader | ChatStatusHeader.kt |
 | `create_session_button` | "+" in SessionDrawer header | SessionDrawer.kt |
+| `session_search_input` | Session drawer search field | SessionDrawer.kt |

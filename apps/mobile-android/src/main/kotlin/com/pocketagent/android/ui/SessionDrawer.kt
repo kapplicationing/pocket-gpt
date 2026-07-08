@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.pocketagent.android.R
 import com.pocketagent.android.ui.state.ChatSessionUiModel
@@ -120,7 +121,8 @@ internal fun SessionDrawer(
 ) {
     val haptic = LocalHapticFeedback.current
     val createSessionDescription = stringResource(id = R.string.a11y_create_session)
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQueryValue by remember { mutableStateOf(TextFieldValue("")) }
+    val searchQuery = searchQueryValue.text
     val visibleSessions = sessions.filterNot { it.id in hiddenSessionIds }
     val groupedSessions = remember(sessions, searchQuery, hiddenSessionIds) {
         val filtered = if (searchQuery.isBlank()) {
@@ -163,10 +165,11 @@ internal fun SessionDrawer(
 
         item {
             OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+                value = searchQueryValue,
+                onValueChange = { searchQueryValue = it },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("session_search_input")
                     .padding(horizontal = PocketAgentDimensions.sheetHorizontalPadding, vertical = PocketAgentDimensions.sectionSpacing),
                 placeholder = { Text(stringResource(id = R.string.ui_session_search_placeholder)) },
                 singleLine = true,
@@ -175,10 +178,10 @@ internal fun SessionDrawer(
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = {
-                            haptic.tickLight()
-                            searchQuery = ""
-                        }) {
+	                        IconButton(onClick = {
+	                            haptic.tickLight()
+	                            searchQueryValue = TextFieldValue("")
+	                        }) {
                             Icon(Icons.Default.Clear, contentDescription = stringResource(id = R.string.ui_session_search_clear))
                         }
                     }

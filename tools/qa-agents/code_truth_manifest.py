@@ -48,7 +48,7 @@ LAUNCH_SURFACES = {
         "ModelOperation",
         "runtime/modelmanager",
     ],
-    "Advanced": ["SettingsSheet", "CompletionSettingsSheet", "ModalOrchestrator", "ui/advanced", "AdvancedSheet"],
+    "Advanced": ["SettingsSheet", "CompletionSettingsSheet", "ui/advanced", "AdvancedSheet"],
     "RuntimeStatus": [
         "ChatStatusHeader",
         "ui/state/ChatUiState.kt",

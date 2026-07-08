@@ -154,6 +154,10 @@ class ChatViewModel internal constructor(
             SharingStarted.Lazily,
             _uiState.value.activeSession()?.completionSettings?.showThinking == true,
         )
+    val defaultThinkingEnabledFlow: StateFlow<Boolean> = _uiState
+        .map { it.defaultThinkingEnabled }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.defaultThinkingEnabled)
     // Narrow flow for the active session's completion settings. Used by the Completion
     // Settings modal sheet, which previously read state.activeSession()?.completionSettings
     // off the full uiState — that observation pulled the entire ChatUiState through Compose
@@ -174,6 +178,10 @@ class ChatViewModel internal constructor(
         .map { it.advancedUnlocked }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.advancedUnlocked)
+    val onboardingPageFlow: StateFlow<Int> = _uiState
+        .map { it.onboardingPage }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.onboardingPage)
     val streamingFlow: StateFlow<StreamingState> = _uiState
         .map { it.streaming }
         .distinctUntilChanged()

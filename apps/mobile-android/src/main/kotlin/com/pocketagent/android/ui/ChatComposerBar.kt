@@ -335,7 +335,10 @@ private fun ComposerActionStrip(
             }
         }
         Spacer(modifier = Modifier.weight(1f))
-        IconButton(onClick = { haptic.tickLight(); onOpenCompletionSettings() }) {
+        IconButton(
+            onClick = { haptic.tickLight(); onOpenCompletionSettings() },
+            modifier = Modifier.testTag("completion_settings_button"),
+        ) {
             Icon(
                 imageVector = Icons.Default.Tune,
                 contentDescription = stringResource(id = R.string.a11y_chat_settings),

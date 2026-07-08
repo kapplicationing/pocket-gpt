@@ -75,7 +75,7 @@
           ]
         },
         {
-          "glob": "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ModalOrchestrator.kt",
+          "glob": "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatApp.kt",
           "must_contain": [
             "ToolDialog(",
             "onUsePrompt = onUseToolPrompt"

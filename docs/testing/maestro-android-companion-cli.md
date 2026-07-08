@@ -15,8 +15,5 @@ References:
 2. Repo-local wrapper docs: [`tools/maestro_android/README.md`](../../tools/maestro_android/README.md)
 3. PocketGPT testing ladder and policy: [`docs/testing/README.md`](README.md), [`docs/testing/test-strategy.md`](test-strategy.md), [`docs/testing/runbooks.md`](runbooks.md)
 
-Default guidance to carry into `CLAUDE.md` / `AGENTS.md`:
-
-1. Default Android evidence is emulator + connected device + cloud.
-2. Use the smallest command that proves the theory on the right surface.
-3. If the same Maestro path is stuck twice, stop repeating it; step back, classify the failure, and pivot.
+Testing policy belongs in [`docs/testing/test-strategy.md`](test-strategy.md).
+This file only explains which Maestro CLI surface to use.

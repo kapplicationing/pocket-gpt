@@ -183,6 +183,63 @@ class PerformanceContractAuditTest {
     }
 
     @Test
+    fun `settings and search hot text fields use TextFieldValue locally`() {
+        val hotFields = listOf(
+            resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt") to "system prompt",
+            resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/SessionDrawer.kt") to "session search",
+            resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/ModelSheet.kt") to "model search",
+        )
+
+        val offenders = hotFields.mapNotNull { (file, label) ->
+            val source = file.readText()
+            if ("TextFieldValue" in source) {
+                null
+            } else {
+                "${file.relativePath()}: $label must use TextFieldValue for hot input"
+            }
+        }
+
+        assertTrue(
+            offenders.isEmpty(),
+            "High-frequency settings/search text fields must keep local TextFieldValue state. Offenders:\n${offenders.joinToString("\n")}",
+        )
+    }
+
+    @Test
+    fun `completion settings system prompt does not commit on every keystroke`() {
+        val source = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt").readText()
+        val systemPromptField = source.substringAfter("OutlinedTextField(")
+            .substringBefore("HorizontalDivider(modifier = Modifier.padding(vertical = PocketAgentDimensions.sectionSpacing))")
+
+        assertTrue(
+            "onValueChange = { systemPrompt = it }" in systemPromptField &&
+                "emitUpdate()" !in systemPromptField &&
+                "onSettingsChanged(" !in systemPromptField,
+            "Completion system prompt typing must stay compose-local; commit on focus loss, Done, reset, dismiss, or slider boundaries.",
+        )
+        assertTrue(
+            "DisposableEffect(Unit)" in source && "commitSystemPromptIfChanged()" in source,
+            "Completion system prompt must flush the local TextFieldValue buffer when the sheet is dismissed.",
+        )
+    }
+
+    @Test
+    fun `download transitions do not refresh provisioning snapshot on progress ticks`() {
+        val source = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/DownloadTransitionHandler.kt").readText()
+        val effectBody = source.substringAfter("LaunchedEffect(downloads) {")
+            .substringBefore("val transitionFeedback")
+
+        assertTrue(
+            "shouldRefreshProvisioningSnapshotOnTransition()" in effectBody,
+            "DownloadTransitionHandler must gate snapshot refresh on meaningful status transitions, not every downloads emission.",
+        )
+        assertTrue(
+            "onRefreshSnapshot()\n        val transitioned" !in source,
+            "DownloadTransitionHandler must not refresh the full provisioning snapshot before checking for a status transition.",
+        )
+    }
+
+    @Test
     fun `every UI state class is annotated Immutable or appears in stability config`() {
         val stabilityNames = stabilityConfigClasses()
         val offenders = sourceFiles("src/main/kotlin/com/pocketagent/android/ui/state")

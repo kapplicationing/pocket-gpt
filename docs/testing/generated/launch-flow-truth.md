@@ -8,10 +8,12 @@ code changes, regenerate this file in the same PR.
 
 ## Advanced
 
-Source files (3):
-- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ModalOrchestrator.kt`
+Source files (2):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/SettingsSheet.kt`
+
+### testTag
+- `completion_system_prompt_input`
 
 ## ChatShell
 
@@ -34,6 +36,7 @@ Source files (5):
 - `provisioning_bootstrap_loading`
 - `session_drawer_button`
 - `session_row_active`
+- `session_search_input`
 
 ## Composer
 
@@ -42,6 +45,7 @@ Source files (1):
 
 ### testTag
 - `chat_gate_inline_card`
+- `completion_settings_button`
 - `composer_input`
 - `send_button`
 
@@ -78,9 +82,61 @@ Source files (27):
 
 ### testTag
 - `choose_another_model`
+- `debug_model_library_ready`
+- `debug_model_library_status`
+- `debug_model_library_status_terminal`
+- `debug_model_library_task_present`
+- `debug_model_library_task_status`
+- `model_library_add_hugging_face`
+- `model_library_download_queue`
+- `model_library_download_queue_cancel`
+- `model_library_download_queue_pause`
+- `model_library_download_queue_resume`
+- `model_library_download_queue_retry`
+- `model_library_download_qwen3-0.6b-q4_k_m_q4_k_m`
+- `model_library_hf_candidate_card`
+- `model_library_hf_check_disabled_reason`
+- `model_library_hf_check_url`
+- `model_library_hf_download_status`
+- `model_library_hf_error`
+- `model_library_hf_find_on_hugging_face`
+- `model_library_hf_license`
+- `model_library_hf_open_license`
+- `model_library_hf_open_model_card`
+- `model_library_hf_queue_download`
+- `model_library_hf_recent`
+- `model_library_hf_recent_clear`
+- `model_library_hf_recent_license`
+- `model_library_hf_recent_open_license`
+- `model_library_hf_recent_open_model_card`
+- `model_library_hf_recent_recheck`
+- `model_library_hf_recent_remove`
+- `model_library_hf_recent_row`
+- `model_library_hf_search`
+- `model_library_hf_search_button`
+- `model_library_hf_search_clear`
+- `model_library_hf_search_empty`
+- `model_library_hf_search_error`
+- `model_library_hf_search_input`
+- `model_library_hf_search_open_file`
+- `model_library_hf_search_open_model_card`
+- `model_library_hf_search_quantization`
+- `model_library_hf_search_repo_group`
+- `model_library_hf_search_result`
+- `model_library_hf_search_results`
+- `model_library_hf_search_use_file`
+- `model_library_hf_storage_impact`
+- `model_library_hf_target_model`
+- `model_library_hf_url_input`
+- `model_library_load_qwen3-0.6b-q4_k_m_q4_k_m`
+- `model_search_input`
 - `model_sheet_status_message`
 - `remove_button_${model.modelId}_${version.version}`
 - `unified_model_sheet`
+
+### Literal text
+- `hf_task_present`
+- `hf_terminal`
 
 ## Onboarding
 
@@ -111,13 +167,14 @@ Source files (2):
 
 ## RuntimeStatus
 
-Source files (35):
+Source files (41):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatStatusHeader.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuProbeService.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppRuntimeHost.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ModelRuntimeLaunchPlanner.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AndroidGpuOffloadSupport.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeErrorCodes.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppDispatchers.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeProvisioningStoreInternals.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeDiagnosticsSnapshot.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeMode.kt`
@@ -135,20 +192,26 @@ Source files (35):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/IpcSendMonitor.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RemoteRuntimeTransport.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ProvisioningRuntimeBindings.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/MainThreadGuard.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/LlamaRuntimeService.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeModelLifecycleState.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AndroidRuntimeProvisioningStore.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppOperationTrace.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ModelAdmissionPolicy.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeTuningStore.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppForegroundRuntimeServices.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/PresetModelMappingStore.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuOffloadQualification.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RuntimeProvisioningStoreCodec.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ModelSourceRefJsonCodec.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ModelCatalogEligibility.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/modelspec/NormalizedModelCatalogRegistry.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/huggingface/HuggingFaceModelAcquisition.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/huggingface/HuggingFaceRecentModelStore.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/state/ChatUiState.kt`
 
 ### testTag
+- `chat_load_last_used_button`
 - `refresh_button`
 
 ### Error codes
@@ -233,7 +296,7 @@ Source files (4):
 - `ui_diagnostics_section_title` = "Diagnostics"
 - `ui_download_complete_different_model_loaded` = "%1$s is ready. Switch to it from the model list when needed."
 - `ui_downloaded_models` = "Downloaded models"
-- `ui_downloaded_models_subtitle` = "Choose which version is active, load a model into memory, or remove versions you no longer need."
+- `ui_downloaded_models_subtitle` = "Load a downloaded model into memory, replace local files, or remove versions you no longer need."
 - `ui_export_diagnostics` = "Export diagnostics"
 - `ui_fix_model_setup` = "Fix model library"
 - `ui_get_ready` = "Get ready"
@@ -251,9 +314,14 @@ Source files (4):
 - `ui_gpu_backend_cpu` = "CPU"
 - `ui_gpu_backend_hexagon` = "Hexagon"
 - `ui_gpu_backend_opencl` = "OpenCL"
+- `ui_hf_candidate_model_card` = "Model card: %1$s"
+- `ui_hf_candidate_prompt_profile` = "Prompt profile: %1$s"
+- `ui_hf_open_model_card` = "Open model card"
+- `ui_hf_target_model_hint` = "Choose the PocketGPT model family this file is compatible with. This does not load the model."
+- `ui_hf_target_model_label` = "Runs as"
 - `ui_load_button_disabled_already_loaded` = "Already loaded"
 - `ui_local_tools_title` = "Local tools"
-- `ui_model_activate_version` = "Set active"
+- `ui_model_activate_version` = "Load"
 - `ui_model_active_version_label` = "Active version: %1$s"
 - `ui_model_artifact_progress` = "File %1$d of %2$d"
 - `ui_model_catalog_source_bundled` = "bundled"
@@ -281,6 +349,8 @@ Source files (4):
 - `ui_model_download_notifications_disabled` = "Notifications are disabled. The download will continue, but cancel/progress controls stay in-app."
 - `ui_model_download_pause` = "Pause"
 - `ui_model_download_paused` = "Download paused."
+- `ui_model_download_queue` = "Download queue"
+- `ui_model_download_queue_subtitle` = "Downloads from sources outside the catalog stay visible here until installed."
 - `ui_model_download_queuing` = "Queuing\u2026"
 - `ui_model_download_resume` = "Resume"
 - `ui_model_download_resumed` = "Download resumed."
@@ -390,7 +460,7 @@ Source files (4):
 - `ui_model_selection_subtitle` = "Pick a preset for everyday chat. Advanced users can assign which downloaded model backs each preset."
 - `ui_model_selection_title` = "Model"
 - `ui_model_setup_hint` = "Models may be missing, inactive, or failed verification. Use the model library, then refresh runtime checks."
-- `ui_model_sheet_subtitle` = "Load, set defaults, import local files, and manage downloads from one place."
+- `ui_model_sheet_subtitle` = "Load downloaded models, import local files, and manage downloads from one place."
 - `ui_model_stage_failure_corrupt` = "Corrupt task metadata"
 - `ui_model_stage_failure_download` = "Network/download failure"
 - `ui_model_stage_failure_install` = "Install failure"

@@ -13,9 +13,9 @@ Use it with:
 
 ## Principles
 
-### 0. Default Android evidence is emulator + connected device + cloud
+### 0. Match Android evidence surfaces to risk
 
-Use:
+Use these surfaces when the changed risk needs them:
 
 1. emulator for fast harness/bootstrap proof
 2. connected device for real hardware/storage/permission proof

@@ -20,20 +20,26 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.TextFieldValue
 import com.pocketagent.android.R
 import com.pocketagent.android.ui.components.SectionHeader
 import com.pocketagent.android.ui.state.CompletionSettings
@@ -56,10 +62,18 @@ internal fun CompletionSettingsSheet(
     var repeatPenalty by remember(settings) { mutableFloatStateOf(settings.repeatPenalty) }
     var frequencyPenalty by remember(settings) { mutableFloatStateOf(settings.frequencyPenalty) }
     var presencePenalty by remember(settings) { mutableFloatStateOf(settings.presencePenalty) }
-    var systemPrompt by remember(settings) { mutableStateOf(settings.systemPrompt) }
+    var systemPrompt by remember(settings.systemPrompt) { mutableStateOf(TextFieldValue(settings.systemPrompt)) }
+    var lastCommittedSystemPrompt by remember(settings.systemPrompt) { mutableStateOf(settings.systemPrompt) }
     var showAdvanced by remember { mutableStateOf(false) }
 
+    LaunchedEffect(settings.systemPrompt) {
+        if (settings.systemPrompt != systemPrompt.text) {
+            systemPrompt = TextFieldValue(settings.systemPrompt)
+        }
+    }
+
     fun emitUpdate() {
+        lastCommittedSystemPrompt = systemPrompt.text
         onSettingsChanged(
             CompletionSettings(
                 temperature = temperature,
@@ -69,10 +83,16 @@ internal fun CompletionSettingsSheet(
                 repeatPenalty = repeatPenalty,
                 frequencyPenalty = frequencyPenalty,
                 presencePenalty = presencePenalty,
-                systemPrompt = systemPrompt,
+                systemPrompt = systemPrompt.text,
                 showThinking = settings.showThinking,
             ),
         )
+    }
+
+    fun commitSystemPromptIfChanged() {
+        if (systemPrompt.text != lastCommittedSystemPrompt) {
+            emitUpdate()
+        }
     }
 
     fun resetDefaults() {
@@ -84,8 +104,15 @@ internal fun CompletionSettingsSheet(
         repeatPenalty = defaults.repeatPenalty
         frequencyPenalty = defaults.frequencyPenalty
         presencePenalty = defaults.presencePenalty
-        systemPrompt = defaults.systemPrompt
+        systemPrompt = TextFieldValue(defaults.systemPrompt)
         onSettingsChanged(defaults)
+    }
+
+    val currentCommitSystemPrompt by rememberUpdatedState(newValue = { commitSystemPromptIfChanged() })
+    DisposableEffect(Unit) {
+        onDispose {
+            currentCommitSystemPrompt()
+        }
     }
 
     Column(
@@ -116,11 +143,15 @@ internal fun CompletionSettingsSheet(
         )
         OutlinedTextField(
             value = systemPrompt,
-            onValueChange = {
-                systemPrompt = it
-                emitUpdate()
-            },
-            modifier = Modifier.fillMaxWidth(),
+            onValueChange = { systemPrompt = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("completion_system_prompt_input")
+                .onFocusChanged { focusState ->
+                    if (!focusState.isFocused) {
+                        commitSystemPromptIfChanged()
+                    }
+                },
             minLines = 3,
             maxLines = 6,
             placeholder = { Text(stringResource(id = R.string.ui_completion_system_prompt_placeholder)) },
@@ -246,6 +277,7 @@ internal fun CompletionSettingsSheet(
         Button(
             onClick = {
                 haptic.tickLight()
+                commitSystemPromptIfChanged()
                 onClose()
             },
             modifier = Modifier.fillMaxWidth(),

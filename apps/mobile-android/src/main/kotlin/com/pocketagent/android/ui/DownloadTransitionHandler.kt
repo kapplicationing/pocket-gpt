@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -19,10 +20,11 @@ import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
 import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 internal fun DownloadTransitionHandler(
-    downloads: List<DownloadTaskState>,
+    downloadsFlow: StateFlow<List<DownloadTaskState>>,
     pendingGetReadyActivation: Pair<String, String>?,
     loadedModelId: String?,
     lastDownloadTransitionRefreshKey: String?,
@@ -41,16 +43,19 @@ internal fun DownloadTransitionHandler(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val previousDownloadStatuses = remember { mutableStateMapOf<String, DownloadTaskStatus>() }
+    val downloads by downloadsFlow.collectAsState()
     val currentPendingGetReadyActivation by rememberUpdatedState(pendingGetReadyActivation)
     val currentLoadedModelId by rememberUpdatedState(loadedModelId)
     val currentLastDownloadTransitionRefreshKey by rememberUpdatedState(lastDownloadTransitionRefreshKey)
     val currentReadinessRefreshSequence by rememberUpdatedState(readinessRefreshSequence)
 
     LaunchedEffect(downloads) {
-        onRefreshSnapshot()
         val transitioned = downloads.firstOrNull { task ->
             val previous = previousDownloadStatuses[task.taskId]
             previous != null && previous != task.status
+        }
+        if (transitioned?.shouldRefreshProvisioningSnapshotOnTransition() == true) {
+            onRefreshSnapshot()
         }
         val transitionFeedback = transitioned?.provisioningFeedbackForDownloadTransition(context)
         transitionFeedback?.let(onSetStatusMessage)
@@ -236,6 +241,13 @@ private fun DownloadTaskState.provisioningFeedbackForDownloadTransition(context:
 
         else -> null
     }
+}
+
+private fun DownloadTaskState.shouldRefreshProvisioningSnapshotOnTransition(): Boolean {
+    return status == DownloadTaskStatus.COMPLETED ||
+        status == DownloadTaskStatus.INSTALLED_INACTIVE ||
+        status == DownloadTaskStatus.FAILED ||
+        status == DownloadTaskStatus.CANCELLED
 }
 
 private fun logProvisioningTransitionForDownloadHandler(

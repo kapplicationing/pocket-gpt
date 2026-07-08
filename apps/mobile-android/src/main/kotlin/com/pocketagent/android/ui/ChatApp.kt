@@ -18,6 +18,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +44,8 @@ import com.pocketagent.android.R
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
+import com.pocketagent.android.ui.components.AppBottomSheet
+import com.pocketagent.android.ui.components.ConfirmDialog
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
 import com.pocketagent.android.ui.state.ChatGateStatus
@@ -87,7 +90,6 @@ fun PocketAgentApp(
     val advancedUnlocked by viewModel.advancedUnlockedFlow.collectAsState()
     val modelLoadingState by provisioningViewModel.modelLoadingState.collectAsState()
     val provisioningSnapshot by provisioningViewModel.provisioningSnapshotFlow.collectAsState()
-    val downloads by provisioningViewModel.downloadsFlow.collectAsState()
     val context = LocalContext.current
     if (!bootstrapCompleted || provisioningSnapshot == null) {
         ProvisioningBootstrapScreen()
@@ -312,7 +314,7 @@ fun PocketAgentApp(
     }
 
     DownloadTransitionHandler(
-        downloads = downloads,
+        downloadsFlow = provisioningViewModel.downloadsFlow,
         pendingGetReadyActivation = pendingGetReadyActivation,
         loadedModelId = modelLoadingState.loadedModel?.modelId,
         lastDownloadTransitionRefreshKey = lastDownloadTransitionRefreshKey,
@@ -442,6 +444,7 @@ fun PocketAgentApp(
     ModalOrchestratorHost(
         viewModel = viewModel,
         activeSurface = activeSurface,
+        runtime = runtime,
         voiceState = voiceState,
         provisioningViewModel = provisioningViewModel,
         defaultGetReadyModelId = defaultGetReadyModelId,
@@ -595,6 +598,7 @@ private fun ChatScreenHost(
 private fun ModalOrchestratorHost(
     viewModel: ChatViewModel,
     activeSurface: ModalSurface,
+    runtime: RuntimeUiState,
     voiceState: VoiceActivationUiState,
     provisioningViewModel: ModelProvisioningViewModel,
     defaultGetReadyModelId: String?,
@@ -635,28 +639,25 @@ private fun ModalOrchestratorHost(
     ) {
         return
     }
-    val state by viewModel.uiState.collectAsState()
-    val provisioningState by provisioningViewModel.uiState.collectAsState()
-    val completionSettings by viewModel.currentCompletionSettingsFlow.collectAsState()
-    val modelLibraryState = remember(provisioningState, defaultGetReadyModelId) {
-        provisioningState.toModelLibraryUiState(defaultGetReadyModelId)
-    } ?: return
-    ModalOrchestrator(
-        state = state,
+
+    if (activeSurface is ModalSurface.ToolSuggestions) {
+        ToolDialog(
+            onDismiss = onDismissSurface,
+            onUsePrompt = onUseToolPrompt,
+        )
+    }
+
+    AdvancedSettingsModalHost(
+        activeSurface = activeSurface,
+        viewModel = viewModel,
+        provisioningViewModel = provisioningViewModel,
+        runtime = runtime,
         voiceState = voiceState,
-        provisioningState = provisioningState,
-        modelLibraryState = modelLibraryState,
         presetBackingStore = presetBackingStore,
-        pendingRoutingModeSwitch = pendingRoutingModeSwitch,
-        pendingMeteredWarningVersion = pendingMeteredWarningVersion,
-        downloads = provisioningState.downloads,
         onDismissSurface = onDismissSurface,
-        onUseToolPrompt = onUseToolPrompt,
         onDefaultThinkingEnabledChanged = onDefaultThinkingEnabledChanged,
         onModelPresetSelected = onModelPresetSelected,
         onOpenPresetCustomization = onOpenPresetCustomization,
-        onPresetBackingChanged = onPresetBackingChanged,
-        onResetPresetMappings = onResetPresetMappings,
         onPerformanceProfileSelected = onPerformanceProfileSelected,
         onKeepAlivePreferenceSelected = onKeepAlivePreferenceSelected,
         onVoiceActivationChanged = onVoiceActivationChanged,
@@ -666,18 +667,235 @@ private fun ModalOrchestratorHost(
         onWifiOnlyDownloadsChanged = onWifiOnlyDownloadsChanged,
         onGpuAccelerationEnabledChanged = onGpuAccelerationEnabledChanged,
         onExportDiagnostics = onExportDiagnostics,
-        completionSettings = completionSettings,
+    )
+
+    PresetCustomizationModalHost(
+        activeSurface = activeSurface,
+        provisioningViewModel = provisioningViewModel,
+        defaultGetReadyModelId = defaultGetReadyModelId,
+        presetBackingStore = presetBackingStore,
+        onDismissSurface = onDismissSurface,
+        onPresetBackingChanged = onPresetBackingChanged,
+        onResetPresetMappings = onResetPresetMappings,
+    )
+
+    CompletionSettingsModalHost(
+        activeSurface = activeSurface,
+        viewModel = viewModel,
+        onDismissSurface = onDismissSurface,
         onCompletionSettingsChanged = onCompletionSettingsChanged,
-        onDismissRoutingModeSwitch = onDismissRoutingModeSwitch,
-        onConfirmRoutingModeSwitch = onConfirmRoutingModeSwitch,
-        onDismissMeteredDownloadWarning = onDismissMeteredDownloadWarning,
-        onConfirmMeteredDownloadWarning = onConfirmMeteredDownloadWarning,
+    )
+
+    RoutingModeSwitchDialog(
+        pending = pendingRoutingModeSwitch,
+        onDismiss = onDismissRoutingModeSwitch,
+        onConfirm = onConfirmRoutingModeSwitch,
+    )
+
+    MeteredDownloadWarningDialog(
+        pending = pendingMeteredWarningVersion,
+        onDismiss = onDismissMeteredDownloadWarning,
+        onConfirm = onConfirmMeteredDownloadWarning,
+    )
+
+    OnboardingModalHost(
+        activeSurface = activeSurface,
+        viewModel = viewModel,
+        provisioningViewModel = provisioningViewModel,
         onOnboardingPageChanged = onOnboardingPageChanged,
         onNextOnboardingPage = onNextOnboardingPage,
         onSkipOnboarding = onSkipOnboarding,
         onFinishOnboarding = onFinishOnboarding,
         onStartOnboardingDownload = onStartOnboardingDownload,
     )
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList")
+private fun AdvancedSettingsModalHost(
+    activeSurface: ModalSurface,
+    viewModel: ChatViewModel,
+    provisioningViewModel: ModelProvisioningViewModel,
+    runtime: RuntimeUiState,
+    voiceState: VoiceActivationUiState,
+    presetBackingStore: PresetBackingStore,
+    onDismissSurface: () -> Unit,
+    onDefaultThinkingEnabledChanged: (Boolean) -> Unit,
+    onModelPresetSelected: (ModelPreset) -> Unit,
+    onOpenPresetCustomization: () -> Unit,
+    onPerformanceProfileSelected: (RuntimePerformanceProfile) -> Unit,
+    onKeepAlivePreferenceSelected: (RuntimeKeepAlivePreference) -> Unit,
+    onVoiceActivationChanged: (Boolean) -> Unit,
+    onRequestAssistantRole: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
+    onWifiOnlyDownloadsChanged: (Boolean) -> Unit,
+    onGpuAccelerationEnabledChanged: (Boolean) -> Unit,
+    onExportDiagnostics: () -> Unit,
+) {
+    if (activeSurface !is ModalSurface.AdvancedSettings) {
+        return
+    }
+
+    val defaultThinkingEnabled by viewModel.defaultThinkingEnabledFlow.collectAsState()
+    val downloadPreferences by provisioningViewModel.downloadPreferencesFlow.collectAsState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    AppBottomSheet(
+        title = stringResource(id = R.string.ui_advanced_controls_title),
+        sheetState = sheetState,
+        onDismiss = onDismissSurface,
+    ) {
+        AdvancedSettingsSheet(
+            runtime = runtime,
+            defaultThinkingEnabled = defaultThinkingEnabled,
+            voiceState = voiceState,
+            wifiOnlyDownloadsEnabled = downloadPreferences.wifiOnlyEnabled,
+            onDefaultThinkingEnabledChanged = onDefaultThinkingEnabledChanged,
+            presetBackingStore = presetBackingStore,
+            onModelPresetSelected = onModelPresetSelected,
+            onOpenPresetCustomization = onOpenPresetCustomization,
+            onPerformanceProfileSelected = onPerformanceProfileSelected,
+            onKeepAlivePreferenceSelected = onKeepAlivePreferenceSelected,
+            onVoiceActivationChanged = onVoiceActivationChanged,
+            onRequestAssistantRole = onRequestAssistantRole,
+            onOpenBatteryOptimizationSettings = onOpenBatteryOptimizationSettings,
+            onOpenAppSettings = onOpenAppSettings,
+            onWifiOnlyDownloadsChanged = onWifiOnlyDownloadsChanged,
+            onGpuAccelerationEnabledChanged = onGpuAccelerationEnabledChanged,
+            onExportDiagnostics = onExportDiagnostics,
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun PresetCustomizationModalHost(
+    activeSurface: ModalSurface,
+    provisioningViewModel: ModelProvisioningViewModel,
+    defaultGetReadyModelId: String?,
+    presetBackingStore: PresetBackingStore,
+    onDismissSurface: () -> Unit,
+    onPresetBackingChanged: (ModelPreset, String) -> Unit,
+    onResetPresetMappings: () -> Unit,
+) {
+    if (activeSurface !is ModalSurface.PresetCustomization) {
+        return
+    }
+
+    val provisioningState by provisioningViewModel.uiState.collectAsState()
+    val modelLibraryState = remember(provisioningState, defaultGetReadyModelId) {
+        provisioningState.toModelLibraryUiState(defaultGetReadyModelId)
+    } ?: return
+    val presetSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    AppBottomSheet(
+        title = stringResource(id = R.string.ui_preset_customize_title),
+        sheetState = presetSheetState,
+        onDismiss = onDismissSurface,
+    ) {
+        PresetCustomizationSheetContent(
+            libraryState = modelLibraryState,
+            presetBackingStore = presetBackingStore,
+            onBackingModelSelected = onPresetBackingChanged,
+            onResetToDefaults = onResetPresetMappings,
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun CompletionSettingsModalHost(
+    activeSurface: ModalSurface,
+    viewModel: ChatViewModel,
+    onDismissSurface: () -> Unit,
+    onCompletionSettingsChanged: (CompletionSettings) -> Unit,
+) {
+    if (activeSurface !is ModalSurface.CompletionSettings) {
+        return
+    }
+
+    val completionSettings by viewModel.currentCompletionSettingsFlow.collectAsState()
+    val completionSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    AppBottomSheet(
+        title = stringResource(id = R.string.ui_completion_settings_title),
+        sheetState = completionSheetState,
+        onDismiss = onDismissSurface,
+    ) {
+        CompletionSettingsSheet(
+            settings = completionSettings,
+            onSettingsChanged = onCompletionSettingsChanged,
+            onClose = onDismissSurface,
+        )
+    }
+}
+
+@Composable
+private fun OnboardingModalHost(
+    activeSurface: ModalSurface,
+    viewModel: ChatViewModel,
+    provisioningViewModel: ModelProvisioningViewModel,
+    onOnboardingPageChanged: (Int) -> Unit,
+    onNextOnboardingPage: () -> Unit,
+    onSkipOnboarding: () -> Unit,
+    onFinishOnboarding: () -> Unit,
+    onStartOnboardingDownload: () -> Unit,
+) {
+    if (activeSurface !is ModalSurface.Onboarding) {
+        return
+    }
+
+    val onboardingPage by viewModel.onboardingPageFlow.collectAsState()
+    val downloads by provisioningViewModel.downloadsFlow.collectAsState()
+    OnboardingScreen(
+        currentPage = onboardingPage,
+        onPageChanged = onOnboardingPageChanged,
+        onNextPage = onNextOnboardingPage,
+        onSkip = onSkipOnboarding,
+        onFinish = onFinishOnboarding,
+        isDownloading = downloads.any { !it.terminal },
+        downloadProgress = downloads.firstOrNull { !it.terminal }?.progressPercent?.div(100f),
+        onStartDownload = onStartOnboardingDownload,
+    )
+}
+
+@Composable
+private fun RoutingModeSwitchDialog(
+    pending: Pair<String, String>?,
+    onDismiss: () -> Unit,
+    onConfirm: (modelId: String, version: String) -> Unit,
+) {
+    pending?.let { (modelId, version) ->
+        ConfirmDialog(
+            title = stringResource(id = R.string.ui_switch_model_title),
+            text = stringResource(id = R.string.ui_switch_model_body, modelId, version),
+            confirmLabel = stringResource(id = R.string.ui_load),
+            dismissLabel = stringResource(id = R.string.ui_later),
+            onConfirm = { onConfirm(modelId, version) },
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+@Composable
+private fun MeteredDownloadWarningDialog(
+    pending: ModelDistributionVersion?,
+    onDismiss: () -> Unit,
+    onConfirm: (ModelDistributionVersion) -> Unit,
+) {
+    pending?.let { version ->
+        ConfirmDialog(
+            title = stringResource(id = R.string.ui_large_download_metered_title),
+            text = stringResource(
+                id = R.string.ui_large_download_metered_body,
+                version.modelId,
+                version.fileSizeBytes.formatAsGiB(),
+            ),
+            confirmLabel = stringResource(id = R.string.ui_large_download_metered_continue),
+            dismissLabel = stringResource(id = R.string.ui_cancel_button),
+            onConfirm = { onConfirm(version) },
+            onDismiss = onDismiss,
+        )
+    }
 }
 
 internal fun canAttachImagesForModel(modelId: String?): Boolean {

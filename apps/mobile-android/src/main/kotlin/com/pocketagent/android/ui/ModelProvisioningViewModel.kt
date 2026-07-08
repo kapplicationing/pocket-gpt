@@ -193,6 +193,10 @@ class ModelProvisioningViewModel internal constructor(
         .map { it.downloads }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.downloads)
+    val downloadPreferencesFlow = _uiState
+        .map { it.downloadPreferences }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.downloadPreferences)
     private val modelOperationStateLock = Any()
 
     @Volatile

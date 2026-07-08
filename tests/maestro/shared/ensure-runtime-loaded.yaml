@@ -1,6 +1,8 @@
 appId: com.pocketagent.android
 ---
+- runFlow: load-chat-last-used-if-present.yaml
 - runFlow: recover-runtime-from-model-library.yaml
+- runFlow: load-chat-last-used-if-present.yaml
 - extendedWaitUntil:
     notVisible: "Setup"
     timeout: 180000
@@ -36,6 +38,14 @@ appId: com.pocketagent.android
     visible:
       id: "send_button"
     timeout: 180000
+- extendedWaitUntil:
+    notVisible:
+      id: "chat_gate_inline_card"
+    timeout: 180000
+- extendedWaitUntil:
+    notVisible:
+      id: "chat_load_last_used_button"
+    timeout: 180000
 - assertNotVisible: "Setup"
 - assertNotVisible: "Retry"
 - assertNotVisible: "Loading…"
@@ -47,3 +57,5 @@ appId: com.pocketagent.android
 - assertNotVisible: "Update"
 - assertNotVisible:
     id: "chat_gate_inline_card"
+- assertNotVisible:
+    id: "chat_load_last_used_button"

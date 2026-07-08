@@ -1,0 +1,26 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible:
+        id: "chat_load_last_used_button"
+    commands:
+      - tapOn:
+          id: "chat_load_last_used_button"
+      - extendedWaitUntil:
+          notVisible:
+            id: "chat_load_last_used_button"
+          timeout: 180000
+      - runFlow: wait-runtime-transition-idle.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "composer_input"
+          timeout: 180000
+      - extendedWaitUntil:
+          visible:
+            id: "send_button"
+          timeout: 180000
+      - extendedWaitUntil:
+          notVisible:
+            id: "chat_gate_inline_card"
+          timeout: 180000

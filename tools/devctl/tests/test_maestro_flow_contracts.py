@@ -155,6 +155,13 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     recovery_text.index('visible: "Unloaded"'),
                     "chat-gated recovery must run before opening Model Library from the Unloaded status.",
                 )
+                self.assertRegex(
+                    recovery_text,
+                    re.compile(
+                        r'visible: "Unloaded"\s*\n\s*commands:\s*\n\s*- tapOn: "Unloaded"\s*\n\s*- extendedWaitUntil:\s*\n\s*visible: "Model library"\s*\n\s*timeout: 20000\s*\n\s*- runFlow: bootstrap-launch-default-model\.yaml',
+                    ),
+                    "Unloaded recovery must finish the default-model bootstrap after opening Model Library.",
+                )
                 self.assertIn(
                     'id: "unified_model_sheet"\n    commands:\n      - runFlow: close-model-library-if-open.yaml\n      - runFlow: bootstrap-launch-default-model.yaml',
                     recovery_text,
@@ -181,6 +188,17 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 self.assertIn('notVisible: "Update"', text)
                 self.assertIn('visible:\n      id: "composer_input"', text)
                 self.assertIn('visible:\n      id: "send_button"', text)
+                self.assertIn("runFlow: load-chat-last-used-if-present.yaml", text)
+                self.assertIn(
+                    'notVisible:\n      id: "chat_load_last_used_button"',
+                    text,
+                )
+                self.assertIn(
+                    'assertNotVisible:\n    id: "chat_load_last_used_button"',
+                    text,
+                )
+                self.assertNotIn('visible: "Loaded"', text)
+                self.assertNotIn('assertVisible: "Loaded"', text)
                 self.assertNotIn('visible: "Send"', text)
                 self.assertLess(
                     text.index('visible:\n      id: "send_button"'),
@@ -415,12 +433,22 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 self.assertIn("assert-post-onboarding-chat-surface.yaml", text)
                 if flow_path.name == "scenario-first-run-download-chat.yaml":
                     self.assertIn("runFlow: shared/ensure-runtime-loaded.yaml", text)
-                    self.assertNotIn("bootstrap-launch-default-model.yaml", text)
                 elif flow_path.parent.name != "shared":
                     self.assertIn("bootstrap-launch-default-model.yaml", text)
                 if flow_path.name == "scenario-first-run-download-chat.yaml":
-                    self.assertIn('visible: "Load last used"', text)
-                    self.assertIn("runFlow: shared/wait-runtime-transition-idle.yaml", text)
+                    self.assertIn("runFlow: shared/bootstrap-launch-default-model.yaml", text)
+                    self.assertIn("runFlow: shared/ensure-runtime-loaded.yaml", text)
+                    self.assertLess(
+                        text.index("assert-post-onboarding-chat-surface.yaml"),
+                        text.index("runFlow: shared/bootstrap-launch-default-model.yaml"),
+                        "first-run lifecycle must settle the chat surface before running the default-model bootstrap.",
+                    )
+                    pre_bootstrap = text.split("runFlow: shared/bootstrap-launch-default-model.yaml", 1)[0]
+                    self.assertNotIn(
+                        'tapOn:\n    id: "send_button"',
+                        pre_bootstrap,
+                        "first-run lifecycle must not depend on the composer Setup tap before bootstrap; use the model-library path.",
+                    )
                     self.assertNotIn(
                         'notVisible:\n            id: "chat_gate_inline_card"',
                         text,
@@ -483,6 +511,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
         local_path = REPO_ROOT / "tests/maestro/shared/dismiss-system-overlays.yaml"
         cloud_path = REPO_ROOT / "tests/maestro-cloud/shared/dismiss-system-overlays.yaml"
         local_text = local_path.read_text(encoding="utf-8")
+        self.assertIn('visible: "System UI isn\'t responding"', local_text)
         self.assertIn('visible: "Pixel Launcher isn\'t responding"', local_text)
         self.assertIn('tapOn: "Wait"', local_text)
         self.assertIn('visible: "Try out your stylus"', local_text)
@@ -495,15 +524,36 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn("LIFECYCLE_E2E_SYSTEM_OVERLAY_RETRIES", script_text)
         self.assertIn("com.google.android.apps.nexuslauncher", script_text)
         self.assertIn("Pixel Launcher isn't responding", script_text)
+        self.assertIn("System UI isn't responding", script_text)
+        self.assertIn("com.android.systemui", script_text)
         self.assertIn("android:id/aerr_wait", script_text)
         self.assertIn("stabilize_system_ui", script_text)
+        self.assertIn("tap_non_app_anr_wait_if_present", script_text)
+        self.assertIn("failure_has_non_app_system_anr_overlay", script_text)
+        self.assertIn("retry_system_overlay_attempts", script_text)
         self.assertIn("am force-stop", script_text)
         self.assertIn("non-app system overlay", script_text)
         self.assertNotIn(" rg ", script_text)
         self.assertNotIn("rg -", script_text)
-        self.assertIn("launcher_overlay_detected=$?", script_text)
+        self.assertIn("system_overlay_detected=$?", script_text)
         self.assertIn("crash_detected=$?", script_text)
         self.assertIn("second_rc=$?", script_text)
+        self.assertRegex(
+            script_text,
+            re.compile(
+                r"set \+e\s+retry_system_overlay_attempts \"\$\{first_rc\}\" \"1\"\s+first_rc=\$\?\s+set -e",
+                re.MULTILINE,
+            ),
+            "First-attempt overlay retry classification must not run under set -e, or normal flow failures skip the clean retry.",
+        )
+        self.assertRegex(
+            script_text,
+            re.compile(
+                r"set \+e\s+retry_system_overlay_attempts \"\$\{second_rc\}\" \"2\"\s+second_rc=\$\?\s+set -e",
+                re.MULTILINE,
+            ),
+            "Second-attempt overlay retry classification must not run under set -e.",
+        )
 
     def test_settle_top_bar_shell_normalizes_ime_before_asserting_top_bar(self) -> None:
         helper_paths = (

@@ -34,6 +34,7 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000
+      - runFlow: bootstrap-launch-default-model.yaml
 - runFlow:
     when:
       visible: "Retry"
@@ -42,6 +43,7 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000
+      - runFlow: bootstrap-launch-default-model.yaml
 - runFlow:
     when:
       visible: "Load"
@@ -50,6 +52,7 @@ appId: com.pocketagent.android
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000
+      - runFlow: bootstrap-launch-default-model.yaml
 - runFlow:
     when:
       visible: "Loaded"

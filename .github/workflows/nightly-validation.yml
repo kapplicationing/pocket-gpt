@@ -155,7 +155,7 @@ jobs:
           echo "${HOME}/.maestro/bin" >> "${GITHUB_PATH}"
 
       - name: Install native Android SDK components
-        run: bash scripts/ci/install_android_sdk_components.sh "cmake;3.22.1"
+        run: bash scripts/ci/install_android_sdk_components.sh "ndk;27.0.12077973" "cmake;3.22.1"
 
       - name: Assemble debug APK
         run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true -Ppocketgpt.nativeAbiFilters=x86_64 :apps:mobile-android:assembleDebug
@@ -220,7 +220,7 @@ jobs:
 
       - name: Install native Android SDK components
         if: env.MAESTRO_CLOUD_API_KEY != ''
-        run: bash scripts/ci/install_android_sdk_components.sh "cmake;3.22.1"
+        run: bash scripts/ci/install_android_sdk_components.sh "ndk;27.0.12077973" "cmake;3.22.1"
 
       - name: Assemble debug APK
         if: env.MAESTRO_CLOUD_API_KEY != ''

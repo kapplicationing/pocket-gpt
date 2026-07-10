@@ -85,6 +85,7 @@ val hfFixtureBaseUrl = providers.gradleProperty("pocketgpt.hfFixtureBaseUrl")
 android {
     namespace = "com.pocketagent.android"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.pocketagent.android"

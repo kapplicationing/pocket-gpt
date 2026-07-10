@@ -368,8 +368,7 @@ private fun estimateMemoryForConfig(
         modelFileSizeBytes = modelFileSizeBytes,
         metadata = modelMetadata,
         nCtx = config.nCtx,
-        kvCacheMethod = config.kvCacheMethod,
-        kvCacheMethodPreset = config.kvCacheMethodPreset,
+        kvCachePreset = config.kvCachePreset,
         nUbatch = config.nUbatch,
         availableMemoryMb = availableMemoryMb,
     )

@@ -46,13 +46,13 @@ class SettingsSheetOpenClWarningTest {
     }
 
     @Test
-    fun `shows warning for q1_0_g128 quantization`() {
+    fun `shows warning for q4 k m quantization`() {
         val runtime = RuntimeUiState(
             gpuAccelerationEnabled = true,
             activeBackend = "opencl",
             backendProfile = "opencl",
             compiledBackend = "opencl",
-            activeModelQuantization = "q1_0_g128",
+            activeModelQuantization = "q4_k_m",
         )
 
         assertTrue(shouldShowOpenClQuantizationWarning(runtime))

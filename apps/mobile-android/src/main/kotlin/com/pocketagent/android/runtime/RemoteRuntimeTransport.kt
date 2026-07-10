@@ -16,8 +16,7 @@ import com.pocketagent.nativebridge.BridgeError
 import com.pocketagent.nativebridge.CachePolicy
 import com.pocketagent.nativebridge.GenerationFinishReason
 import com.pocketagent.nativebridge.GenerationResult
-import com.pocketagent.nativebridge.KvCacheMethod
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
@@ -448,12 +447,8 @@ internal class MessengerRemoteRuntimeTransport(
             ?.getDouble(LlamaRuntimeIpc.EXTRA_RESULT_TOKENS_PER_SEC)
         val peakRssMb = bundle.takeIf { it.containsKey(LlamaRuntimeIpc.EXTRA_RESULT_PEAK_RSS_MB) }
             ?.getDouble(LlamaRuntimeIpc.EXTRA_RESULT_PEAK_RSS_MB)
-        val requestedKvMethod = bundle.getString(LlamaRuntimeIpc.EXTRA_RESULT_REQUESTED_KV_METHOD)
-            ?.let { raw -> runCatching { KvCacheMethod.valueOf(raw) }.getOrNull() }
-        val effectiveKvMethod = bundle.getString(LlamaRuntimeIpc.EXTRA_RESULT_EFFECTIVE_KV_METHOD)
-            ?.let { raw -> runCatching { KvCacheMethod.valueOf(raw) }.getOrNull() }
-        val kvMethodPreset = bundle.getString(LlamaRuntimeIpc.EXTRA_RESULT_KV_METHOD_PRESET)
-            ?.let { raw -> runCatching { KvCacheMethodPreset.valueOf(raw) }.getOrNull() }
+        val kvPreset = bundle.getString(LlamaRuntimeIpc.EXTRA_RESULT_KV_PRESET)
+            ?.let { raw -> runCatching { KvCachePreset.valueOf(raw) }.getOrNull() }
         return GenerationResult(
             finishReason = finishReason,
             tokenCount = bundle.getInt(LlamaRuntimeIpc.EXTRA_RESULT_TOKEN_COUNT, 0),
@@ -465,10 +460,7 @@ internal class MessengerRemoteRuntimeTransport(
             tokensPerSec = tokensPerSec,
             peakRssMb = peakRssMb,
             errorCode = bundle.getString(LlamaRuntimeIpc.EXTRA_ERROR_CODE),
-            requestedKvCacheMethod = requestedKvMethod,
-            effectiveKvCacheMethod = effectiveKvMethod,
-            kvCacheMethodPreset = kvMethodPreset,
-            kvCacheMethodDemotionReason = bundle.getString(LlamaRuntimeIpc.EXTRA_RESULT_KV_METHOD_DEMOTION_REASON),
+            kvCachePreset = kvPreset,
         )
     }
 

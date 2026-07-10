@@ -17,7 +17,6 @@ import com.pocketagent.core.model.NormalizedRuntimeProfile
 import com.pocketagent.core.model.ProductPolicyProfile
 import com.pocketagent.core.model.PromptProfileRegistry
 import com.pocketagent.core.model.PromptTemplateFamily
-import com.pocketagent.core.model.RuntimeBackendFamilyTag
 import com.pocketagent.core.model.RuntimeRequirementProfile
 import com.pocketagent.core.model.ThinkingStrategyId
 import com.pocketagent.core.model.ToolCallStrategyId
@@ -396,14 +395,6 @@ private fun ModelDescriptor.toNormalizedModelSpec(): NormalizedModelSpec {
         runtimeRequirements = RuntimeRequirementProfile(
             bridgeSupported = bridgeSupported,
             minRamGb = minRamGb,
-            requiredBackendFamily = when {
-                descriptorModelId.contains("q1_0_g128") -> RuntimeBackendFamilyTag.OPENCL
-                else -> null
-            },
-            supportedBackendFamilies = when {
-                bridgeSupported -> setOf(RuntimeBackendFamilyTag.CPU, RuntimeBackendFamilyTag.OPENCL)
-                else -> setOf(RuntimeBackendFamilyTag.CPU)
-            },
         ),
         productPolicy = ProductPolicyProfile(
             tier = tier.toNormalizedTier(),

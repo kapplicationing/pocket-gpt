@@ -61,7 +61,6 @@ jobs:
               - "scripts/benchmarks/**"
               - "config/devctl/**"
               - "third_party/llama.cpp/**"
-              - "third_party/llama.cpp-patches/**"
               - ".gitmodules"
             android_instrumented:
               - "apps/mobile-android/**"

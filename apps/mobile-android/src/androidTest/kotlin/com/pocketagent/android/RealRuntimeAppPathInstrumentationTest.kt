@@ -201,74 +201,6 @@ class RealRuntimeAppPathInstrumentationTest {
         )
     }
 
-    @Test
-    fun appPathExplicitBonsaiRoutingProducesBonsaiResponse() = runBlocking {
-        val args = InstrumentationRegistry.getArguments()
-        assumeTrue(
-            "Skipping Bonsai app-path lane. Set stage2_enable_app_path_test=true for RC app-path validation.",
-            parseBooleanArg(args, ARG_ENABLE_APP_PATH_TEST, defaultValue = false),
-        )
-        val bonsaiModelId = args.getString(ARG_BONSAI_MODEL_ID)
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: ModelCatalog.LLAMA_3_2_1B_Q4_K_M
-        val modelPath0_8bRaw = args.getString(ARG_MODEL_PATH_0_8B)?.trim().orEmpty()
-        val modelPathBonsaiRaw = args.getString(ARG_MODEL_PATH_BONSAI)?.trim().orEmpty()
-        assumeTrue(
-            "Skipping Bonsai app-path lane. Provide both a 0.8B baseline path and a Bonsai path via instrumentation arguments.",
-            modelPath0_8bRaw.isNotEmpty() && modelPathBonsaiRaw.isNotEmpty(),
-        )
-        val modelPath0_8b = requireFile(modelPath0_8bRaw)
-        val modelPathBonsai = requireFile(modelPathBonsaiRaw)
-        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-
-        AppRuntimeDependencies.resetRuntimeFacadeFactoryForTests()
-        val seeded0 = seedAndActivateModel(
-            appContext = appContext,
-            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
-            absolutePath = modelPath0_8b,
-        )
-        val seededBonsai = seedAndActivateModel(
-            appContext = appContext,
-            modelId = bonsaiModelId,
-            absolutePath = modelPathBonsai,
-        )
-
-        val snapshot = AppRuntimeDependencies.currentProvisioningSnapshot(appContext)
-        val state0 = snapshot.models.first { it.modelId == ModelCatalog.QWEN_3_5_0_8B_Q4 }
-        val stateBonsai = snapshot.models.first { it.modelId == bonsaiModelId }
-        assertEquals(seeded0.version, state0.activeVersion)
-        assertEquals(seededBonsai.version, stateBonsai.activeVersion)
-        assertEquals(normalizePath(modelPath0_8b), normalizePath(state0.absolutePath.orEmpty()))
-        assertEquals(normalizePath(modelPathBonsai), normalizePath(stateBonsai.absolutePath.orEmpty()))
-        AppRuntimeDependencies.installProductionRuntime(appContext)
-
-        val facade = AppRuntimeDependencies.runtimeFacadeFactory()
-        val startupChecks = facade.runStartupChecks()
-        assertTrue(
-            "Bonsai app-path startup checks contain a backend-unavailable failure: ${startupChecks.joinToString()}",
-            startupChecks.none { check ->
-                val normalized = check.lowercase()
-                normalized.contains("runtime backend is unavailable") ||
-                    normalized.contains("runtime backend is adb_fallback")
-            },
-        )
-        assertEquals("NATIVE_JNI", facade.runtimeBackend())
-        val resourceControl = facade as com.pocketagent.runtime.RuntimeResourceControl
-        val loadResult = resourceControl.loadModel(
-            modelId = bonsaiModelId,
-            modelVersion = seededBonsai.version,
-        )
-        assertTrue(
-            "Expected Bonsai app-path load to succeed, but got detail: ${loadResult.detail}",
-            loadResult.success,
-        )
-        assertEquals(
-            bonsaiModelId,
-            resourceControl.loadedModel()?.modelId,
-        )
-    }
-
     private suspend fun seedAndActivateModel(
         appContext: android.content.Context,
         modelId: String,
@@ -353,8 +285,6 @@ class RealRuntimeAppPathInstrumentationTest {
         private const val ARG_ENABLE_APP_PATH_TEST = "stage2_enable_app_path_test"
         private const val ARG_MODEL_PATH_0_8B = "stage2_model_0_8b_path"
         private const val ARG_MODEL_PATH_1_7B = "stage2_model_1_7b_path"
-        private const val ARG_MODEL_PATH_BONSAI = "stage2_model_bonsai_path"
-        private const val ARG_BONSAI_MODEL_ID = "stage2_model_bonsai_id"
         private const val ARG_MODEL_PATH_SMOLLM3_Q4 = "stage2_model_smol_360m_path"
         private const val ARG_MODEL_PATH_SMOLLM3_DRAFT = "stage2_model_smol_135m_path"
     }

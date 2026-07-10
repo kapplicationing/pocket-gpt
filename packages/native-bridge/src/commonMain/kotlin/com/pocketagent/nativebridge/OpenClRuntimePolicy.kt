@@ -6,25 +6,6 @@ enum class OpenClQuantCompatibility {
     UNSUPPORTED,
 }
 
-enum class OpenClProbeQualificationStatus {
-    QUALIFIED,
-    PENDING,
-    FAILED,
-    UNKNOWN,
-}
-
-data class OpenClQualificationSnapshot(
-    val runtimeSupportsGpuOffload: Boolean? = null,
-    val automaticOpenClEligible: Boolean? = null,
-    val probeStatus: OpenClProbeQualificationStatus = OpenClProbeQualificationStatus.UNKNOWN,
-) {
-    val canAttemptSpecializedFormats: Boolean
-        get() = runtimeSupportsGpuOffload == true && automaticOpenClEligible != false
-
-    val specializedFormatsQualified: Boolean
-        get() = canAttemptSpecializedFormats && probeStatus == OpenClProbeQualificationStatus.QUALIFIED
-}
-
 object OpenClRuntimePolicy {
     const val MIN_AUTOMATIC_ADRENO_GENERATION = 7
 
@@ -42,20 +23,7 @@ object OpenClRuntimePolicy {
         modelPath: String?,
         modelId: String,
         modelVersion: String?,
-        qualification: OpenClQualificationSnapshot = OpenClQualificationSnapshot(),
     ): OpenClQuantCompatibility {
-        val formatHint = ModelRuntimeFormats.infer(
-            modelId = modelId,
-            modelVersion = modelVersion,
-            modelPath = modelPath,
-        )
-        if (formatHint.requiresQualifiedGpu) {
-            return when {
-                qualification.specializedFormatsQualified -> OpenClQuantCompatibility.SUPPORTED
-                qualification.canAttemptSpecializedFormats -> OpenClQuantCompatibility.EXPERIMENTAL
-                else -> OpenClQuantCompatibility.UNSUPPORTED
-            }
-        }
         val versionCompatibility = classifyQuantHint(modelVersion.orEmpty())
         if (versionCompatibility != null) {
             return versionCompatibility
@@ -83,12 +51,10 @@ object OpenClRuntimePolicy {
         modelPath: String?,
         modelId: String,
         modelVersion: String?,
-        qualification: OpenClQualificationSnapshot = OpenClQualificationSnapshot(),
     ): Boolean = releaseQuantCompatibility(
         modelPath = modelPath,
         modelId = modelId,
         modelVersion = modelVersion,
-        qualification = qualification,
     ) == OpenClQuantCompatibility.SUPPORTED
 
     private fun classifyQuantHint(rawHint: String): OpenClQuantCompatibility? {

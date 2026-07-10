@@ -1,11 +1,7 @@
 package com.pocketagent.android
 
-import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.pocketagent.android.runtime.AndroidGpuOffloadQualifier
-import com.pocketagent.android.runtime.AndroidGpuOffloadSupport
-import com.pocketagent.android.runtime.GpuProbeStatus
 import com.pocketagent.android.runtime.RuntimeDiagnosticsSnapshot
 import com.pocketagent.android.runtime.RuntimeDiagnosticsSnapshotParser
 import com.pocketagent.inference.ModelCatalog
@@ -13,8 +9,6 @@ import com.pocketagent.nativebridge.CachePolicy
 import com.pocketagent.nativebridge.GpuExecutionBackend
 import com.pocketagent.nativebridge.ModelLoadOptions
 import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
-import com.pocketagent.nativebridge.OpenClProbeQualificationStatus
-import com.pocketagent.nativebridge.OpenClQualificationSnapshot
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import java.io.File
 import kotlin.math.max
@@ -83,10 +77,7 @@ class RuntimeBackendTruthInstrumentationTest {
             strictGpuOffload: Boolean = false,
             runGeneration: Boolean = false,
         ) {
-            val bridge = NativeJniLlamaCppBridge(
-                fallbackEnabled = false,
-                openClQualificationProvider = buildOpenClQualificationProvider(appContext),
-            )
+            val bridge = NativeJniLlamaCppBridge(fallbackEnabled = false)
             bridge.setRuntimeGenerationConfig(config)
             record(
                 scope = "direct_bridge",
@@ -305,7 +296,6 @@ class RuntimeBackendTruthInstrumentationTest {
             "opencl_icd_filenames" to sanitizeField(snapshot.openclIcdFilenames),
             "opencl_device_count" to payload?.optInt("opencl_device_count", -1)?.takeIf { it >= 0 }?.toString().orEmpty().ifBlank { "unknown" },
             "hexagon_device_count" to payload?.optInt("hexagon_device_count", -1)?.takeIf { it >= 0 }?.toString().orEmpty().ifBlank { "unknown" },
-            "supports_q1_0_g128" to payload?.takeIf { it.has("supports_q1_0_g128") }?.optBoolean("supports_q1_0_g128").toString(),
             "active_model_quantization" to sanitizeField(snapshot.activeModelQuantization),
         )
         extras.forEach { (key, value) ->
@@ -316,26 +306,6 @@ class RuntimeBackendTruthInstrumentationTest {
             fields.forEach { (key, value) ->
                 append('|').append(key).append('=').append(value.ifBlank { "none" })
             }
-        }
-    }
-
-    private fun buildOpenClQualificationProvider(context: Context): () -> OpenClQualificationSnapshot {
-        val support = AndroidGpuOffloadSupport(context.applicationContext)
-        val qualifier = AndroidGpuOffloadQualifier(context.applicationContext)
-        return {
-            val advisory = support.advisory()
-            val probe = qualifier.evaluate(
-                runtimeSupported = advisory.supportedForProbe,
-                deviceAdvisory = advisory,
-            )
-            OpenClQualificationSnapshot(
-                automaticOpenClEligible = advisory.automaticOpenClEligible,
-                probeStatus = when (probe.status) {
-                    GpuProbeStatus.QUALIFIED -> OpenClProbeQualificationStatus.QUALIFIED
-                    GpuProbeStatus.PENDING -> OpenClProbeQualificationStatus.PENDING
-                    GpuProbeStatus.FAILED -> OpenClProbeQualificationStatus.FAILED
-                },
-            )
         }
     }
 

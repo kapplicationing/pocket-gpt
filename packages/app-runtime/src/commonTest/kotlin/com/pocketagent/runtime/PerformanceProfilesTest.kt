@@ -3,8 +3,7 @@ package com.pocketagent.runtime
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.nativebridge.FlashAttnMode
-import com.pocketagent.nativebridge.KvCacheMethod
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -54,8 +53,7 @@ class PerformanceProfilesTest {
         assertEquals(0.05f, balancedGpu.minP)
         assertEquals(64, balancedGpu.repeatLastN)
         assertEquals(1.05f, balancedGpu.repeatPenalty)
-        assertEquals(KvCacheMethod.AUTO, balancedGpu.kvCacheMethod)
-        assertEquals(KvCacheMethodPreset.BALANCED, balancedGpu.kvCacheMethodPreset)
+        assertEquals(KvCachePreset.BALANCED, balancedGpu.kvCachePreset)
         assertEquals(true, balancedGpu.useMmap)
         assertEquals(false, balancedGpu.useMlock)
         assertEquals(128, balancedGpu.nKeep)
@@ -67,8 +65,7 @@ class PerformanceProfilesTest {
         assertEquals(0.05f, fastGpu.minP)
         assertEquals(64, fastGpu.repeatLastN)
         assertEquals(1.05f, fastGpu.repeatPenalty)
-        assertEquals(KvCacheMethod.AUTO, fastGpu.kvCacheMethod)
-        assertEquals(KvCacheMethodPreset.AGGRESSIVE, fastGpu.kvCacheMethodPreset)
+        assertEquals(KvCachePreset.AGGRESSIVE, fastGpu.kvCachePreset)
         assertEquals(true, fastGpu.useMmap)
         assertEquals(false, fastGpu.useMlock)
         assertEquals(256, fastGpu.nKeep)
@@ -148,7 +145,7 @@ class PerformanceProfilesTest {
     }
 
     @Test
-    fun `no profile defaults to ULTRA or EXTREME`() {
+    fun `profiles use only retained kv cache presets`() {
         val profiles = RuntimePerformanceProfile.entries
         profiles.forEach { profile ->
             val config = PerformanceRuntimeConfig.forProfile(
@@ -157,12 +154,8 @@ class PerformanceProfilesTest {
                 gpuEnabled = false,
             )
             assertTrue(
-                config.kvCacheMethodPreset in listOf(
-                    KvCacheMethodPreset.SAFE,
-                    KvCacheMethodPreset.BALANCED,
-                    KvCacheMethodPreset.AGGRESSIVE,
-                ),
-                "Profile ${profile.name} should not default to ${config.kvCacheMethodPreset.name}"
+                config.kvCachePreset in KvCachePreset.entries,
+                "Profile ${profile.name} should use a retained KV cache preset",
             )
         }
     }

@@ -133,7 +133,7 @@ class NativeJniLlamaCppBridgeTest {
     }
 
     @Test
-    fun `opencl policy forces flash attention off and safe turboquant preset on native load`() {
+    fun `opencl policy forces flash attention off and safe kv preset on native load`() {
         val nativeApi = FakeNativeApi(
             initializeOk = true,
             loadOk = true,
@@ -147,146 +147,24 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
                 gpuEnabled = true,
                 gpuLayers = 16,
                 flashAttnMode = FlashAttnMode.ON,
-                kvCacheMethod = KvCacheMethod.TURBOQUANT,
-                kvCacheMethodPreset = KvCacheMethodPreset.AGGRESSIVE,
+                kvCachePreset = KvCachePreset.AGGRESSIVE,
             ),
         )
 
         assertTrue(bridge.isReady())
         assertTrue(bridge.loadModel(ModelCatalog.QWEN_3_5_0_8B_Q4, "/tmp/qwen-0.8b.gguf"))
         assertEquals(listOf(FlashAttnMode.OFF.code), nativeApi.loadFlashAttnCodes)
-        assertEquals(listOf(KvCacheMethod.TURBOQUANT.code), nativeApi.loadKvCacheMethodCodes)
-        assertEquals(listOf(KvCacheMethodPreset.SAFE.code), nativeApi.loadKvCacheMethodPresetCodes)
+        assertEquals(listOf(KvCachePreset.SAFE.code), nativeApi.loadKvCachePresetCodes)
     }
 
     @Test
-    fun `bonsai rejects cpu only devices before load`() {
-        val nativeApi = FakeNativeApi(
-            initializeOk = true,
-            loadOk = true,
-            generatedText = "native hello",
-            supportsGpuOffload = false,
-            backendDiagnosticsJson = """{"compiled_backend":"cpu","supports_q1_0_g128":true}""",
-        )
-        val bridge = NativeJniLlamaCppBridge(
-            nativeApi = nativeApi,
-            libraryLoader = { _ -> },
-            fallbackBridge = FakeFallbackBridge(),
-            fallbackEnabled = false,
-        )
-        bridge.setRuntimeGenerationConfig(
-            RuntimeGenerationConfig.default().copy(
-                gpuEnabled = false,
-                flashAttnMode = FlashAttnMode.ON,
-                kvCacheMethod = KvCacheMethod.TURBOQUANT,
-                kvCacheMethodPreset = KvCacheMethodPreset.AGGRESSIVE,
-                nBatch = 576,
-                nUbatch = 384,
-            ),
-        )
-
-        assertTrue(bridge.isReady())
-        assertFalse(
-            bridge.loadModel(
-                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
-                "/tmp/bonsai-8b-q1_0_g128.gguf",
-                options = ModelLoadOptions(modelVersion = "q1_0_g128"),
-            ),
-        )
-        assertFalse(nativeApi.loadCalled)
-        assertEquals("RUNTIME_INCOMPATIBLE_MODEL_FORMAT", bridge.lastError()?.code)
-        assertTrue(bridge.lastError()?.detail?.contains("qualified_gpu_required=true") == true)
-    }
-
-    @Test
-    fun `bonsai cpu fallback keeps cpu safe runtime config on gpu capable device`() {
-        val nativeApi = FakeNativeApi(
-            initializeOk = true,
-            loadOk = true,
-            generatedText = "native hello",
-            supportsGpuOffload = true,
-            backendDiagnosticsJson = """{"compiled_backend":"opencl","opencl_device_count":1,"supports_q1_0_g128":true}""",
-        )
-        val bridge = NativeJniLlamaCppBridge(
-            nativeApi = nativeApi,
-            libraryLoader = { _ -> },
-            fallbackBridge = FakeFallbackBridge(),
-            fallbackEnabled = false,
-        )
-        bridge.setRuntimeGenerationConfig(
-            RuntimeGenerationConfig.default().copy(
-                gpuEnabled = false,
-                flashAttnMode = FlashAttnMode.ON,
-                kvCacheMethod = KvCacheMethod.TURBOQUANT,
-                kvCacheMethodPreset = KvCacheMethodPreset.AGGRESSIVE,
-                nBatch = 576,
-                nUbatch = 384,
-            ),
-        )
-
-        assertTrue(bridge.isReady())
-        assertTrue(
-            bridge.loadModel(
-                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
-                "/tmp/bonsai-8b-q1_0_g128.gguf",
-                options = ModelLoadOptions(modelVersion = "q1_0_g128"),
-            ),
-        )
-        assertEquals(listOf(FlashAttnMode.OFF.code), nativeApi.loadFlashAttnCodes)
-        assertEquals(listOf(KvCacheMethod.TURBOQUANT.code), nativeApi.loadKvCacheMethodCodes)
-        assertEquals(listOf(KvCacheMethodPreset.SAFE.code), nativeApi.loadKvCacheMethodPresetCodes)
-        assertEquals(listOf(128), nativeApi.loadNBatches)
-        assertEquals(listOf(128), nativeApi.loadNUbatches)
-    }
-
-    @Test
-    fun `q1 release rejects explicitly unsupported gpu device classes before load`() {
-        val nativeApi = FakeNativeApi(
-            initializeOk = true,
-            loadOk = true,
-            generatedText = "native hello",
-            supportsGpuOffload = true,
-            backendDiagnosticsJson = """{"compiled_backend":"opencl","opencl_device_count":1,"supports_q1_0_g128":true}""",
-        )
-        val bridge = NativeJniLlamaCppBridge(
-            nativeApi = nativeApi,
-            libraryLoader = { _ -> },
-            fallbackBridge = FakeFallbackBridge(),
-            fallbackEnabled = false,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = false,
-                    probeStatus = OpenClProbeQualificationStatus.FAILED,
-                )
-            },
-        )
-
-        assertTrue(bridge.isReady())
-        assertFalse(
-            bridge.loadModel(
-                ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
-                "/tmp/bonsai-8b-q1_0_g128.gguf",
-                options = ModelLoadOptions(modelVersion = "q1_0_g128"),
-            ),
-        )
-        assertFalse(nativeApi.loadCalled)
-        assertTrue(bridge.lastError()?.detail?.contains("device_gpu_path_supported=false") == true)
-    }
-
-    @Test
-    fun `non bonsai cpu load preserves requested runtime config`() {
+    fun `cpu load preserves requested runtime config`() {
         val nativeApi = FakeNativeApi(
             initializeOk = true,
             loadOk = true,
@@ -303,8 +181,7 @@ class NativeJniLlamaCppBridgeTest {
             RuntimeGenerationConfig.default().copy(
                 gpuEnabled = false,
                 flashAttnMode = FlashAttnMode.ON,
-                kvCacheMethod = KvCacheMethod.TURBOQUANT,
-                kvCacheMethodPreset = KvCacheMethodPreset.AGGRESSIVE,
+                kvCachePreset = KvCachePreset.AGGRESSIVE,
                 nBatch = 576,
                 nUbatch = 384,
             ),
@@ -313,14 +190,13 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(bridge.isReady())
         assertTrue(bridge.loadModel(ModelCatalog.QWEN_3_5_0_8B_Q4, "/tmp/qwen-0.8b.gguf"))
         assertEquals(listOf(FlashAttnMode.ON.code), nativeApi.loadFlashAttnCodes)
-        assertEquals(listOf(KvCacheMethod.TURBOQUANT.code), nativeApi.loadKvCacheMethodCodes)
-        assertEquals(listOf(KvCacheMethodPreset.AGGRESSIVE.code), nativeApi.loadKvCacheMethodPresetCodes)
+        assertEquals(listOf(KvCachePreset.AGGRESSIVE.code), nativeApi.loadKvCachePresetCodes)
         assertEquals(listOf(576), nativeApi.loadNBatches)
         assertEquals(listOf(384), nativeApi.loadNUbatches)
     }
 
     @Test
-    fun `turboquant requests preserve turboquant metadata`() {
+    fun `kv cache requests preserve preset metadata`() {
         val nativeApi = FakeNativeApi(
             initializeOk = true,
             loadOk = true,
@@ -334,8 +210,7 @@ class NativeJniLlamaCppBridgeTest {
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
-                kvCacheMethod = KvCacheMethod.TURBOQUANT,
-                kvCacheMethodPreset = KvCacheMethodPreset.BALANCED,
+                kvCachePreset = KvCachePreset.BALANCED,
             ),
         )
 
@@ -350,10 +225,7 @@ class NativeJniLlamaCppBridgeTest {
         ) {}
 
         assertTrue(result.success)
-        assertEquals(KvCacheMethod.TURBOQUANT, result.requestedKvCacheMethod)
-        assertEquals(KvCacheMethod.TURBOQUANT, result.effectiveKvCacheMethod)
-        assertEquals(KvCacheMethodPreset.BALANCED, result.kvCacheMethodPreset)
-        assertEquals(null, result.kvCacheMethodDemotionReason)
+        assertEquals(KvCachePreset.BALANCED, result.kvCachePreset)
     }
 
     @Test
@@ -461,12 +333,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -503,12 +369,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -563,12 +423,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -634,12 +488,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -670,12 +518,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -696,83 +538,6 @@ class NativeJniLlamaCppBridgeTest {
     }
 
     @Test
-    fun `bonsai q1 keeps opencl backend and gpu layers when release-qualified`() {
-        val nativeApi = FakeNativeApi(
-            initializeOk = true,
-            loadOk = true,
-            generatedText = "native hello",
-            supportsGpuOffload = true,
-            backendDiagnosticsJson = """{"compiled_backend":"opencl","opencl_device_count":1,"supports_q1_0_g128":true}""",
-        )
-        val bridge = NativeJniLlamaCppBridge(
-            nativeApi = nativeApi,
-            libraryLoader = { _ -> },
-            fallbackBridge = FakeFallbackBridge(),
-            fallbackEnabled = false,
-            gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
-        )
-        bridge.setRuntimeGenerationConfig(
-            RuntimeGenerationConfig.default().copy(
-                gpuEnabled = true,
-                gpuLayers = 20,
-                gpuBackend = GpuExecutionBackend.AUTO,
-            ),
-        )
-
-        assertTrue(bridge.isReady())
-        assertTrue(
-            bridge.loadModel(
-                modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
-                modelPath = "/tmp/Bonsai-8B.gguf",
-                options = ModelLoadOptions(modelVersion = "q1_0_g128"),
-            ),
-        )
-        assertEquals(listOf("opencl"), nativeApi.backendProfiles)
-        assertEquals(listOf(20), nativeApi.loadGpuLayers)
-    }
-
-    @Test
-    fun `bonsai q1 is rejected when runtime format capability is unavailable`() {
-        val nativeApi = FakeNativeApi(
-            initializeOk = true,
-            loadOk = true,
-            generatedText = "native hello",
-            supportsGpuOffload = true,
-            backendDiagnosticsJson = """{"compiled_backend":"opencl","opencl_device_count":1,"supports_q1_0_g128":false}""",
-        )
-        val bridge = NativeJniLlamaCppBridge(
-            nativeApi = nativeApi,
-            libraryLoader = { _ -> },
-            fallbackBridge = FakeFallbackBridge(),
-            fallbackEnabled = false,
-            gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
-        )
-
-        assertTrue(bridge.isReady())
-        assertFalse(
-            bridge.loadModel(
-                modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
-                modelPath = "/tmp/Bonsai-8B.gguf",
-                options = ModelLoadOptions(modelVersion = "q1_0_g128"),
-            ),
-        )
-        assertFalse(nativeApi.loadCalled)
-        assertEquals("RUNTIME_INCOMPATIBLE_MODEL_FORMAT", bridge.lastError()?.code)
-    }
-
-    @Test
     fun `opencl heuristic fallback demotes gpu layers when quantization cannot be inferred`() {
         val nativeApi = FakeNativeApi(
             initializeOk = true,
@@ -787,12 +552,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -827,12 +586,6 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
             fallbackEnabled = false,
             gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
         )
         bridge.setRuntimeGenerationConfig(
             RuntimeGenerationConfig.default().copy(
@@ -954,48 +707,6 @@ class NativeJniLlamaCppBridgeTest {
             ),
         )
         assertEquals(listOf(0), nativeApi.loadGpuLayers)
-    }
-
-    @Test
-    fun `bonsai q1 quant keeps opencl backend and gpu layers on native load`() {
-        val nativeApi = FakeNativeApi(
-            initializeOk = true,
-            loadOk = true,
-            generatedText = "native hello",
-            supportsGpuOffload = true,
-            backendDiagnosticsJson = """{"compiled_backend":"opencl","opencl_device_count":1,"supports_q1_0_g128":true}""",
-        )
-        val bridge = NativeJniLlamaCppBridge(
-            nativeApi = nativeApi,
-            libraryLoader = { _ -> },
-            fallbackBridge = FakeFallbackBridge(),
-            fallbackEnabled = false,
-            gpuOffloadAllowed = true,
-            openClQualificationProvider = {
-                OpenClQualificationSnapshot(
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                )
-            },
-        )
-        bridge.setRuntimeGenerationConfig(
-            RuntimeGenerationConfig.default().copy(
-                gpuEnabled = true,
-                gpuLayers = 20,
-                gpuBackend = GpuExecutionBackend.AUTO,
-            ),
-        )
-
-        assertTrue(bridge.isReady())
-        assertTrue(
-            bridge.loadModel(
-                modelId = ModelCatalog.LLAMA_3_2_1B_Q4_K_M,
-                modelPath = "/tmp/bonsai-8b.gguf",
-                options = ModelLoadOptions(modelVersion = "q1_0_g128"),
-            ),
-        )
-        assertEquals(listOf("opencl"), nativeApi.backendProfiles)
-        assertEquals(listOf(20), nativeApi.loadGpuLayers)
     }
 
     @Test
@@ -1234,19 +945,6 @@ class NativeJniLlamaCppBridgeTest {
         assertEquals(ModelLifecycleErrorCode.OUT_OF_MEMORY, error.code)
     }
 
-    @Test
-    fun `resolveKvCacheMethod with ULTRA preset passes through`() {
-        val result = resolveKvCacheMethod(KvCacheMethod.AUTO, KvCacheMethodPreset.ULTRA)
-        assertEquals(KvCacheMethod.TURBOQUANT, result.effectiveMethod)
-        assertEquals(KvCacheMethodPreset.ULTRA, result.preset)
-    }
-
-    @Test
-    fun `resolveKvCacheMethod with EXTREME preset passes through`() {
-        val result = resolveKvCacheMethod(KvCacheMethod.AUTO, KvCacheMethodPreset.EXTREME)
-        assertEquals(KvCacheMethod.TURBOQUANT, result.effectiveMethod)
-        assertEquals(KvCacheMethodPreset.EXTREME, result.preset)
-    }
 }
 
 private fun waitForLifecycleStates(
@@ -1305,8 +1003,7 @@ private class FakeNativeApi(
     val backendProfiles = mutableListOf<String>()
     val loadGpuLayers = mutableListOf<Int>()
     val loadFlashAttnCodes = mutableListOf<Int>()
-    val loadKvCacheMethodCodes = mutableListOf<Int>()
-    val loadKvCacheMethodPresetCodes = mutableListOf<Int>()
+    val loadKvCachePresetCodes = mutableListOf<Int>()
     val loadNBatches = mutableListOf<Int>()
     val loadNUbatches = mutableListOf<Int>()
     val loadDraftGpuLayers = mutableListOf<Int>()
@@ -1363,8 +1060,7 @@ private class FakeNativeApi(
         nCtx: Int,
         nGpuLayers: Int,
         flashAttnCode: Int,
-        kvCacheMethodCode: Int,
-        kvCacheMethodPresetCode: Int,
+        kvCachePresetCode: Int,
         temperature: Float,
         topK: Int,
         topP: Float,
@@ -1396,8 +1092,7 @@ private class FakeNativeApi(
         loadCalled = true
         loadGpuLayers += nGpuLayers
         loadFlashAttnCodes += flashAttnCode
-        loadKvCacheMethodCodes += kvCacheMethodCode
-        loadKvCacheMethodPresetCodes += kvCacheMethodPresetCode
+        loadKvCachePresetCodes += kvCachePresetCode
         loadNBatches += nBatch
         loadNUbatches += nUbatch
         loadDraftGpuLayers += speculativeDraftGpuLayers

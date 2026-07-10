@@ -1,6 +1,6 @@
 package com.pocketagent.android.runtime
 
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.runtime.PerformanceRuntimeConfig
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import kotlin.test.Test
@@ -34,7 +34,7 @@ class RuntimeTuningDeciderTest {
         assertEquals(128, next.nBatch)
         assertEquals(128, next.nUbatch)
         assertEquals(1, next.speculativeDraftGpuLayers)
-        assertEquals(KvCacheMethodPreset.ULTRA, next.kvCacheMethodPreset)
+        assertEquals(KvCachePreset.AGGRESSIVE, next.kvCachePreset)
         assertEquals(42L, next.updatedAtEpochMs)
         assertEquals("demote_memory_pressure", next.lastDecision)
     }
@@ -227,7 +227,7 @@ class RuntimeTuningDeciderTest {
         )
         val demoted = RuntimeTuningRecommendation(
             gpuLayers = 4,
-            kvCacheMethodPreset = KvCacheMethodPreset.BALANCED,
+            kvCachePreset = KvCachePreset.BALANCED,
             speculativeEnabled = true,
             nBatch = 256,
             nUbatch = 256,
@@ -291,24 +291,23 @@ class RuntimeTuningDeciderTest {
                 artifactIdentity = "ffffeeee11112222",
             ),
         )
-        val kvMethodKey = buildRuntimeTuningStorageKey(
+        val kvPresetKey = buildRuntimeTuningStorageKey(
             prefix = "runtime_tuning_rec__",
             deviceKey = "pixel_8",
             profileName = "FAST",
             mode = "gpu",
             modelId = "qwen3.5-0.8b-q4",
             envelope = baseEnvelope.copy(
-                kvMethod = "turboquant",
-                kvMethodPreset = "balanced",
+                kvPreset = "balanced",
             ),
         )
 
         assertNotEquals(versionKey, contextKey)
         assertNotEquals(versionKey, artifactKey)
-        assertNotEquals(versionKey, kvMethodKey)
+        assertNotEquals(versionKey, kvPresetKey)
         assertNotEquals(contextKey, artifactKey)
-        assertNotEquals(contextKey, kvMethodKey)
-        assertNotEquals(artifactKey, kvMethodKey)
+        assertNotEquals(contextKey, kvPresetKey)
+        assertNotEquals(artifactKey, kvPresetKey)
     }
 
     @Test
@@ -371,7 +370,7 @@ class RuntimeTuningDeciderTest {
     }
 
     @Test
-    fun `memory pressure demotes ULTRA to EXTREME`() {
+    fun `memory pressure demotes balanced kv cache to aggressive`() {
         val decider = RuntimeTuningDecider()
         val targetConfig = PerformanceRuntimeConfig.forProfile(
             profile = RuntimePerformanceProfile.FAST,
@@ -379,11 +378,11 @@ class RuntimeTuningDeciderTest {
             gpuEnabled = true,
             gpuLayers = 16,
         )
-        val appliedConfig = targetConfig.copy(kvCacheMethodPreset = KvCacheMethodPreset.ULTRA)
+        val appliedConfig = targetConfig.copy(kvCachePreset = KvCachePreset.BALANCED)
         val next = decider.nextRecommendation(
             current = RuntimeTuningRecommendation(
                 gpuLayers = 16,
-                kvCacheMethodPreset = KvCacheMethodPreset.ULTRA,
+                kvCachePreset = KvCachePreset.BALANCED,
                 speculativeEnabled = true,
                 speculativeDraftGpuLayers = 2,
                 useMmap = true,
@@ -397,12 +396,12 @@ class RuntimeTuningDeciderTest {
             targetConfig = targetConfig,
             observation = RuntimeTuningObservation(success = false, errorCode = "out_of_memory"),
         )
-        assertEquals(KvCacheMethodPreset.EXTREME, next.kvCacheMethodPreset)
+        assertEquals(KvCachePreset.AGGRESSIVE, next.kvCachePreset)
         assertEquals("demote_memory_pressure", next.lastDecision)
     }
 
     @Test
-    fun `EXTREME stays at EXTREME on memory pressure`() {
+    fun `aggressive kv cache stays aggressive on memory pressure`() {
         val decider = RuntimeTuningDecider()
         val targetConfig = PerformanceRuntimeConfig.forProfile(
             profile = RuntimePerformanceProfile.FAST,
@@ -410,11 +409,11 @@ class RuntimeTuningDeciderTest {
             gpuEnabled = true,
             gpuLayers = 16,
         )
-        val appliedConfig = targetConfig.copy(kvCacheMethodPreset = KvCacheMethodPreset.EXTREME)
+        val appliedConfig = targetConfig.copy(kvCachePreset = KvCachePreset.AGGRESSIVE)
         val next = decider.nextRecommendation(
             current = RuntimeTuningRecommendation(
                 gpuLayers = 16,
-                kvCacheMethodPreset = KvCacheMethodPreset.EXTREME,
+                kvCachePreset = KvCachePreset.AGGRESSIVE,
                 speculativeEnabled = true,
                 speculativeDraftGpuLayers = 2,
                 useMmap = true,
@@ -428,39 +427,21 @@ class RuntimeTuningDeciderTest {
             targetConfig = targetConfig,
             observation = RuntimeTuningObservation(success = false, errorCode = "out_of_memory"),
         )
-        assertEquals(KvCacheMethodPreset.EXTREME, next.kvCacheMethodPreset)
+        assertEquals(KvCachePreset.AGGRESSIVE, next.kvCachePreset)
     }
 
     @Test
-    fun `promotion climbs from EXTREME to ULTRA`() {
+    fun `promotion climbs from aggressive toward balanced`() {
         val decider = RuntimeTuningDecider(nowMs = { 100L })
         val targetConfig = PerformanceRuntimeConfig.forProfile(
-            profile = RuntimePerformanceProfile.FAST,
+            profile = RuntimePerformanceProfile.BALANCED,
             availableCpuThreads = 8,
             gpuEnabled = true,
             gpuLayers = 16,
         )
-        val appliedConfig = targetConfig.copy(kvCacheMethodPreset = KvCacheMethodPreset.EXTREME)
+        val appliedConfig = targetConfig.copy(kvCachePreset = KvCachePreset.AGGRESSIVE)
         var rec = RuntimeTuningRecommendation(
-            gpuLayers = 16,
-            kvCacheMethodPreset = KvCacheMethodPreset.EXTREME,
-            speculativeEnabled = true,
-            speculativeDraftGpuLayers = 2,
-            useMmap = true,
-            nThreads = 8,
-            nThreadsBatch = 12,
-            nBatch = 768,
-            nUbatch = 768,
-            nCtx = 8192,
-            targetGpuLayers = 16,
-            targetSpeculativeEnabled = true,
-            targetSpeculativeDraftGpuLayers = 2,
-            targetUseMmap = true,
-            targetNThreads = 8,
-            targetNThreadsBatch = 12,
-            targetNBatch = 768,
-            targetNUbatch = 768,
-            targetNCtx = 8192,
+            kvCachePreset = KvCachePreset.AGGRESSIVE,
             benchmarkWinCount = 2,
         )
         rec = decider.nextRecommendation(
@@ -474,7 +455,7 @@ class RuntimeTuningDeciderTest {
                 peakRssMb = 1500.0,
             ),
         )
-        assertEquals(KvCacheMethodPreset.ULTRA, rec.kvCacheMethodPreset)
-        assertEquals("promote_kv_method_preset", rec.lastDecision)
+        assertEquals(KvCachePreset.BALANCED, rec.kvCachePreset)
+        assertEquals("promote_kv_preset", rec.lastDecision)
     }
 }

@@ -56,7 +56,7 @@ class AdbDeviceLlamaCppBridge(
         val startedMs = System.currentTimeMillis()
         val serial = activeSerial ?: resolveSerial()
         if (serial == null) {
-            return currentKvMethodGenerationResult(
+            return currentGenerationResult(
                 finishReason = GenerationFinishReason.ERROR,
                 tokenCount = 0,
                 firstTokenMs = -1L,
@@ -67,7 +67,7 @@ class AdbDeviceLlamaCppBridge(
         }
         val model = activeModelId
         if (model == null) {
-            return currentKvMethodGenerationResult(
+            return currentGenerationResult(
                 finishReason = GenerationFinishReason.ERROR,
                 tokenCount = 0,
                 firstTokenMs = -1L,
@@ -92,7 +92,7 @@ class AdbDeviceLlamaCppBridge(
                 ),
             )
         }.getOrElse {
-            return currentKvMethodGenerationResult(
+            return currentGenerationResult(
                 finishReason = GenerationFinishReason.ERROR,
                 tokenCount = 0,
                 firstTokenMs = -1L,
@@ -102,7 +102,7 @@ class AdbDeviceLlamaCppBridge(
             )
         }
         if (shellOutput.exitCode != 0) {
-            return currentKvMethodGenerationResult(
+            return currentGenerationResult(
                 finishReason = GenerationFinishReason.ERROR,
                 tokenCount = 0,
                 firstTokenMs = -1L,
@@ -131,7 +131,7 @@ class AdbDeviceLlamaCppBridge(
                 tokenCount += 1
                 onToken("$token ")
             }
-        return currentKvMethodGenerationResult(
+        return currentGenerationResult(
             finishReason = GenerationFinishReason.COMPLETED,
             tokenCount = tokenCount,
             firstTokenMs = firstTokenMs,
@@ -189,7 +189,7 @@ class AdbDeviceLlamaCppBridge(
         return devices.singleOrNull()
     }
 
-    private fun currentKvMethodGenerationResult(
+    private fun currentGenerationResult(
         finishReason: GenerationFinishReason,
         tokenCount: Int,
         firstTokenMs: Long,
@@ -197,10 +197,6 @@ class AdbDeviceLlamaCppBridge(
         cancelled: Boolean,
         errorCode: String? = null,
     ): GenerationResult {
-        val kvMethodResolution = resolveKvCacheMethod(
-            requestedMethod = runtimeGenerationConfig.kvCacheMethod,
-            preset = runtimeGenerationConfig.kvCacheMethodPreset,
-        )
         return GenerationResult(
             finishReason = finishReason,
             tokenCount = tokenCount,
@@ -208,10 +204,7 @@ class AdbDeviceLlamaCppBridge(
             totalMs = totalMs,
             cancelled = cancelled,
             errorCode = errorCode,
-            requestedKvCacheMethod = kvMethodResolution.requestedMethod,
-            effectiveKvCacheMethod = kvMethodResolution.effectiveMethod,
-            kvCacheMethodPreset = kvMethodResolution.preset,
-            kvCacheMethodDemotionReason = kvMethodResolution.demotionReason,
+            kvCachePreset = runtimeGenerationConfig.kvCachePreset,
         )
     }
 }

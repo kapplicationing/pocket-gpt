@@ -27,20 +27,8 @@
 
 #include "llama.h"
 #include "ggml-backend.h"
-#include "turboquant.h"
-#include "llama-kv-cache.h"
-#include "llama-kv-cache-iswa.h"
-#include "llama-memory-hybrid.h"
 #include "mtmd.h"
 #include "mtmd-helper.h"
-
-#ifndef GGML_HAVE_Q1_0
-#define GGML_HAVE_Q1_0 0
-#endif
-
-#ifndef GGML_HAVE_Q1_0_G128
-#define GGML_HAVE_Q1_0_G128 0
-#endif
 
 namespace {
 constexpr const char * TAG = "PocketLlamaJNI";
@@ -59,11 +47,6 @@ constexpr jint STREAM_STATUS_CANCELLED = 2;
 constexpr jint STREAM_STATUS_CALLBACK_ERROR = 3;
 constexpr jint STREAM_STATUS_UTF8_STREAM_ERROR = 4;
 constexpr jint STREAM_STATUS_RUNTIME_ERROR = 5;
-
-bool runtime_supports_q1_0();
-bool runtime_supports_q1_0_g128();
-bool active_quantization_requires_prism_runtime();
-bool active_quantization_runtime_supported();
 
 std::mutex g_mutex;
 enum class BackendInitMode {
@@ -155,8 +138,8 @@ bool g_last_flash_attn_requested = false;
 bool g_last_flash_attn_gpu_ops = false;
 bool g_last_flash_attn_active = false;
 bool g_last_quantized_kv_cache = false;
-std::string g_last_turboquant_mode = "disabled";
-std::string g_last_turboquant_fallback_reason;
+std::string g_last_kv_cache_mode = "f16";
+std::string g_last_kv_cache_fallback_reason;
 bool g_last_opencl_flash_guard_applied = false;
 bool g_last_opencl_quant_kv_guard_applied = false;
 std::string g_last_model_quantization = "unknown";
@@ -175,22 +158,6 @@ int32_t g_speculative_max_draft_tokens = 6;
 int32_t g_speculative_min_draft_tokens = 2;
 uint64_t g_context_shift_count = 0;
 uint64_t g_context_rebuild_count = 0;
-
-// TurboQuant rotation session (per-model WHT sign vectors)
-tq_session * g_tq_session = nullptr;
-bool g_tq_rotation_enabled = false;
-
-// Per-layer hook contexts for the KV cache rotation callback.
-// Each entry stores a {tq_session*, layer_idx, head_dim} triple so the
-// callback knows which layer's sign vector to use.
-struct TqHookCtx {
-    tq_session * session;
-    int layer_idx;
-    int head_dim;
-    bool skip_rotation; // layer-adaptive: true for first/last N layers
-};
-TqHookCtx * g_tq_hook_ctxs = nullptr;
-void ** g_tq_hook_userdata = nullptr; // void* array pointing into g_tq_hook_ctxs
 
 struct LoadProgressContext {
     JNIEnv * env = nullptr;
@@ -242,9 +209,42 @@ bool model_has_no_kv_cache() {
 bool should_run_native_warmup(bool gpu_ops_active) {
     // Speed-first policy:
     // Native warmup is most valuable when GPU kernels/shader paths are active.
-    // On CPU-only device paths it adds visible load latency, including for
-    // quantized transformer models like Bonsai, without enough first-turn ROI.
+    // On CPU-only device paths it adds visible load latency without enough
+    // first-turn return.
     return gpu_ops_active;
+}
+
+int warmup_context(llama_context * ctx, const llama_model * model) {
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    std::vector<llama_token> tokens;
+    const llama_token bos = llama_vocab_bos(vocab);
+    const llama_token eos = llama_vocab_eos(vocab);
+    if (bos != LLAMA_TOKEN_NULL) {
+        tokens.push_back(bos);
+    }
+    if (eos != LLAMA_TOKEN_NULL) {
+        tokens.push_back(eos);
+    }
+    if (tokens.empty()) {
+        tokens.push_back(0);
+    }
+
+    int result = 0;
+    if (llama_model_has_encoder(model)) {
+        result = llama_encode(ctx, llama_batch_get_one(tokens.data(), tokens.size()));
+        llama_token decoder_start = llama_model_decoder_start_token(model);
+        if (decoder_start == LLAMA_TOKEN_NULL) {
+            decoder_start = bos != LLAMA_TOKEN_NULL ? bos : tokens.front();
+        }
+        tokens.assign(1, decoder_start);
+    }
+    if (result == 0 && llama_model_has_decoder(model)) {
+        result = llama_decode(ctx, llama_batch_get_one(tokens.data(), tokens.size()));
+    }
+    llama_memory_clear(llama_get_memory(ctx), true);
+    llama_synchronize(ctx);
+    llama_perf_context_reset(ctx);
+    return result;
 }
 
 void clear_prefix_cache_slots_locked();
@@ -716,31 +716,6 @@ std::string safe_string(const char * value) {
     return value != nullptr ? value : "";
 }
 
-bool env_flag_enabled(const char * name) {
-    const char * raw = std::getenv(name);
-    if (raw == nullptr) {
-        return false;
-    }
-    const std::string value = lowercase_copy(raw);
-    return value == "1" || value == "true" || value == "yes" || value == "on";
-}
-
-bool turboquant_force_session_alloc_failure() {
-    return env_flag_enabled("POCKETGPT_TURBOQUANT_FORCE_SESSION_ALLOC_FAIL");
-}
-
-bool turboquant_force_hook_registration_failure() {
-    return env_flag_enabled("POCKETGPT_TURBOQUANT_FORCE_HOOK_REG_FAIL");
-}
-
-bool turboquant_force_rotation_unsupported() {
-    return env_flag_enabled("POCKETGPT_TURBOQUANT_FORCE_ROTATION_UNSUPPORTED");
-}
-
-bool turboquant_experimental_types_enabled() {
-    return env_flag_enabled("POCKETGPT_TURBOQUANT_EXPERIMENTAL_TYPES");
-}
-
 int parse_adreno_generation(const std::string & text) {
     const std::string lower = lowercase_copy(text);
     size_t marker = lower.find("adreno");
@@ -803,127 +778,13 @@ bool contains_quant_token(const std::string & normalized_filename, const std::st
     return false;
 }
 
-bool uses_turboquant_kv_cache(jint code) {
-    switch (code) {
-        case 0:  // AUTO
-        case 1:  // TURBOQUANT
-            return true;
-        default:
-            return false;
-    }
-}
-
-// TurboQuant rotation callback for ggml_map_custom1.
-// Applied to K/V tensors before they are written to the KV cache.
-// Each layer gets its own sign vector via per-layer userdata.
-static void turboquant_rotation_callback(
-    struct ggml_tensor * dst,
-    const struct ggml_tensor * src,
-    int ith,
-    int nth,
-    void * userdata)
-{
-    if (!userdata || !src || !dst) return;
-    const auto * hook = static_cast<const TqHookCtx *>(userdata);
-    if (!hook->session) return;
-
-    // Layer-adaptive: skip rotation for protected first/last layers.
-    // These layers store in the quantized format without rotation — still compressed,
-    // but without the distributional assumption that rotation enables.
-    if (hook->skip_rotation) {
-        if (src->data != dst->data) {
-            memcpy(dst->data, src->data, ggml_nbytes(src));
-        }
-        return;
-    }
-
-    const tq_layer_ctx * layer = tq_session_get_layer(hook->session, hook->layer_idx);
-    if (!layer) return;
-
-    const int64_t n_embd_gqa = src->ne[0];
-    const int64_t n_tokens   = src->ne[1];
-    const int head_dim = hook->head_dim;
-    const int n_heads = (int)(n_embd_gqa / head_dim);
-
-    // Parallel over tokens
-    const int64_t row_start = (ith * n_tokens) / nth;
-    const int64_t row_end   = ((ith + 1) * n_tokens) / nth;
-
-    for (int64_t r = row_start; r < row_end; r++) {
-        const float * src_row = (const float *)((const char *)src->data + r * src->nb[1]);
-        float * dst_row = (float *)((char *)dst->data + r * dst->nb[1]);
-
-        // Rotate each head independently
-        for (int h = 0; h < n_heads; h++) {
-            tq_rotate_forward(layer,
-                src_row + h * head_dim,
-                dst_row + h * head_dim,
-                head_dim);
-        }
-    }
-}
-
-// TurboQuant inverse rotation callback for ggml_map_custom1.
-// Applied to attention output before W_o projection to undo the WHT rotation.
-static void turboquant_inverse_rotation_callback(
-    struct ggml_tensor * dst,
-    const struct ggml_tensor * src,
-    int ith,
-    int nth,
-    void * userdata)
-{
-    if (!userdata || !src || !dst) return;
-    const auto * hook = static_cast<const TqHookCtx *>(userdata);
-    if (!hook->session) return;
-
-    if (hook->skip_rotation) {
-        if (src->data != dst->data) {
-            memcpy(dst->data, src->data, ggml_nbytes(src));
-        }
-        return;
-    }
-
-    const tq_layer_ctx * layer = tq_session_get_layer(hook->session, hook->layer_idx);
-    if (!layer) return;
-
-    const int64_t n_embd_gqa = src->ne[0];
-    const int64_t n_tokens   = src->ne[1];
-    const int head_dim = hook->head_dim;
-    const int n_heads = (int)(n_embd_gqa / head_dim);
-
-    const int64_t row_start = (ith * n_tokens) / nth;
-    const int64_t row_end   = ((ith + 1) * n_tokens) / nth;
-
-    for (int64_t r = row_start; r < row_end; r++) {
-        const float * src_row = (const float *)((const char *)src->data + r * src->nb[1]);
-        float * dst_row = (float *)((char *)dst->data + r * dst->nb[1]);
-
-        for (int h = 0; h < n_heads; h++) {
-            tq_rotate_inverse(layer,
-                src_row + h * head_dim,
-                dst_row + h * head_dim,
-                head_dim);
-        }
-    }
-}
-
-// Asymmetric K/V type resolution following KIVI principle:
-// Keys drive attention weights and need more precision than values.
+// Keys drive attention weights and use at least as much precision as values.
 // Returns {type_k, type_v} pair.
 struct kv_type_pair { ggml_type type_k; ggml_type type_v; };
 
-kv_type_pair resolve_turboquant_kv_types(jint preset_code, uint64_t model_size_bytes) {
-    const bool small_model = model_size_bytes > 0 && model_size_bytes < 2ULL * 1024 * 1024 * 1024;
-    const bool experimental = turboquant_experimental_types_enabled();
+kv_type_pair resolve_quantized_kv_types(jint preset_code) {
     switch (preset_code) {
-        case 4:  // EXTREME — keys Q4_0, values Q2_K/TQ_Q2_LM (asymmetric, ~2.5 bpw effective)
-            if (small_model) return { GGML_TYPE_Q8_0, GGML_TYPE_Q4_0 };
-            return { GGML_TYPE_Q4_0, experimental ? GGML_TYPE_TQ_Q2_LM : GGML_TYPE_Q2_K };
-        case 3:  // ULTRA — keys Q8_0, values Q3_K/TQ_Q3_LM (asymmetric, ~3.5 bpw effective)
-            if (small_model) return { GGML_TYPE_Q8_0, GGML_TYPE_Q8_0 };
-            return { GGML_TYPE_Q8_0, experimental ? GGML_TYPE_TQ_Q3_LM : GGML_TYPE_Q3_K };
         case 2:  // AGGRESSIVE — keys Q8_0, values Q4_0 (asymmetric)
-            if (small_model) return { GGML_TYPE_Q8_0, GGML_TYPE_Q8_0 };
             return { GGML_TYPE_Q8_0, GGML_TYPE_Q4_0 };
         case 1:  // BALANCED — keys Q8_0, values Q8_0
             return { GGML_TYPE_Q8_0, GGML_TYPE_Q8_0 };
@@ -1304,14 +1165,11 @@ std::string backend_diagnostics_json() {
         << "\"opencl_adreno_generation\":" << diag.opencl_adreno_generation << ","
         << "\"requested_model_quantization\":\"" << json_escape(g_last_model_quantization) << "\","
         << "\"active_model_quantization\":\"" << json_escape(g_active_model_quantization) << "\","
-        << "\"supports_q1_0\":" << (runtime_supports_q1_0() ? "true" : "false") << ","
-        << "\"supports_q1_0_g128\":" << (runtime_supports_q1_0_g128() ? "true" : "false") << ","
         << "\"model_memory_mode\":\"" << json_escape(model_memory_mode_label()) << "\","
         << "\"prefix_cache_mode\":\"" << json_escape(prefix_cache_mode_label()) << "\","
         << "\"flashAttnActive\":" << (g_last_flash_attn_active ? "true" : "false") << ","
-        << "\"turboquant_mode\":\"" << json_escape(g_last_turboquant_mode) << "\","
-        << "\"turboquant_fallback_reason\":\"" << json_escape(g_last_turboquant_fallback_reason) << "\","
-        << "\"turboquant_experimental_types\":" << (turboquant_experimental_types_enabled() ? "true" : "false") << ","
+        << "\"kv_cache_mode\":\"" << json_escape(g_last_kv_cache_mode) << "\","
+        << "\"kv_cache_fallback_reason\":\"" << json_escape(g_last_kv_cache_fallback_reason) << "\","
         << "\"flash_attn_guard_reason\":\"" << json_escape(flash_attn_guard_reason) << "\","
         << "\"quantized_kv_guard_reason\":\"" << json_escape(quantized_kv_guard_reason) << "\","
         << "\"last_mmap_readahead_label\":\"" << json_escape(g_mmap_telemetry.last_label) << "\","
@@ -1416,28 +1274,6 @@ const char * model_memory_mode_label() {
         return "recurrent";
     }
     return "standard";
-}
-
-bool runtime_supports_q1_0() {
-    return GGML_HAVE_Q1_0 == 1;
-}
-
-bool runtime_supports_q1_0_g128() {
-    return GGML_HAVE_Q1_0_G128 == 1;
-}
-
-bool active_quantization_requires_prism_runtime() {
-    return g_last_model_quantization == "q1_0" || g_last_model_quantization == "q1_0_g128";
-}
-
-bool active_quantization_runtime_supported() {
-    if (g_last_model_quantization == "q1_0") {
-        return runtime_supports_q1_0();
-    }
-    if (g_last_model_quantization == "q1_0_g128") {
-        return runtime_supports_q1_0_g128();
-    }
-    return true;
 }
 
 const char * prefix_cache_mode_label() {
@@ -1656,16 +1492,6 @@ void release_runtime_locked() {
         llama_sampler_free(g_draft_sampler);
         g_draft_sampler = nullptr;
     }
-    // Free TurboQuant rotation session and hook contexts
-    if (g_tq_session) {
-        tq_session_free(g_tq_session);
-        g_tq_session = nullptr;
-        g_tq_rotation_enabled = false;
-    }
-    delete[] g_tq_hook_ctxs;
-    g_tq_hook_ctxs = nullptr;
-    delete[] g_tq_hook_userdata;
-    g_tq_hook_userdata = nullptr;
     if (g_context != nullptr) {
         llama_free(g_context);
         g_context = nullptr;
@@ -1709,8 +1535,8 @@ void release_runtime_locked() {
     g_last_flash_attn_gpu_ops = false;
     g_last_flash_attn_active = false;
     g_last_quantized_kv_cache = false;
-    g_last_turboquant_mode = "disabled";
-    g_last_turboquant_fallback_reason.clear();
+    g_last_kv_cache_mode = "f16";
+    g_last_kv_cache_fallback_reason.clear();
     g_last_opencl_flash_guard_applied = false;
     g_last_opencl_quant_kv_guard_applied = false;
     g_last_model_quantization = "unknown";
@@ -3219,8 +3045,7 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
     jint nCtx,
     jint nGpuLayers,
     jint flashAttnCode,
-    jint kvCacheMethodCode,
-    jint kvCacheMethodPresetCode,
+    jint kvCachePresetCode,
     jfloat temperature,
     jint topK,
     jfloat topP,
@@ -3349,17 +3174,6 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
                 set_backend_error_locked(
                     "OUT_OF_MEMORY",
                     std::string("stage=model_load|errno=") + std::to_string(target_load_errno) + "|detail=" + std::strerror(target_load_errno));
-            } else if (active_quantization_requires_prism_runtime()) {
-                std::ostringstream detail;
-                detail << "quantization=" << g_last_model_quantization
-                       << "|supports_q1_0=" << (runtime_supports_q1_0() ? "true" : "false")
-                       << "|supports_q1_0_g128=" << (runtime_supports_q1_0_g128() ? "true" : "false")
-                       << "|runtime_supported=" << (active_quantization_runtime_supported() ? "true" : "false")
-                       << "|profile=" << g_backend_profile
-                       << "|selected_backend=" << g_active_backend
-                       << "|target_layers=" << static_cast<int>(model_params.n_gpu_layers)
-                       << "|use_mmap=" << (model_params.use_mmap ? "true" : "false");
-                set_backend_error_locked("RUNTIME_INCOMPATIBLE_MODEL_FORMAT", detail.str());
             } else {
                 set_backend_error_locked(
                     "GPU_BACKEND_LOAD_FAILED",
@@ -3401,16 +3215,14 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
         context_params.op_offload = use_gpu_ops;
         const bool is_opencl_backend = (g_active_backend == "opencl");
         const bool opencl_flash_guard_applied = use_gpu_ops && is_opencl_backend;
-        const bool turboquant_kv_applicable = !model_has_no_kv_cache();
-        context_params.kv_unified =
-            uses_turboquant_kv_cache(kvCacheMethodCode) && turboquant_kv_applicable;
+        const bool quantized_kv_applicable = !model_has_no_kv_cache();
+        context_params.kv_unified = quantized_kv_applicable;
         context_params.flash_attn_type = resolve_flash_attn_type(flashAttnCode, opencl_flash_guard_applied);
-        const auto kv_types = resolve_turboquant_kv_types(kvCacheMethodPresetCode, g_model_size_bytes);
+        const auto kv_types = resolve_quantized_kv_types(kvCachePresetCode);
         const ggml_type requested_kv_type_k = kv_types.type_k;
         const ggml_type requested_kv_type_v = kv_types.type_v;
         const bool quantized_kv_requested =
-            uses_turboquant_kv_cache(kvCacheMethodCode) &&
-                turboquant_kv_applicable &&
+            quantized_kv_applicable &&
                 (requested_kv_type_k != GGML_TYPE_F16 || requested_kv_type_v != GGML_TYPE_F16);
         const bool quantized_kv_enabled =
             quantized_kv_requested &&
@@ -3428,18 +3240,18 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
         g_last_opencl_flash_guard_applied = opencl_flash_guard_applied;
         g_last_opencl_quant_kv_guard_applied = quantized_kv_requested && is_opencl_backend;
         g_last_quantized_kv_cache = quantized_kv_enabled;
-        g_last_turboquant_fallback_reason.clear();
-        if (!turboquant_kv_applicable) {
-            g_last_turboquant_mode = "not_applicable";
-            g_last_turboquant_fallback_reason = "recurrent_no_kv_cache";
+        g_last_kv_cache_fallback_reason.clear();
+        if (!quantized_kv_applicable) {
+            g_last_kv_cache_mode = "not_applicable";
+            g_last_kv_cache_fallback_reason = "recurrent_no_kv_cache";
         } else if (quantized_kv_enabled) {
-            g_last_turboquant_mode = "rotation_pending";
+            g_last_kv_cache_mode = "quantized_upstream_rotation";
         } else if (quantized_kv_requested) {
-            g_last_turboquant_mode = "f16_guarded";
-            g_last_turboquant_fallback_reason =
+            g_last_kv_cache_mode = "f16_guarded";
+            g_last_kv_cache_fallback_reason =
                 is_opencl_backend ? "opencl_backend" : "flash_attention_disabled";
         } else {
-            g_last_turboquant_mode = "disabled";
+            g_last_kv_cache_mode = "f16";
         }
         __android_log_print(
             ANDROID_LOG_INFO,
@@ -3459,13 +3271,6 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
             context_params.n_ubatch,
             g_prefix_cache_prefill_only_mode ? "true" : "false",
             recurrent_cpu_batch_cap_applied ? "true" : "false");
-        auto apply_turboquant_f16_fallback = [&](const std::string & reason) {
-            context_params.type_k = GGML_TYPE_F16;
-            context_params.type_v = GGML_TYPE_F16;
-            g_last_quantized_kv_cache = false;
-            g_last_turboquant_mode = "f16_fallback";
-            g_last_turboquant_fallback_reason = reason;
-        };
         auto init_target_context = [&](const char * stage, int * init_errno) -> bool {
             errno = 0;
             g_context = llama_init_from_model(g_model, context_params);
@@ -3486,182 +3291,17 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
             }
             return false;
         };
-        // ── TurboQuant rotation session (pre-context) ───────────────────
-        // Attempt rotation session creation BEFORE llama_init_from_model so
-        // we can fall back to F16 KV types if rotation won't work. The model
-        // metadata functions only need g_model which is already loaded.
-        if (g_tq_session) {
-            tq_session_free(g_tq_session);
-            g_tq_session = nullptr;
-        }
-        g_tq_rotation_enabled = false;
-
-        // Shared model metadata for TurboQuant rotation (used by both
-        // pre-context session creation and post-context hook registration).
-        const int tq_n_layer = llama_model_n_layer(g_model);
-        const int tq_n_embd = llama_model_n_embd(g_model);
-        const int tq_n_head = llama_model_n_head(g_model);
-        const int tq_n_embd_head_k = (tq_n_head > 0) ? (tq_n_embd / tq_n_head) : 0;
-
-        if (quantized_kv_enabled) {
-            const bool head_dim_supported =
-                tq_n_embd_head_k > 0 &&
-                (tq_n_embd_head_k & (tq_n_embd_head_k - 1)) == 0 &&
-                !turboquant_force_rotation_unsupported();
-            if (head_dim_supported) {
-                if (!turboquant_force_session_alloc_failure()) {
-                    g_tq_session = tq_session_create(tq_n_layer, tq_n_embd_head_k, g_model_size_bytes);
-                }
-                if (g_tq_session) {
-                    const bool scratch_ready = tq_session_set_max_embd(g_tq_session, tq_n_embd);
-                    g_tq_rotation_enabled = true;
-                    __android_log_print(ANDROID_LOG_INFO, TAG,
-                        "TURBOQUANT|rotation_enabled=true|layers=%d|head_dim=%d|memory_kb=%.1f|scratch=%s",
-                        tq_n_layer, tq_n_embd_head_k,
-                        tq_session_memory_bytes(g_tq_session) / 1024.0,
-                        scratch_ready ? "true" : "false");
-                    g_last_turboquant_mode = "rotation_enabled";
-                } else {
-                    // Rotation alloc failed — demote to F16 to avoid uncompensated quantization.
-                    apply_turboquant_f16_fallback(
-                        turboquant_force_session_alloc_failure()
-                            ? "session_alloc_failpoint"
-                            : "session_alloc_failed");
-                    __android_log_print(ANDROID_LOG_WARN, TAG,
-                        "TURBOQUANT|rotation_fallback=f16|reason=%s",
-                        g_last_turboquant_fallback_reason.c_str());
-                }
-            } else {
-                // Non-power-of-2 head_dim — WHT rotation impossible, demote to F16.
-                apply_turboquant_f16_fallback(
-                    turboquant_force_rotation_unsupported()
-                        ? "rotation_unsupported_failpoint"
-                        : "not_power_of_2");
-                __android_log_print(ANDROID_LOG_WARN, TAG,
-                    "TURBOQUANT|rotation_fallback=f16|head_dim=%d|reason=%s",
-                    tq_n_embd_head_k,
-                    g_last_turboquant_fallback_reason.c_str());
-            }
-        }
-
-        if (turboquant_experimental_types_enabled()) {
-            ggml_set_type_trait_fns(
-                GGML_TYPE_TQ_Q3_LM,
-                (ggml_to_float_t)   dequantize_row_tq_q3_lm,
-                (ggml_from_float_t) quantize_row_tq_q3_lm);
-            ggml_set_type_trait_fns(
-                GGML_TYPE_TQ_Q2_LM,
-                (ggml_to_float_t)   dequantize_row_tq_q2_lm,
-                (ggml_from_float_t) quantize_row_tq_q2_lm);
-            __android_log_print(ANDROID_LOG_INFO, TAG,
-                "TURBOQUANT|experimental_types_registered=true|tq_q3_lm=%d|tq_q2_lm=%d",
-                GGML_TYPE_TQ_Q3_LM, GGML_TYPE_TQ_Q2_LM);
-        }
-
         int context_init_errno = 0;
         if (!init_target_context("context_init", &context_init_errno)) {
             log_error("nativeLoadModel failed: llama_init_from_model returned null");
             release_runtime_locked();
             return JNI_FALSE;
         }
-
-        // ── TurboQuant rotation hook registration (post-context) ────────
-        if (g_tq_rotation_enabled && g_tq_session) {
-            // Resolve the KV cache from the model's memory backend.
-            // Recurrent/SSM models (Mamba, RWKV, Qwen-SSM) have no KV cache —
-            // TurboQuant is not applicable and must be skipped cleanly.
-            llama_kv_cache * resolved_kv = nullptr;
-            auto * memory = llama_get_memory(g_context);
-            if (memory) {
-                resolved_kv = dynamic_cast<llama_kv_cache *>(memory);
-                if (!resolved_kv) {
-                    // Try hybrid memory (attention + recurrent layers)
-                    auto * hybrid = dynamic_cast<llama_memory_hybrid *>(memory);
-                    if (hybrid) resolved_kv = hybrid->get_mem_attn();
-                }
-                if (!resolved_kv) {
-                    // Try ISWA KV cache (SWA + non-SWA layers)
-                    auto * iswa = dynamic_cast<llama_kv_cache_iswa *>(memory);
-                    if (iswa) resolved_kv = iswa->get_base();
-                }
-            }
-
-            if (!resolved_kv) {
-                // Model does not use a KV cache (e.g. pure recurrent/SSM).
-                // TurboQuant rotation is irrelevant — clean up without
-                // destroying the already-working context.
-                g_tq_rotation_enabled = false;
-                tq_session_free(g_tq_session);
-                g_tq_session = nullptr;
-                g_last_turboquant_mode = "not_applicable";
-                g_last_turboquant_fallback_reason = "no_kv_cache";
-                __android_log_print(ANDROID_LOG_INFO, TAG,
-                    "TURBOQUANT|skipped=true|reason=no_kv_cache|memory_type=%s",
-                    memory ? "recurrent_or_other" : "null");
-            } else {
-                // KV cache found — register rotation hooks.
-                constexpr int PROTECT_N_LAYERS = 2;
-                delete[] g_tq_hook_ctxs;
-                delete[] g_tq_hook_userdata;
-                g_tq_hook_ctxs = new TqHookCtx[tq_n_layer];
-                g_tq_hook_userdata = new void*[tq_n_layer];
-                int protected_count = 0;
-                for (int i = 0; i < tq_n_layer; i++) {
-                    const bool protect = (i < PROTECT_N_LAYERS) ||
-                                         (i >= tq_n_layer - PROTECT_N_LAYERS);
-                    g_tq_hook_ctxs[i] = { g_tq_session, i, tq_n_embd_head_k, protect };
-                    g_tq_hook_userdata[i] = &g_tq_hook_ctxs[i];
-                    if (protect) protected_count++;
-                }
-
-                bool hook_registered = false;
-                const bool hook_failpoint = turboquant_force_hook_registration_failure();
-                if (!hook_failpoint) {
-                    resolved_kv->set_kv_rotation_hook(turboquant_rotation_callback, g_tq_hook_userdata);
-                    resolved_kv->set_q_rotation_hook(turboquant_rotation_callback, g_tq_hook_userdata);
-                    resolved_kv->set_inverse_rotation_hook(turboquant_inverse_rotation_callback, g_tq_hook_userdata);
-                    hook_registered = true;
-                    g_last_turboquant_mode = "rotation_active";
-                    __android_log_print(ANDROID_LOG_INFO, TAG,
-                        "TURBOQUANT|hook_registered=true|n_layer=%d|protected=%d|type_k=%s|type_v=%s",
-                        tq_n_layer, protected_count,
-                        ggml_type_name(context_params.type_k),
-                        ggml_type_name(context_params.type_v));
-                }
-
-                if (!hook_registered) {
-                    g_tq_rotation_enabled = false;
-                    g_last_quantized_kv_cache = false;
-                    tq_session_free(g_tq_session);
-                    g_tq_session = nullptr;
-                    delete[] g_tq_hook_ctxs;
-                    g_tq_hook_ctxs = nullptr;
-                    delete[] g_tq_hook_userdata;
-                    g_tq_hook_userdata = nullptr;
-                    if (g_context != nullptr) {
-                        llama_free(g_context);
-                        g_context = nullptr;
-                    }
-                    apply_turboquant_f16_fallback(
-                        hook_failpoint ? "hook_registration_failpoint" : "hook_registration_failed");
-                    __android_log_print(ANDROID_LOG_WARN, TAG,
-                        "TURBOQUANT|rotation_fallback=f16|reason=%s",
-                        g_last_turboquant_fallback_reason.c_str());
-                    int recovery_errno = 0;
-                    if (!init_target_context("context_reinit_f16_after_hook_failure", &recovery_errno)) {
-                        log_error("nativeLoadModel failed: llama_init_from_model F16 recovery returned null");
-                        release_runtime_locked();
-                        return JNI_FALSE;
-                    }
-                    g_last_turboquant_mode = "f16_recovery";
-                }
-            }
-        }
         g_last_flash_attn_active = context_params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_DISABLED;
         __android_log_print(
             ANDROID_LOG_INFO,
             TAG,
-            "FLASH_ATTN|requested=%s|type=%s|gpu_ops=%s|type_k=%s|type_v=%s|n_ctx=%u|n_batch=%u|n_ubatch=%u|turboquant_mode=%s|fallback_reason=%s",
+            "FLASH_ATTN|requested=%s|type=%s|gpu_ops=%s|type_k=%s|type_v=%s|n_ctx=%u|n_batch=%u|n_ubatch=%u|kv_cache_mode=%s|fallback_reason=%s",
             g_last_flash_attn_requested ? "true" : "false",
             llama_flash_attn_type_name(context_params.flash_attn_type),
             g_last_flash_attn_gpu_ops ? "true" : "false",
@@ -3670,16 +3310,11 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
             context_params.n_ctx,
             context_params.n_batch,
             context_params.n_ubatch,
-            g_last_turboquant_mode.c_str(),
-            g_last_turboquant_fallback_reason.c_str());
+            g_last_kv_cache_mode.c_str(),
+            g_last_kv_cache_fallback_reason.c_str());
 
         if (should_run_native_warmup(use_gpu_ops)) {
-            llama_set_warmup(g_context, true);
-            llama_token bos = llama_vocab_bos(llama_model_get_vocab(g_model));
-            llama_batch warmup_batch = llama_batch_get_one(&bos, 1);
-            const int warmup_rc = llama_decode(g_context, warmup_batch);
-            llama_set_warmup(g_context, false);
-            llama_memory_seq_rm(llama_get_memory(g_context), 0, -1, -1);
+            const int warmup_rc = warmup_context(g_context, g_model);
             __android_log_print(ANDROID_LOG_INFO, TAG, "WARMUP|target|rc=%d", warmup_rc);
         } else {
             __android_log_print(
@@ -3807,13 +3442,7 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
                     if (g_draft_sampler != nullptr) {
                         g_speculative_enabled = true;
                         if (should_run_native_warmup(draft_context_params.offload_kqv)) {
-                            llama_set_warmup(g_draft_context, true);
-                            llama_token draft_bos = llama_vocab_bos(
-                                llama_model_get_vocab(g_draft_model));
-                            llama_batch draft_warmup = llama_batch_get_one(&draft_bos, 1);
-                            const int draft_warmup_rc = llama_decode(g_draft_context, draft_warmup);
-                            llama_set_warmup(g_draft_context, false);
-                            llama_memory_seq_rm(llama_get_memory(g_draft_context), 0, -1, -1);
+                            const int draft_warmup_rc = warmup_context(g_draft_context, g_draft_model);
                             __android_log_print(ANDROID_LOG_INFO, TAG,
                                 "WARMUP|draft|rc=%d", draft_warmup_rc);
                         } else {
@@ -4073,8 +3702,7 @@ Java_com_pocketagent_nativebridge_NativeJniLlamaCppBridge_00024JniNativeApi_nati
     jint nCtx,
     jint nGpuLayers,
     jint flashAttnCode,
-    jint kvCacheMethodCode,
-    jint kvCacheMethodPresetCode,
+    jint kvCachePresetCode,
     jfloat temperature,
     jint topK,
     jfloat topP,
@@ -4111,8 +3739,7 @@ Java_com_pocketagent_nativebridge_NativeJniLlamaCppBridge_00024JniNativeApi_nati
         nCtx,
         nGpuLayers,
         flashAttnCode,
-        kvCacheMethodCode,
-        kvCacheMethodPresetCode,
+        kvCachePresetCode,
         temperature,
         topK,
         topP,
@@ -4576,14 +4203,22 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
         auto jpath = static_cast<jstring>(env->GetObjectArrayElement(imagePaths, i));
         const std::string img_path = to_std_string(env, jpath);
         env->DeleteLocalRef(jpath);
-        mtmd_bitmap * bmp = mtmd_helper_bitmap_init_from_file(g_mtmd_ctx, img_path.c_str());
-        if (bmp == nullptr) {
+        auto media = mtmd_helper_bitmap_init_from_file(g_mtmd_ctx, img_path.c_str(), false);
+        if (media.bitmap == nullptr) {
             env->DeleteLocalRef(callback_class);
             __android_log_print(ANDROID_LOG_ERROR, TAG,
                 "MULTIMODAL|bitmap_load_failed|path=%s", img_path.c_str());
             return STREAM_STATUS_RUNTIME_ERROR;
         }
-        bitmaps.entries.emplace_back(bmp);
+        if (media.video_ctx != nullptr) {
+            mtmd_bitmap_free(media.bitmap);
+            mtmd_helper_video_free(media.video_ctx);
+            env->DeleteLocalRef(callback_class);
+            __android_log_print(ANDROID_LOG_ERROR, TAG,
+                "MULTIMODAL|video_unsupported|path=%s", img_path.c_str());
+            return STREAM_STATUS_RUNTIME_ERROR;
+        }
+        bitmaps.entries.emplace_back(media.bitmap);
     }
 
     // Tokenize prompt with interleaved media markers.

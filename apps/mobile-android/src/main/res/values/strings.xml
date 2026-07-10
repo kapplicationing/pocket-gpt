@@ -162,8 +162,6 @@
     <string name="ui_performance_profile_fast_desc">Faster responses, more battery drain</string>
     <string name="ui_routing_mode_auto">Auto (recommended)</string>
     <string name="ui_routing_mode_auto_desc">Uses the best available model</string>
-    <string name="ui_routing_mode_bonsai">1-bit Bonsai</string>
-    <string name="ui_routing_mode_bonsai_desc">Ultra-lightweight model for fast, battery-efficient responses</string>
     <string name="ui_model_selection_title">Model</string>
     <string name="ui_model_selection_subtitle">Pick a preset for everyday chat. Advanced users can assign which downloaded model backs each preset.</string>
     <string name="ui_preset_auto">Auto</string>
@@ -274,13 +272,8 @@
     <string name="ui_model_download_version_label">%1$s • %2$s</string>
     <string name="ui_model_download_expected_size">Expected size: %1$s</string>
     <string name="ui_model_download_state">State: %1$s (%2$d%%)</string>
-    <string name="ui_experimental">Experimental</string>
     <string name="ui_model_eligibility_runtime_mismatch">This version targets a different runtime build.</string>
     <string name="ui_model_eligibility_runtime_disabled">This model is not enabled in the current runtime.</string>
-    <string name="ui_model_eligibility_gpu_device_unsupported">This model requires a qualified GPU path. This device is not supported.</string>
-    <string name="ui_model_eligibility_gpu_runtime_unavailable">This model requires GPU acceleration, but the runtime GPU path is unavailable on this device.</string>
-    <string name="ui_model_eligibility_gpu_qualification_pending">This model uses a specialized accelerated format. Support on this device is still experimental.</string>
-    <string name="ui_model_eligibility_gpu_qualification_failed">This model uses a specialized accelerated format. This device has not been qualified yet, so support remains experimental.</string>
     <string name="ui_model_installed_version_row">%1$s • version %2$s</string>
     <string name="ui_model_installed_active">Verified and active</string>
     <string name="ui_model_installed_inactive">Verified, activation pending</string>

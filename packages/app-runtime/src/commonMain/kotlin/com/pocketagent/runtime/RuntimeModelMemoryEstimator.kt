@@ -1,7 +1,6 @@
 package com.pocketagent.runtime
 
-import com.pocketagent.nativebridge.KvCacheMethod
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.nativebridge.ModelRuntimeMetadata
 
 data class RuntimeMemoryEstimate(
@@ -20,11 +19,9 @@ object RuntimeModelMemoryEstimator {
         modelFileSizeBytes: Long,
         metadata: ModelRuntimeMetadata?,
         nCtx: Int,
-        kvCacheMethod: KvCacheMethod,
-        kvCacheMethodPreset: KvCacheMethodPreset,
+        kvCachePreset: KvCachePreset,
         nUbatch: Int,
         availableMemoryMb: Double? = null,
-        experimentalTypes: Boolean = false,
     ): RuntimeMemoryEstimate {
         val validMetadata: ModelRuntimeMetadata = metadata?.takeIf { candidate ->
             (candidate.layerCount ?: 0) > 0 &&
@@ -49,24 +46,22 @@ object RuntimeModelMemoryEstimator {
         val vocabSize = validMetadata.vocabSize ?: 0
         val embeddingSize = validMetadata.embeddingSize ?: 0
 
-        // Asymmetric K/V: keys get more precision than values (KIVI principle).
+        // Asymmetric K/V: the aggressive preset keeps keys at Q8_0 and compresses values to Q4_0.
         // AGGRESSIVE: keys Q8_0, values Q4_0. BALANCED: both Q8_0. SAFE: both F16.
-        // Small models (<2GB) get clamped: ULTRA->BALANCED, EXTREME->AGGRESSIVE (mirrors C++).
-        val (effectivePresetK, effectivePresetV) = effectiveKvPresets(kvCacheMethodPreset, modelFileSizeBytes)
         val kvCacheBytes = (
             layerCount.toLong() *
                 effectiveCtx.toLong() *
                 headCountKv.toLong() *
                 (
-                    keyLength.toDouble() * bytesPerElementK(kvCacheMethod, effectivePresetK) +
-                        valueLength.toDouble() * bytesPerElementV(kvCacheMethod, effectivePresetV, experimentalTypes)
+                    keyLength.toDouble() * bytesPerElementK(kvCachePreset) +
+                        valueLength.toDouble() * bytesPerElementV(kvCachePreset)
                     )
             ).toLong()
         val computeBufferBytes = (vocabSize.toLong() + embeddingSize.toLong()) * nUbatch.coerceAtLeast(1).toLong() * 4L
-        // TurboQuant WHT rotation overhead: one sign vector (float[head_dim]) per layer.
-        // Only allocated when quantized KV is active (BALANCED or AGGRESSIVE preset).
-        val rotationOverheadBytes = when (kvCacheMethodPreset) {
-            KvCacheMethodPreset.SAFE -> 0L
+        // Hadamard rotation overhead: one sign vector (float[head_dim]) per layer.
+        // It is only allocated when quantized KV is active.
+        val rotationOverheadBytes = when (kvCachePreset) {
+            KvCachePreset.SAFE -> 0L
             else -> layerCount.toLong() * keyLength.toLong() * 4L
         }
         val estimatedBytes = ((modelFileSizeBytes + kvCacheBytes + computeBufferBytes + rotationOverheadBytes).toDouble() * METADATA_OVERHEAD_MULTIPLIER)
@@ -96,58 +91,20 @@ object RuntimeModelMemoryEstimator {
         )
     }
 
-    // Asymmetric K/V bytes-per-element following KIVI principle:
-    // Keys need more precision than values since they drive attention weights.
-    private fun bytesPerElementK(method: KvCacheMethod, preset: KvCacheMethodPreset): Double {
-        return when (method) {
-            KvCacheMethod.AUTO,
-            KvCacheMethod.TURBOQUANT,
-            -> when (preset) {
-                KvCacheMethodPreset.SAFE -> 2.0          // F16
-                KvCacheMethodPreset.BALANCED -> 1.0625   // Q8_0
-                KvCacheMethodPreset.AGGRESSIVE -> 1.0625 // Q8_0 (keys get more bits)
-                KvCacheMethodPreset.ULTRA -> 1.0625      // Q8_0 (keys still Q8_0)
-                KvCacheMethodPreset.EXTREME -> 0.5625    // Q4_0 (keys finally reduced)
-            }
-        }
-    }
-
-    private fun bytesPerElementV(
-        method: KvCacheMethod,
-        preset: KvCacheMethodPreset,
-        experimentalTypes: Boolean = false,
-    ): Double {
-        return when (method) {
-            KvCacheMethod.AUTO,
-            KvCacheMethod.TURBOQUANT,
-            -> when (preset) {
-                KvCacheMethodPreset.SAFE -> 2.0          // F16
-                KvCacheMethodPreset.BALANCED -> 1.0625   // Q8_0
-                KvCacheMethodPreset.AGGRESSIVE -> 0.5625 // Q4_0
-                KvCacheMethodPreset.ULTRA ->
-                    if (experimentalTypes) 0.4375         // TQ_Q3_LM (14/32)
-                    else 0.4297                           // Q3_K (~3.4375 bpw)
-                KvCacheMethodPreset.EXTREME ->
-                    if (experimentalTypes) 0.3125         // TQ_Q2_LM (10/32)
-                    else 0.3281                           // Q2_K (~2.625 bpw)
-            }
-        }
-    }
-
-    private const val SMALL_MODEL_THRESHOLD_BYTES = 2L * 1024 * 1024 * 1024
-
-    // Mirror the C++ resolve_turboquant_kv_types small-model safety clamp.
-    // Returns effective (K preset, V preset) after small-model demotion.
-    private fun effectiveKvPresets(
-        preset: KvCacheMethodPreset,
-        modelFileSizeBytes: Long,
-    ): Pair<KvCacheMethodPreset, KvCacheMethodPreset> {
-        val smallModel = modelFileSizeBytes in 1 until SMALL_MODEL_THRESHOLD_BYTES
-        if (!smallModel) return preset to preset
+    // Bytes per element for the exact upstream GGML types selected by each preset.
+    private fun bytesPerElementK(preset: KvCachePreset): Double {
         return when (preset) {
-            KvCacheMethodPreset.EXTREME -> KvCacheMethodPreset.BALANCED to KvCacheMethodPreset.AGGRESSIVE
-            KvCacheMethodPreset.ULTRA -> KvCacheMethodPreset.BALANCED to KvCacheMethodPreset.BALANCED
-            else -> preset to preset
+            KvCachePreset.SAFE -> 2.0          // F16
+            KvCachePreset.BALANCED -> 1.0625   // Q8_0
+            KvCachePreset.AGGRESSIVE -> 1.0625 // Q8_0 (keys get more bits)
+        }
+    }
+
+    private fun bytesPerElementV(preset: KvCachePreset): Double {
+        return when (preset) {
+            KvCachePreset.SAFE -> 2.0          // F16
+            KvCachePreset.BALANCED -> 1.0625   // Q8_0
+            KvCachePreset.AGGRESSIVE -> 0.5625 // Q4_0
         }
     }
 

@@ -3,8 +3,7 @@ package com.pocketagent.runtime
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.nativebridge.FlashAttnMode
-import com.pocketagent.nativebridge.KvCacheMethod
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 
 enum class RuntimePerformanceProfile {
     BATTERY,
@@ -26,8 +25,7 @@ data class PerformanceRuntimeConfig(
     val gpuEnabled: Boolean,
     val gpuLayers: Int,
     val flashAttnMode: FlashAttnMode,
-    val kvCacheMethod: KvCacheMethod,
-    val kvCacheMethodPreset: KvCacheMethodPreset,
+    val kvCachePreset: KvCachePreset,
     val temperature: Float,
     val topK: Int,
     val topP: Float,
@@ -128,11 +126,10 @@ data class PerformanceRuntimeConfig(
                 } else {
                     FlashAttnMode.AUTO
                 },
-                kvCacheMethod = KvCacheMethod.AUTO,
-                kvCacheMethodPreset = when (profile) {
-                    RuntimePerformanceProfile.BATTERY -> KvCacheMethodPreset.SAFE
-                    RuntimePerformanceProfile.BALANCED -> KvCacheMethodPreset.BALANCED
-                    RuntimePerformanceProfile.FAST -> KvCacheMethodPreset.AGGRESSIVE
+                kvCachePreset = when (profile) {
+                    RuntimePerformanceProfile.BATTERY -> KvCachePreset.SAFE
+                    RuntimePerformanceProfile.BALANCED -> KvCachePreset.BALANCED
+                    RuntimePerformanceProfile.FAST -> KvCachePreset.AGGRESSIVE
                 },
                 temperature = 0.6f,
                 topK = if (profile == RuntimePerformanceProfile.BATTERY) 24 else 40,

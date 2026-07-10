@@ -21,7 +21,4 @@ Use this section for system boundaries, engineering contracts, and ADR history.
 ## Research and Decisions
 
 - ADRs: `docs/architecture/adrs/`
-- KIVI assessment: `docs/architecture/kivi-assessment.md`
 - Vendor maintenance: `docs/architecture/llama-vendor-maintenance.md`
-- TurboQuant plan: `docs/architecture/turboquant-benchmark-plan.md`
-- TurboQuant learnings: `docs/architecture/turboquant-research-learnings.md`

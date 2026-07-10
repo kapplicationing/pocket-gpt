@@ -70,7 +70,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.ModelEligibilityReason
-import com.pocketagent.android.runtime.ModelSupportLevel
 import com.pocketagent.android.runtime.ModelVersionEligibility
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.runtime.huggingface.HuggingFaceCandidate
@@ -1556,17 +1555,13 @@ private fun DownloadedModelCard(
                     pulsing = badge == DownloadedModelBadge.SWITCHING,
                 )
             }
-            eligibilityMessage(eligibility)?.takeIf { message ->
-                eligibility.experimental || !eligibility.loadAllowed
+            eligibilityMessage(eligibility)?.takeIf {
+                !eligibility.loadAllowed
             }?.let { message ->
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (eligibility.experimental) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
             FlowRow(
@@ -1645,12 +1640,6 @@ private fun AvailableModelCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(displayName, style = MaterialTheme.typography.labelLarge)
-                if (eligibility.supportLevel == ModelSupportLevel.EXPERIMENTAL) {
-                    StatusRow(
-                        color = MaterialTheme.colorScheme.tertiary,
-                        label = stringResource(id = R.string.ui_experimental),
-                    )
-                }
             }
             Text(
                 text = stringResource(
@@ -1673,11 +1662,7 @@ private fun AvailableModelCard(
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (eligibility.experimental) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
             // Download progress section — animates in/out when a task appears or disappears
@@ -2040,14 +2025,6 @@ private fun eligibilityMessage(eligibility: ModelVersionEligibility): String? {
             stringResource(id = R.string.ui_model_eligibility_runtime_mismatch)
         ModelEligibilityReason.MODEL_NOT_RUNTIME_ENABLED ->
             stringResource(id = R.string.ui_model_eligibility_runtime_disabled)
-        ModelEligibilityReason.DEVICE_GPU_CLASS_UNSUPPORTED ->
-            stringResource(id = R.string.ui_model_eligibility_gpu_device_unsupported)
-        ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE ->
-            stringResource(id = R.string.ui_model_eligibility_gpu_runtime_unavailable)
-        ModelEligibilityReason.GPU_QUALIFICATION_PENDING ->
-            stringResource(id = R.string.ui_model_eligibility_gpu_qualification_pending)
-        ModelEligibilityReason.GPU_QUALIFICATION_FAILED ->
-            stringResource(id = R.string.ui_model_eligibility_gpu_qualification_failed)
     }
 }
 

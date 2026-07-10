@@ -67,14 +67,6 @@ enum class CapabilityFlag {
     LONG_CONTEXT,
 }
 
-enum class RuntimeBackendFamilyTag {
-    CPU,
-    OPENCL,
-    HEXAGON,
-    VULKAN,
-    REMOTE,
-}
-
 enum class NormalizedModelTier {
     BASELINE,
     FAST,
@@ -158,8 +150,6 @@ data class RuntimeRequirementProfile(
     val bridgeSupported: Boolean = false,
     val minRamGb: Int? = null,
     val minStorageBytes: Long? = null,
-    val requiredBackendFamily: RuntimeBackendFamilyTag? = null,
-    val supportedBackendFamilies: Set<RuntimeBackendFamilyTag> = emptySet(),
     val runtimeCompatibilityTags: Set<String> = emptySet(),
     val preferredContextTokens: Int? = null,
     val preferredBatchSize: Int? = null,

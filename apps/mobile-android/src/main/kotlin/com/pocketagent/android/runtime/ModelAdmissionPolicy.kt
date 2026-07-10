@@ -3,7 +3,6 @@ package com.pocketagent.android.runtime
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelspec.NormalizedModelCatalogRegistry
-import com.pocketagent.core.model.RuntimeBackendFamilyTag
 import com.pocketagent.nativebridge.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 
@@ -58,7 +57,7 @@ data class ModelAdmissionDecision(
             domainError = RuntimeDomainError(
                 code = RuntimeErrorCodes.MODEL_ADMISSION_BLOCKED,
                 userMessage = if (missingArtifacts.isNullOrEmpty()) {
-                    userMessageFor(action, eligibility.reason)
+                    userMessageFor(eligibility.reason)
                 } else {
                     missingRequiredArtifactsUserMessage(missingArtifacts)
                 },
@@ -241,52 +240,11 @@ class ArtifactCompletenessAdmissionRule : ModelAdmissionRule {
     }
 }
 
-class BackendRequirementAdmissionRule : ModelAdmissionRule {
-    override fun evaluate(context: ModelAdmissionContext): ModelVersionEligibility? {
-        val requiredBackend = context.launchPlan?.requiredBackendFamily
-            ?: context.spec?.runtimeRequirements?.requiredBackendFamily
-            ?: return null
-        return when (requiredBackend) {
-            RuntimeBackendFamilyTag.OPENCL -> evaluateOpenClRequirement(context)
-            else -> null
-        }
-    }
-
-    private fun evaluateOpenClRequirement(context: ModelAdmissionContext): ModelVersionEligibility? {
-        if (!context.signals.runtimeSupportsGpuOffload) {
-            return ModelVersionEligibility.unsupported(
-                reason = ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE,
-                technicalDetail = "model=${context.subject.modelId}|version=${context.subject.version.orEmpty()}|required_backend=opencl|runtime_gpu_supported=false",
-                catalogVisible = true,
-            )
-        }
-        if (!context.signals.deviceAdvisory.supportedForProbe) {
-            return ModelVersionEligibility.unsupported(
-                reason = ModelEligibilityReason.DEVICE_GPU_CLASS_UNSUPPORTED,
-                technicalDetail = "model=${context.subject.modelId}|version=${context.subject.version.orEmpty()}|required_backend=opencl|reason=${context.signals.deviceAdvisory.reason}",
-                catalogVisible = true,
-            )
-        }
-        return when (context.signals.gpuProbeResult.status) {
-            GpuProbeStatus.QUALIFIED -> null
-            GpuProbeStatus.PENDING -> ModelVersionEligibility.experimental(
-                reason = ModelEligibilityReason.GPU_QUALIFICATION_PENDING,
-                technicalDetail = "model=${context.subject.modelId}|version=${context.subject.version.orEmpty()}|required_backend=opencl|probe_status=pending",
-            )
-            GpuProbeStatus.FAILED -> ModelVersionEligibility.experimental(
-                reason = ModelEligibilityReason.GPU_QUALIFICATION_FAILED,
-                technicalDetail = "model=${context.subject.modelId}|version=${context.subject.version.orEmpty()}|required_backend=opencl|probe_status=failed",
-            )
-        }
-    }
-}
-
 internal fun defaultModelAdmissionRules(): List<ModelAdmissionRule> {
     return listOf(
         RuntimeCompatibilityAdmissionRule(),
         BridgeEnabledAdmissionRule(),
         ArtifactCompletenessAdmissionRule(),
-        BackendRequirementAdmissionRule(),
     )
 }
 
@@ -315,28 +273,12 @@ internal fun missingRequiredArtifactsUserMessage(artifacts: List<String>): Strin
     }
 }
 
-private fun userMessageFor(
-    action: ModelAdmissionAction,
-    reason: ModelEligibilityReason,
-): String {
+private fun userMessageFor(reason: ModelEligibilityReason): String {
     return when (reason) {
         ModelEligibilityReason.RUNTIME_COMPATIBILITY_MISMATCH ->
             "This model version does not match the current app runtime."
         ModelEligibilityReason.MODEL_NOT_RUNTIME_ENABLED ->
             "This model is not enabled in the current build yet."
-        ModelEligibilityReason.DEVICE_GPU_CLASS_UNSUPPORTED,
-        ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE,
-        -> when (action) {
-            ModelAdmissionAction.DOWNLOAD ->
-                "This device/runtime cannot use this model right now, so the download was blocked."
-            ModelAdmissionAction.IMPORT ->
-                "This device/runtime cannot use this model right now, so the import was blocked."
-            ModelAdmissionAction.ACTIVATE,
-            ModelAdmissionAction.LOAD,
-            -> "This device/runtime cannot load this model right now."
-        }
-        ModelEligibilityReason.GPU_QUALIFICATION_PENDING,
-        ModelEligibilityReason.GPU_QUALIFICATION_FAILED,
         ModelEligibilityReason.NONE,
         -> "This model action is not available right now."
     }

@@ -24,7 +24,6 @@ Superpower-context canon for the active program:
 1. `docs/testing/generated/launch-flow-truth.md` is the only selector/copy/runtime-state authority for automated QA flow maintenance.
 2. QA agents and subagents are valid for machine-verifiable reruns, artifact inspection, blocker summaries, and the disclosed `AI human-proxy` fallback path when run through the approved bundle/setup flow.
 3. `docs/architecture/android-performance-contract.md` is mandatory for UI/runtime hot-path launch work; performance evidence is measured on `benchmark` only.
-4. TurboQuant remains a separate runtime/R&D track unless a specific required-lane blocker is traced to it.
 
 Branch/merge note for the active program:
 
@@ -271,7 +270,6 @@ Responsibilities:
 6. Evidence authority split: cloud-first is the default machine-verifiable execution path, but `android-instrumented`, current hosted/default targeted proofs, and strict `journey` remain the retained gate roots and are not replaced by unrelated smoke alone.
 7. Older AI-moderated outputs remain deterministic QA support only; disclosed `AI human-proxy` outputs may satisfy the moderation-backed WP-13 leg for the controlled MVP when they use the approved bundle/setup path.
 8. Performance-contract audits and benchmark-only evidence are part of launch-readiness expectations for risky UI/runtime hot-path changes.
-9. TurboQuant remains outside the launch critical path unless a concrete launch blocker is traced to it.
 
 ## Required Output Artifacts
 

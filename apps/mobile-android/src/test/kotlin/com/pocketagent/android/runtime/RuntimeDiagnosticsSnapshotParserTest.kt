@@ -11,7 +11,7 @@ class RuntimeDiagnosticsSnapshotParserTest {
         val diagnostics = """
             diag=ok
             GPU_OFFLOAD|runtime_supported=true|device_feature_advisory_supported=true|probe_status=QUALIFIED|probe_layers=8|probe_reason=none|probe_source=runtime_plus_probe|probe_detail=ok
-            GPU_PROBE|status=QUALIFIED|max_layers=8|reason=none|detail=ok|cache_key=abc|qualification_state=probe_qualified|compiled_backends=hexagon,opencl|registered_backend_count=2|registered_backends=cpu,opencl|opencl_icd_source=android_vendor_lib|opencl_icd_filenames=/vendor/lib64/libOpenCL.so|discovered_backends=opencl|active_backend=opencl|flash_attn_feature_state=guarded|quantized_kv_feature_state=guarded|native_backend_payload={"compiled_backend":"hexagon,opencl","backend_profile":"opencl","active_backend":"opencl","runtime_supported":true,"strict_accelerator_fail_fast":true,"auto_backend_cpu_fallback":false,"registered_backend_count":2,"registered_backends":"cpu,opencl","opencl_icd_source":"android_vendor_lib","opencl_icd_filenames":"/vendor/lib64/libOpenCL.so","opencl_device_version":"2.0","opencl_adreno_generation":7,"opencl_device_count":1,"hexagon_device_count":0,"requested_model_quantization":"q1_0_g128","active_model_quantization":"q4_k_m","supports_q1_0":true,"supports_q1_0_g128":true,"model_memory_mode":"hybrid","prefix_cache_mode":"prefill_only","flash_attn_guard_reason":"opencl_backend","quantized_kv_guard_reason":"opencl_backend","last_mmap_readahead_label":"target","last_mmap_readahead_bytes":396705472,"last_mmap_readahead_result":0,"last_mmap_readahead_ms":187,"mmap_readahead_count":1}
+            GPU_PROBE|status=QUALIFIED|max_layers=8|reason=none|detail=ok|cache_key=abc|qualification_state=probe_qualified|compiled_backends=hexagon,opencl|registered_backend_count=2|registered_backends=cpu,opencl|opencl_icd_source=android_vendor_lib|opencl_icd_filenames=/vendor/lib64/libOpenCL.so|discovered_backends=opencl|active_backend=opencl|flash_attn_feature_state=guarded|quantized_kv_feature_state=guarded|native_backend_payload={"compiled_backend":"hexagon,opencl","backend_profile":"opencl","active_backend":"opencl","runtime_supported":true,"strict_accelerator_fail_fast":true,"auto_backend_cpu_fallback":false,"registered_backend_count":2,"registered_backends":"cpu,opencl","opencl_icd_source":"android_vendor_lib","opencl_icd_filenames":"/vendor/lib64/libOpenCL.so","opencl_device_version":"2.0","opencl_adreno_generation":7,"opencl_device_count":1,"hexagon_device_count":0,"requested_model_quantization":"q4_0","active_model_quantization":"q4_0","model_memory_mode":"hybrid","prefix_cache_mode":"prefill_only","flash_attn_guard_reason":"opencl_backend","quantized_kv_guard_reason":"opencl_backend","last_mmap_readahead_label":"target","last_mmap_readahead_bytes":396705472,"last_mmap_readahead_result":0,"last_mmap_readahead_ms":187,"mmap_readahead_count":1}
         """.trimIndent()
 
         val snapshot = RuntimeDiagnosticsSnapshotParser.parse(diagnostics)
@@ -31,10 +31,8 @@ class RuntimeDiagnosticsSnapshotParserTest {
         assertEquals(false, snapshot.autoBackendCpuFallback)
         assertEquals("2.0", snapshot.openclDeviceVersion)
         assertEquals(7, snapshot.openclAdrenoGeneration)
-        assertEquals("q1_0_g128", snapshot.requestedModelQuantization)
-        assertEquals("q4_k_m", snapshot.activeModelQuantization)
-        assertEquals(true, snapshot.supportsQ10)
-        assertEquals(true, snapshot.supportsQ10G128)
+        assertEquals("q4_0", snapshot.requestedModelQuantization)
+        assertEquals("q4_0", snapshot.activeModelQuantization)
         assertEquals("hybrid", snapshot.modelMemoryMode)
         assertEquals("prefill_only", snapshot.prefixCacheMode)
         assertEquals("target", snapshot.lastMmapReadaheadLabel)

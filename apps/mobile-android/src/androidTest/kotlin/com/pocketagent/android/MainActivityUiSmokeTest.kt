@@ -134,7 +134,7 @@ class MainActivityUiSmokeTest {
         composeRule.onNodeWithText("Next").performClick()
         composeRule.onNodeWithContentDescription("Step 3 of 3").assertIsDisplayed()
         composeRule.captureScreenshotIfEnabled("ui-03-onboarding-page-3")
-        composeRule.onNodeWithText("Get started").performClick()
+        composeRule.onNodeWithTag("onboarding_get_started").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithText("Welcome").fetchSemanticsNodes().isEmpty()
         }

@@ -60,23 +60,13 @@ class UiErrorMapperTest {
     }
 
     @Test
-    fun `startup mapper differentiates bonsai runtime support guidance`() {
+    fun `startup mapper differentiates unsupported model format guidance`() {
         val error = UiErrorMapper.startupFailure(
-            listOf("RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=bonsai-8b-q1_0_g128|required_format=q1_0_g128"),
+            listOf("RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=unsupported-model|required_format=unsupported_quant"),
         )
 
         assertNotNull(error)
-        assertTrue(error.userMessage.contains("1-bit model format", ignoreCase = true))
-    }
-
-    @Test
-    fun `startup mapper differentiates bonsai gpu requirement guidance`() {
-        val error = UiErrorMapper.startupFailure(
-            listOf("RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=bonsai-8b-q1_0_g128|required_backend=gpu|qualified_gpu_required=true"),
-        )
-
-        assertNotNull(error)
-        assertTrue(error.userMessage.contains("GPU acceleration", ignoreCase = true))
+        assertTrue(error.userMessage.contains("model format", ignoreCase = true))
     }
 
     @Test
@@ -186,30 +176,17 @@ class UiErrorMapperTest {
     }
 
     @Test
-    fun `model lifecycle runtime incompatible maps bonsai support guidance`() {
+    fun `model lifecycle runtime incompatible maps unsupported model format guidance`() {
         val error = UiErrorMapper.fromModelLifecycleResult(
             RuntimeModelLifecycleCommandResult.rejected(
                 code = ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE,
-                detail = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=bonsai-8b-q1_0_g128|required_format=q1_0_g128",
+                detail = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=unsupported-model|required_format=unsupported_quant",
             ),
         )
 
         assertNotNull(error)
-        assertTrue(error.userMessage.contains("1-bit model format", ignoreCase = true))
+        assertTrue(error.userMessage.contains("model format", ignoreCase = true))
         assertEquals(RecoveryAction.CHANGE_MODEL, error.recoveryAction)
     }
 
-    @Test
-    fun `model lifecycle runtime incompatible maps bonsai gpu requirement guidance`() {
-        val error = UiErrorMapper.fromModelLifecycleResult(
-            RuntimeModelLifecycleCommandResult.rejected(
-                code = ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE,
-                detail = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=bonsai-8b-q1_0_g128|required_backend=gpu|qualified_gpu_required=true",
-            ),
-        )
-
-        assertNotNull(error)
-        assertTrue(error.userMessage.contains("GPU acceleration", ignoreCase = true))
-        assertEquals(RecoveryAction.CHANGE_MODEL, error.recoveryAction)
-    }
 }

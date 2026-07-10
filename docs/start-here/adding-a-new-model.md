@@ -131,7 +131,7 @@ You should **not** need to edit any of these test files when adding a standard m
 
 The only test that may need manual updates is `AdaptiveRoutingPolicyTest`, since routing case expectations depend on the relative quality/speed ranks of all models in the catalog.
 
-For specialized runtimes or quantizations such as Bonsai-style 1-bit GGUFs, catalog-driven tests are not enough. Add or update a real Android instrumentation smoke that seeds the model path and exercises JNI load before marking the model as `bridgeSupported`.
+For a new model architecture or quantization, catalog-driven tests are not enough. Add or update a real Android instrumentation smoke that seeds the model path and exercises JNI load before marking the model as `bridgeSupported`.
 
 ## Architecture Notes
 

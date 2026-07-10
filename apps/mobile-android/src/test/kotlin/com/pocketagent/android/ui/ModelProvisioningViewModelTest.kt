@@ -234,65 +234,6 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
-    fun `library ui state carries unsupported bonsai eligibility for cpu only devices`() = runTest(dispatcher) {
-        val bonsaiVersion = ModelDistributionVersion(
-            modelId = "bonsai-1.7b-q1_0_g128",
-            version = "q1_0_g128",
-            downloadUrl = "https://example.com/bonsai-1.7b.gguf",
-            expectedSha256 = "b".repeat(64),
-            provenanceIssuer = "issuer",
-            provenanceSignature = "sig",
-            runtimeCompatibility = "android-arm64-v8a",
-            fileSizeBytes = 123L,
-        )
-        val gateway = FakeProvisioningGateway().apply {
-            manifestResult = ModelDistributionManifest(
-                models = listOf(
-                    ModelDistributionModel(
-                        modelId = bonsaiVersion.modelId,
-                        displayName = "Bonsai 1.7B",
-                        versions = listOf(bonsaiVersion),
-                    ),
-                ),
-            )
-        }
-        val signalsProvider = object : ModelEligibilitySignalsProvider {
-            override fun currentSignals(): ModelEligibilitySignals {
-                return ModelEligibilitySignals(
-                    runtimeCompatibilityTag = "android-arm64-v8a",
-                    runtimeSupportsGpuOffload = false,
-                    deviceAdvisory = DeviceGpuOffloadAdvisory(
-                        supportedForProbe = false,
-                        automaticOpenClEligible = false,
-                        reason = "adreno_family_missing",
-                    ),
-                    gpuProbeResult = GpuProbeResult(
-                        status = GpuProbeStatus.FAILED,
-                        failureReason = GpuProbeFailureReason.RUNTIME_UNSUPPORTED,
-                    ),
-                )
-            }
-        }
-        val viewModel = ModelProvisioningViewModel(
-            gateway = gateway,
-            eligibilityEvaluator = DefaultModelCatalogEligibilityEvaluator(),
-            eligibilitySignalsProvider = signalsProvider,
-            ioDispatcher = dispatcher,
-        )
-        advanceUntilIdle()
-
-        viewModel.refreshManifest()
-        advanceUntilIdle()
-
-        val libraryState = viewModel.uiState.value.toModelLibraryUiState(defaultGetReadyModelId = "qwen3.5-0.8b-q4")
-        val eligibility = libraryState!!.eligibility.eligibilityFor(bonsaiVersion.modelId, bonsaiVersion.version)
-        assertEquals(ModelSupportLevel.UNSUPPORTED, eligibility.supportLevel)
-        assertFalse(eligibility.catalogVisible)
-        assertFalse(eligibility.downloadAllowed)
-        assertFalse(eligibility.loadAllowed)
-    }
-
-    @Test
     fun `runtime ui state exposes lifecycle and installed versions`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway().apply {
             setLifecycle(

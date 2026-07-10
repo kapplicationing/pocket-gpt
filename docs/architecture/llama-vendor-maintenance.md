@@ -1,57 +1,57 @@
 # `llama.cpp` Vendor Maintenance
 
-PocketGPT integrates native inference through the vendored `third_party/llama.cpp` tree and the Android seam in `apps/mobile-android/src/main/cpp/CMakeLists.txt`.
+PocketGPT vendors an unmodified upstream `llama.cpp` revision. Keep every Android-specific policy in the app seam so an upstream refresh remains mechanical and auditable.
 
-## Vendor stack
+## Current pin
 
-Treat the runtime as a layered stack:
+- Repository: `https://github.com/ggml-org/llama.cpp`
+- Tag: `b9951`
+- Commit: `082b326fc76f6e9bbb835b3920a3022bfdb6691c`
+- Local path: `third_party/llama.cpp`
 
-1. `ggml-org/llama.cpp` upstream baseline at `c96f608d9cf19d95b28d0e000f0bd3d2f7c6d4e9`
-2. PocketGPT overlay patches tracked in `third_party/llama.cpp-patches/`
-3. Android integration in `apps/mobile-android/src/main/cpp/`
+PocketGPT carries no downstream changes inside the vendor tree. Do not edit vendored sources or add a local overlay. Put integration code in `apps/mobile-android/src/main/cpp/` and submit generally useful runtime changes upstream.
 
-The app should depend on the patched vendor contents, not on assumptions about which upstream fork happened to contain them.
+## Reproducible bootstrap
 
-CI restores the vendored tree from the public upstream base plus the tracked patch series by running `bash scripts/ci/bootstrap_llama_vendor.sh`.
+Run this command from a clean checkout:
 
-## Current PocketGPT overlay
+```bash
+bash scripts/ci/bootstrap_llama_vendor.sh
+```
 
-PocketGPT carries local runtime changes on top of vendored `llama.cpp`, including:
+The script recreates `third_party/llama.cpp` directly from the pinned public tag. It deletes the existing vendor directory first, so do not run it while that directory contains uncommitted work.
 
-- `52e654729` — Android regex stability and Phi tokenizer support
-- `37fea2efc` — optional rotation hook in KV cache
-- `0670b510a` — TurboQuant Q rotation and inverse rotation
-- `9930c7819` — refine TurboQuant rotation and KV-cache output
-- `9c8236b9c` — Q1_0 Bonsai quantization support
+`POCKETGPT_LLAMA_UPSTREAM_URL` may select another upstream remote for a controlled test. `POCKETGPT_LLAMA_REF` may select another ref temporarily. CI and committed development state must use the default upstream URL and pinned tag.
+
+## Android integration boundary
+
+The Android seam owns PocketGPT-specific behavior:
+
+- `apps/mobile-android/src/main/cpp/CMakeLists.txt` selects the static CPU and accelerator backends, Android dependencies, build flags, and native library variants.
+- `apps/mobile-android/src/main/cpp/pocket_llama.cpp` owns JNI contracts, runtime policy, diagnostics, model lifecycle, and multimodal integration.
+- Kotlin runtime and catalog code decide which capabilities the app exposes.
+
+Upstream owns model parsing, tokenization, quantization formats, KV-cache behavior, attention rotation, backend kernels, and `mtmd`. Prefer upstream APIs over private headers or internal class casts.
 
 ## Refresh workflow
 
-When updating the vendor:
-
-1. Start from the desired upstream `llama.cpp` revision.
-2. Rebase or regenerate the tracked patch series under `third_party/llama.cpp-patches/`.
-3. Keep Android integration changes in `pocket_llama.cpp` and `CMakeLists.txt` small and explicit.
-4. Run `bash scripts/ci/bootstrap_llama_vendor.sh` from a clean checkout to prove the vendor can be reconstructed without private refs.
-5. Verify that native diagnostics still expose `supports_q1_0` and `supports_q1_0_g128`.
+1. Select an upstream release tag and record its full commit SHA.
+2. Review upstream API, CMake, backend, tokenizer, KV-cache, and `mtmd` changes that cross the Android seam.
+3. Update the bootstrap default, this document, and the submodule gitlink in the same change.
+4. Adapt only the Android seam; leave the vendor tree identical to upstream.
+5. Run the bootstrap script from a clean checkout and confirm the resulting `HEAD` matches the recorded SHA.
+6. Prove the changed native risk with the narrow Android compile command from `docs/testing/runbooks.md`.
+7. Validate model load, text generation, context shifting, multimodal input, and each enabled accelerator path on the targets required by `docs/testing/test-strategy.md`.
+8. Run the broad gate once the narrow evidence is current.
 
 ## Bridge support rule
 
-Do not set `ModelCatalog.ModelDescriptor.bridgeSupported = true` only because a model is conceptually compatible with `llama.cpp`.
+Do not advertise a model or runtime feature merely because upstream implements the underlying format.
 
-Set `bridgeSupported = true` only when all are true:
+Enable bridge support only when all are true:
 
-- the vendored native runtime can parse the model artifact format
-- the Kotlin/native bridge exposes any required runtime capability flags
-- a real JNI/device-path test proves the model loads successfully
+- the pinned native runtime parses the exact artifact used by the app
+- the Android seam exposes the required typed capability and policy
+- a production-like Android runtime test proves model load and generation
 
-Catalog-only or fake-bridge tests are not sufficient evidence for bridge support.
-
-## Required validation for Bonsai-like models
-
-Before shipping a model that depends on a specialized quantization/runtime fork:
-
-- run `bash scripts/dev/test.sh fast`
-- run a real Android instrumentation test that seeds the artifact path and performs a JNI load
-- confirm the runtime diagnostics payload reports the expected format support flags
-
-This prevents the UI from advertising models that the vendored native runtime cannot actually load.
+Catalog-only and fake-bridge tests do not prove native support. PocketGPT does not preserve compatibility with artifacts produced by removed downstream quantization formats.

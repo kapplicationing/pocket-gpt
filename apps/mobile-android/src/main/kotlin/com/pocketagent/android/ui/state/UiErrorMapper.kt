@@ -38,16 +38,9 @@ object UiErrorMapper {
         val detail = startupChecks.joinToString(" | ")
         val normalized = detail.lowercase()
         val (userMessage, recovery) = when {
-            normalized.contains("qualified_gpu_required") ||
-                normalized.contains("bonsai_gpu_required") ||
-                normalized.contains("required_backend=gpu")
+            normalized.contains("runtime_incompatible_model_format")
             ->
-                "This 1-bit model requires GPU acceleration on this device. Use a qualified GPU device or switch models." to RecoveryAction.CHANGE_MODEL
-            normalized.contains("runtime_incompatible_model_format") ||
-                normalized.contains("required_format=q1_0_g128") ||
-                normalized.contains("supports_q1_0_g128")
-            ->
-                "This build does not include the required runtime support for this 1-bit model format. Install a compatible build or switch models." to RecoveryAction.CHANGE_MODEL
+                "This model format is not compatible with the current runtime. Choose a different model." to RecoveryAction.CHANGE_MODEL
             normalized.contains("missing runtime model") ->
                 "Runtime setup is incomplete. Download or import required models, then refresh checks." to RecoveryAction.REDOWNLOAD_MODEL
             normalized.contains("model_artifact_config_missing") ->
@@ -200,17 +193,9 @@ object UiErrorMapper {
                 "Model file is unavailable. Re-download or re-import the model." to RecoveryAction.REDOWNLOAD_MODEL
             "RUNTIME_INCOMPATIBLE" ->
                 if (
-                    normalizedDetail.contains("qualified_gpu_required") ||
-                    normalizedDetail.contains("bonsai_gpu_required") ||
-                    normalizedDetail.contains("required_backend=gpu")
-                ) {
-                    "This 1-bit model requires GPU acceleration on this device. Use a qualified GPU device or switch models." to RecoveryAction.CHANGE_MODEL
-                } else if (
-                    normalizedDetail.contains("q1_0_g128") ||
-                    normalizedDetail.contains("bonsai") ||
                     normalizedDetail.contains("runtime_incompatible_model_format")
                 ) {
-                    "This build does not include the required runtime support for this 1-bit model format. Install a compatible build or switch models." to RecoveryAction.CHANGE_MODEL
+                    "This model format is not compatible with the current runtime. Choose a different model." to RecoveryAction.CHANGE_MODEL
                 } else {
                     "Model is not compatible with this runtime. Choose a different model." to RecoveryAction.CHANGE_MODEL
                 }

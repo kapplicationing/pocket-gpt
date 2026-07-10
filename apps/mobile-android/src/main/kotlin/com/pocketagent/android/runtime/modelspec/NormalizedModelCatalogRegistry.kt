@@ -292,8 +292,6 @@ private fun RuntimeRequirementProfile.mergeWith(other: RuntimeRequirementProfile
         bridgeSupported = bridgeSupported || other.bridgeSupported,
         minRamGb = minRamGb ?: other.minRamGb,
         minStorageBytes = minStorageBytes ?: other.minStorageBytes,
-        requiredBackendFamily = requiredBackendFamily ?: other.requiredBackendFamily,
-        supportedBackendFamilies = (supportedBackendFamilies + other.supportedBackendFamilies).toSet(),
         runtimeCompatibilityTags = (runtimeCompatibilityTags + other.runtimeCompatibilityTags).toSet(),
         preferredContextTokens = preferredContextTokens ?: other.preferredContextTokens,
         preferredBatchSize = preferredBatchSize ?: other.preferredBatchSize,

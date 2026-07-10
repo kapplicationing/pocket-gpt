@@ -14,12 +14,13 @@ class ModelCatalogEligibilityEvaluatorTest {
     private val evaluator = DefaultModelCatalogEligibilityEvaluator()
 
     @Test
-    fun `standard q4 release stays supported`() {
+    fun `enabled catalog release stays supported`() {
         val snapshot = evaluator.evaluate(
             manifest = manifestFor(
-                version = manifestVersion(
+                manifestVersion(
                     modelId = "qwen3-0.6b-q4_k_m",
                     version = "q4_k_m",
+                    runtimeCompatibility = "android-arm64-v8a",
                 ),
             ),
             snapshot = null,
@@ -34,138 +35,51 @@ class ModelCatalogEligibilityEvaluatorTest {
     }
 
     @Test
-    fun `q1 g128 release is hidden on cpu only devices`() {
-        listOf(
-            "bonsai-1.7b-q1_0_g128",
-            "bonsai-4b-q1_0_g128",
-            "bonsai-8b-q1_0_g128",
-        ).forEach { modelId ->
-            val snapshot = evaluator.evaluate(
-                manifest = manifestFor(
-                    version = manifestVersion(
-                        modelId = modelId,
-                        version = "q1_0_g128",
-                    ),
-                ),
-                snapshot = null,
-                signals = ModelEligibilitySignals(
-                    runtimeCompatibilityTag = "android-arm64-v8a",
-                    runtimeSupportsGpuOffload = false,
-                    deviceAdvisory = DeviceGpuOffloadAdvisory(
-                        supportedForProbe = false,
-                        automaticOpenClEligible = false,
-                        reason = "adreno_family_missing",
-                    ),
-                    gpuProbeResult = GpuProbeResult(
-                        status = GpuProbeStatus.FAILED,
-                        failureReason = GpuProbeFailureReason.RUNTIME_UNSUPPORTED,
-                    ),
-                ),
-            )
-
-            val eligibility = snapshot.eligibilityFor(modelId, "q1_0_g128")
-            assertEquals(ModelSupportLevel.UNSUPPORTED, eligibility.supportLevel)
-            assertFalse(eligibility.catalogVisible)
-            assertFalse(eligibility.downloadAllowed)
-            assertFalse(eligibility.loadAllowed)
-            assertEquals(ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE, eligibility.reason)
-        }
-    }
-
-    @Test
-    fun `q1 g128 release is experimental while qualification is pending`() {
+    fun `runtime compatibility mismatch blocks catalog release`() {
         val snapshot = evaluator.evaluate(
             manifest = manifestFor(
-                version = manifestVersion(
-                    modelId = "bonsai-8b-q1_0_g128",
-                    version = "q1_0_g128",
+                manifestVersion(
+                    modelId = "qwen3-0.6b-q4_k_m",
+                    version = "q4_k_m",
+                    runtimeCompatibility = "other-runtime",
                 ),
             ),
             snapshot = null,
-            signals = ModelEligibilitySignals(
-                runtimeCompatibilityTag = "android-arm64-v8a",
-                runtimeSupportsGpuOffload = true,
-                deviceAdvisory = DeviceGpuOffloadAdvisory(
-                    supportedForProbe = true,
-                    automaticOpenClEligible = true,
-                    isAdrenoFamily = true,
-                    hasArmDotProd = true,
-                    hasArmI8mm = true,
-                    adrenoGeneration = 7,
-                    reason = "advisory_qualified",
-                ),
-                gpuProbeResult = GpuProbeResult(
-                    status = GpuProbeStatus.PENDING,
-                    detail = "qualification_in_progress",
-                ),
-            ),
+            signals = ModelEligibilitySignals.assumeSupported(),
         )
 
-        val eligibility = snapshot.eligibilityFor("bonsai-8b-q1_0_g128", "q1_0_g128")
-        assertEquals(ModelSupportLevel.EXPERIMENTAL, eligibility.supportLevel)
-        assertTrue(eligibility.catalogVisible)
-        assertTrue(eligibility.downloadAllowed)
-        assertTrue(eligibility.loadAllowed)
-        assertEquals(ModelEligibilityReason.GPU_QUALIFICATION_PENDING, eligibility.reason)
+        val eligibility = snapshot.eligibilityFor("qwen3-0.6b-q4_k_m", "q4_k_m")
+        assertEquals(ModelEligibilityReason.RUNTIME_COMPATIBILITY_MISMATCH, eligibility.reason)
+        assertFalse(eligibility.downloadAllowed)
+        assertFalse(eligibility.loadAllowed)
     }
 
     @Test
-    fun `q1 g128 release becomes supported on qualified gpu path`() {
-        val snapshot = evaluator.evaluate(
-            manifest = manifestFor(
-                version = manifestVersion(
-                    modelId = "bonsai-8b-q1_0_g128",
-                    version = "q1_0_g128",
-                ),
-            ),
-            snapshot = null,
-            signals = ModelEligibilitySignals(
-                runtimeCompatibilityTag = "android-arm64-v8a",
-                runtimeSupportsGpuOffload = true,
-                deviceAdvisory = DeviceGpuOffloadAdvisory(
-                    supportedForProbe = true,
-                    automaticOpenClEligible = true,
-                    isAdrenoFamily = true,
-                    hasArmDotProd = true,
-                    hasArmI8mm = true,
-                    adrenoGeneration = 7,
-                    reason = "advisory_qualified",
-                ),
-                gpuProbeResult = GpuProbeResult(
-                    status = GpuProbeStatus.QUALIFIED,
-                    maxStableGpuLayers = 32,
-                ),
-            ),
-        )
-
-        val eligibility = snapshot.eligibilityFor("bonsai-8b-q1_0_g128", "q1_0_g128")
-        assertEquals(ModelSupportLevel.SUPPORTED, eligibility.supportLevel)
-    }
-
-    @Test
-    fun `installed versions also receive eligibility decisions`() {
+    fun `installed versions also receive compatibility decisions`() {
+        val modelId = "qwen3-0.6b-q4_k_m"
+        val version = "q4_k_m"
         val snapshot = evaluator.evaluate(
             manifest = ModelDistributionManifest(models = emptyList()),
             snapshot = RuntimeProvisioningSnapshot(
                 models = listOf(
                     ProvisionedModelState(
-                        modelId = "bonsai-8b-q1_0_g128",
-                        displayName = "Bonsai",
-                        fileName = "bonsai.gguf",
-                        absolutePath = "/tmp/bonsai.gguf",
+                        modelId = modelId,
+                        displayName = "Qwen",
+                        fileName = "qwen.gguf",
+                        absolutePath = "/tmp/qwen.gguf",
                         sha256 = "a".repeat(64),
                         importedAtEpochMs = 1L,
-                        activeVersion = "q1_0_g128",
+                        activeVersion = version,
                         installedVersions = listOf(
                             ModelVersionDescriptor(
-                                modelId = "bonsai-8b-q1_0_g128",
-                                version = "q1_0_g128",
-                                displayName = "Bonsai q1_0_g128",
-                                absolutePath = "/tmp/bonsai.gguf",
+                                modelId = modelId,
+                                version = version,
+                                displayName = "Qwen",
+                                absolutePath = "/tmp/qwen.gguf",
                                 sha256 = "a".repeat(64),
                                 provenanceIssuer = "issuer",
                                 provenanceSignature = "sig",
-                                runtimeCompatibility = "android-arm64-v8a",
+                                runtimeCompatibility = "other-runtime",
                                 fileSizeBytes = 1L,
                                 importedAtEpochMs = 1L,
                                 isActive = true,
@@ -181,22 +95,11 @@ class ModelCatalogEligibilityEvaluatorTest {
                 ),
                 requiredModelIds = emptySet(),
             ),
-            signals = ModelEligibilitySignals(
-                runtimeCompatibilityTag = "android-arm64-v8a",
-                runtimeSupportsGpuOffload = false,
-                deviceAdvisory = DeviceGpuOffloadAdvisory(
-                    supportedForProbe = false,
-                    automaticOpenClEligible = false,
-                    reason = "adreno_family_missing",
-                ),
-                gpuProbeResult = GpuProbeResult(
-                    status = GpuProbeStatus.FAILED,
-                    failureReason = GpuProbeFailureReason.RUNTIME_UNSUPPORTED,
-                ),
-            ),
+            signals = ModelEligibilitySignals.assumeSupported(),
         )
 
-        val eligibility = snapshot.eligibilityFor("bonsai-8b-q1_0_g128", "q1_0_g128")
+        val eligibility = snapshot.eligibilityFor(modelId, version)
+        assertEquals(ModelEligibilityReason.RUNTIME_COMPATIBILITY_MISMATCH, eligibility.reason)
         assertFalse(eligibility.loadAllowed)
     }
 
@@ -215,6 +118,7 @@ class ModelCatalogEligibilityEvaluatorTest {
     private fun manifestVersion(
         modelId: String,
         version: String,
+        runtimeCompatibility: String,
     ): ModelDistributionVersion {
         return ModelDistributionVersion(
             modelId = modelId,
@@ -223,7 +127,7 @@ class ModelCatalogEligibilityEvaluatorTest {
             expectedSha256 = "a".repeat(64),
             provenanceIssuer = "issuer",
             provenanceSignature = "sig",
-            runtimeCompatibility = "android-arm64-v8a",
+            runtimeCompatibility = runtimeCompatibility,
             fileSizeBytes = 1L,
         )
     }

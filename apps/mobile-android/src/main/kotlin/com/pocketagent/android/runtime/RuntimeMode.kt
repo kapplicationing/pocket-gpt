@@ -3,8 +3,6 @@ package com.pocketagent.android.runtime
 import android.content.Context
 import com.pocketagent.nativebridge.LlamaCppRuntimeBridge
 import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
-import com.pocketagent.nativebridge.OpenClProbeQualificationStatus
-import com.pocketagent.nativebridge.OpenClQualificationSnapshot
 
 private const val ANDROID_RUNTIME_MODE_ENV = "POCKETGPT_ANDROID_RUNTIME_MODE"
 private const val ANDROID_RUNTIME_MODE_REMOTE = "remote"
@@ -12,9 +10,7 @@ private const val ANDROID_RUNTIME_MODE_IN_PROCESS = "in_process"
 
 fun createDefaultAndroidRuntimeBridge(context: Context): LlamaCppRuntimeBridge {
     return when (resolveAndroidRuntimeMode()) {
-        ANDROID_RUNTIME_MODE_IN_PROCESS -> NativeJniLlamaCppBridge(
-            openClQualificationProvider = androidOpenClQualificationProvider(context.applicationContext),
-        )
+        ANDROID_RUNTIME_MODE_IN_PROCESS -> NativeJniLlamaCppBridge()
         else -> RemoteLlamaCppRuntimeBridge(context.applicationContext)
     }
 }
@@ -36,24 +32,4 @@ internal fun resolveAndroidRuntimeMode(
         ?.lowercase()
         ?.takeIf { it == ANDROID_RUNTIME_MODE_IN_PROCESS || it == ANDROID_RUNTIME_MODE_REMOTE }
         ?: defaultMode
-}
-
-private fun androidOpenClQualificationProvider(context: Context): () -> OpenClQualificationSnapshot {
-    val support = AndroidGpuOffloadSupport(context.applicationContext)
-    val qualifier = AndroidGpuOffloadQualifier(context.applicationContext)
-    return {
-        val advisory = support.advisory()
-        val probe = qualifier.evaluate(
-            runtimeSupported = advisory.supportedForProbe,
-            deviceAdvisory = advisory,
-        )
-        OpenClQualificationSnapshot(
-            automaticOpenClEligible = advisory.automaticOpenClEligible,
-            probeStatus = when (probe.status) {
-                GpuProbeStatus.QUALIFIED -> OpenClProbeQualificationStatus.QUALIFIED
-                GpuProbeStatus.PENDING -> OpenClProbeQualificationStatus.PENDING
-                GpuProbeStatus.FAILED -> OpenClProbeQualificationStatus.FAILED
-            },
-        )
-    }
 }

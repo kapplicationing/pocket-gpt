@@ -6,7 +6,6 @@ import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.android.runtime.modelspec.NormalizedModelCatalogRegistry
 import com.pocketagent.core.model.ModelArtifactRole
 import com.pocketagent.core.model.ModelVariantSpec
-import com.pocketagent.core.model.RuntimeBackendFamilyTag
 import com.pocketagent.nativebridge.ModelRuntimeFormatHint
 import com.pocketagent.nativebridge.ModelRuntimeFormatProbeInput
 import com.pocketagent.nativebridge.ModelRuntimeFormats
@@ -18,7 +17,6 @@ data class ModelRuntimeLaunchPlan(
     val formatHint: ModelRuntimeFormatHint,
     val sourceKind: String? = null,
     val promptProfileId: String? = null,
-    val requiredBackendFamily: RuntimeBackendFamilyTag? = null,
     val missingRequiredArtifacts: List<String> = emptyList(),
     val multimodalProjectorPath: String? = null,
     val recommendedContextTokens: Int? = null,
@@ -85,12 +83,6 @@ class DefaultModelRuntimeLaunchPlanner(
             formatHint = formatHint,
             sourceKind = descriptor.sourceKind.name,
             promptProfileId = descriptor.promptProfileId ?: spec?.promptProfile?.profileId,
-            requiredBackendFamily = when {
-                variant?.source?.kind?.name == "HUGGING_FACE" && spec?.runtimeRequirements?.requiredBackendFamily != null ->
-                    spec.runtimeRequirements.requiredBackendFamily
-                formatHint.requiresQualifiedGpu -> RuntimeBackendFamilyTag.OPENCL
-                else -> spec?.runtimeRequirements?.requiredBackendFamily
-            },
             missingRequiredArtifacts = missingRequiredArtifacts,
             multimodalProjectorPath = projectorPath,
             recommendedContextTokens = variant?.parameters?.contextLength ?: spec?.runtimeRequirements?.preferredContextTokens,
@@ -140,12 +132,6 @@ class DefaultModelRuntimeLaunchPlanner(
             formatHint = formatHint,
             sourceKind = version.sourceKind.name,
             promptProfileId = version.promptProfileId ?: spec?.promptProfile?.profileId,
-            requiredBackendFamily = when {
-                variant?.source?.kind?.name == "HUGGING_FACE" && spec?.runtimeRequirements?.requiredBackendFamily != null ->
-                    spec.runtimeRequirements.requiredBackendFamily
-                formatHint.requiresQualifiedGpu -> RuntimeBackendFamilyTag.OPENCL
-                else -> spec?.runtimeRequirements?.requiredBackendFamily
-            },
             missingRequiredArtifacts = missingRequiredArtifacts,
             recommendedContextTokens = variant?.parameters?.contextLength ?: spec?.runtimeRequirements?.preferredContextTokens,
             diagnostics = buildList {

@@ -16,8 +16,7 @@ import android.util.Log
 import com.pocketagent.nativebridge.CachePolicy
 import com.pocketagent.nativebridge.FlashAttnMode
 import com.pocketagent.nativebridge.GpuExecutionBackend
-import com.pocketagent.nativebridge.KvCacheMethod
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import java.util.concurrent.atomic.AtomicBoolean
@@ -120,8 +119,7 @@ internal class GpuProbeRunner(
                 // Force safe defaults for probing so the qualification path matches
                 // the release OpenCL policy rather than optimistic AUTO defaults.
                 flashAttnMode = FlashAttnMode.OFF,
-                kvCacheMethod = KvCacheMethod.TURBOQUANT,
-                kvCacheMethodPreset = KvCacheMethodPreset.SAFE,
+                kvCachePreset = KvCachePreset.SAFE,
             )
             bridge.setRuntimeGenerationConfig(config)
             val loaded = runCatching {

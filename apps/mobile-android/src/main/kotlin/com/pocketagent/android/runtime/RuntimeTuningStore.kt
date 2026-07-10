@@ -4,7 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.pocketagent.core.RuntimeExecutionStats
 import com.pocketagent.inference.ModelRuntimeProfile
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.runtime.ModelRegistry
 import com.pocketagent.runtime.MemoryBudgetTracker
 import com.pocketagent.runtime.PerformanceRuntimeConfig
@@ -45,7 +45,7 @@ interface RuntimeTuning {
 
 data class RuntimeTuningRecommendation(
     val gpuLayers: Int? = null,
-    val kvCacheMethodPreset: KvCacheMethodPreset? = null,
+    val kvCachePreset: KvCachePreset? = null,
     val speculativeEnabled: Boolean? = null,
     val speculativeDraftGpuLayers: Int? = null,
     val useMmap: Boolean? = null,
@@ -113,8 +113,7 @@ internal data class RuntimeTuningEnvelopeIdentity(
     val quantClass: String = UNKNOWN_TUNING_DIMENSION,
     val artifactIdentity: String = UNKNOWN_TUNING_DIMENSION,
     val contextBucket: String = UNKNOWN_CONTEXT_BUCKET,
-    val kvMethod: String = UNKNOWN_TUNING_DIMENSION,
-    val kvMethodPreset: String = UNKNOWN_TUNING_DIMENSION,
+    val kvPreset: String = UNKNOWN_TUNING_DIMENSION,
     val backendIdentity: String = UNKNOWN_TUNING_DIMENSION,
 )
 
@@ -204,8 +203,7 @@ internal fun buildRuntimeTuningStorageKeyPrefix(
         append("__qa_").append(sanitizeKey(envelope.quantClass))
         append("__artifact_").append(sanitizeKey(envelope.artifactIdentity))
         append("__ctx_").append(sanitizeKey(envelope.contextBucket))
-        append("__kvm_").append(sanitizeKey(envelope.kvMethod))
-        append("__kvpreset_").append(sanitizeKey(envelope.kvMethodPreset))
+        append("__kvpreset_").append(sanitizeKey(envelope.kvPreset))
         append("__backend_")
     }
 }
@@ -221,7 +219,7 @@ class RuntimeTuningDecider(
     ): RuntimeTuningRecommendation {
         val previous = current ?: RuntimeTuningRecommendation(
             gpuLayers = appliedConfig.gpuLayers,
-            kvCacheMethodPreset = appliedConfig.kvCacheMethodPreset,
+            kvCachePreset = appliedConfig.kvCachePreset,
             speculativeEnabled = appliedConfig.speculativeEnabled,
             speculativeDraftGpuLayers = appliedConfig.speculativeDraftGpuLayers,
             useMmap = appliedConfig.useMmap,
@@ -232,7 +230,7 @@ class RuntimeTuningDecider(
             nCtx = appliedConfig.nCtx,
         )
         var gpuLayers = previous.gpuLayers ?: appliedConfig.gpuLayers
-        var kvCacheMethodPreset = previous.kvCacheMethodPreset ?: appliedConfig.kvCacheMethodPreset
+        var kvCachePreset = previous.kvCachePreset ?: appliedConfig.kvCachePreset
         var speculativeEnabled = previous.speculativeEnabled ?: appliedConfig.speculativeEnabled
         var speculativeDraftGpuLayers = previous.speculativeDraftGpuLayers ?: appliedConfig.speculativeDraftGpuLayers
         var useMmap = previous.useMmap ?: appliedConfig.useMmap
@@ -287,7 +285,7 @@ class RuntimeTuningDecider(
 
         when {
             memoryPressure -> {
-                kvCacheMethodPreset = moreCompressedKvCacheMethodPreset(kvCacheMethodPreset)
+                kvCachePreset = moreCompressedKvCachePreset(kvCachePreset)
                 nBatch = demotedBatch(nBatch)
                 nUbatch = demotedBatch(nUbatch)
                 gpuLayers = demotedGpuLayers(gpuLayers)
@@ -367,14 +365,14 @@ class RuntimeTuningDecider(
                             lastDecision = "promote_batch"
                         }
 
-                        kvCacheMethodPreset != targetConfig.kvCacheMethodPreset -> {
-                            kvCacheMethodPreset = promotedKvCacheMethodPreset(
-                                current = kvCacheMethodPreset,
-                                target = targetConfig.kvCacheMethodPreset,
+                        kvCachePreset != targetConfig.kvCachePreset -> {
+                            kvCachePreset = promotedKvCachePreset(
+                                current = kvCachePreset,
+                                target = targetConfig.kvCachePreset,
                             )
                             promotionCount += 1
                             benchmarkWinCount = 0
-                            lastDecision = "promote_kv_method_preset"
+                            lastDecision = "promote_kv_preset"
                         }
 
                         !speculativeEnabled && targetConfig.speculativeEnabled -> {
@@ -447,7 +445,7 @@ class RuntimeTuningDecider(
 
         return previous.copy(
             gpuLayers = gpuLayers.coerceAtLeast(0),
-            kvCacheMethodPreset = kvCacheMethodPreset,
+            kvCachePreset = kvCachePreset,
             speculativeEnabled = speculativeEnabled,
             speculativeDraftGpuLayers = speculativeDraftGpuLayers.coerceAtLeast(0),
             useMmap = useMmap,
@@ -503,20 +501,18 @@ class RuntimeTuningDecider(
         return (current / 2).coerceAtLeast(MIN_TUNED_BATCH)
     }
 
-    private fun moreCompressedKvCacheMethodPreset(current: KvCacheMethodPreset): KvCacheMethodPreset {
+    private fun moreCompressedKvCachePreset(current: KvCachePreset): KvCachePreset {
         return when (current) {
-            KvCacheMethodPreset.SAFE -> KvCacheMethodPreset.BALANCED
-            KvCacheMethodPreset.BALANCED -> KvCacheMethodPreset.AGGRESSIVE
-            KvCacheMethodPreset.AGGRESSIVE -> KvCacheMethodPreset.ULTRA
-            KvCacheMethodPreset.ULTRA -> KvCacheMethodPreset.EXTREME
-            KvCacheMethodPreset.EXTREME -> KvCacheMethodPreset.EXTREME
+            KvCachePreset.SAFE -> KvCachePreset.BALANCED
+            KvCachePreset.BALANCED -> KvCachePreset.AGGRESSIVE
+            KvCachePreset.AGGRESSIVE -> KvCachePreset.AGGRESSIVE
         }
     }
 
-    private fun promotedKvCacheMethodPreset(
-        current: KvCacheMethodPreset,
-        target: KvCacheMethodPreset,
-    ): KvCacheMethodPreset {
+    private fun promotedKvCachePreset(
+        current: KvCachePreset,
+        target: KvCachePreset,
+    ): KvCachePreset {
         if (current == target) {
             return current
         }
@@ -556,11 +552,9 @@ class RuntimeTuningDecider(
 
     private companion object {
         private val KV_CACHE_PRESET_ORDER = listOf(
-            KvCacheMethodPreset.SAFE,
-            KvCacheMethodPreset.BALANCED,
-            KvCacheMethodPreset.AGGRESSIVE,
-            KvCacheMethodPreset.ULTRA,
-            KvCacheMethodPreset.EXTREME,
+            KvCachePreset.SAFE,
+            KvCachePreset.BALANCED,
+            KvCachePreset.AGGRESSIVE,
         )
         private const val HIGH_PEAK_RSS_MB = 2800.0
         private const val PROMOTION_SAFE_PEAK_RSS_MB = 2200.0
@@ -605,7 +599,7 @@ class AndroidRuntimeTuningStore(
             } else {
                 0
             },
-            kvCacheMethodPreset = recommendation.kvCacheMethodPreset ?: baseConfig.kvCacheMethodPreset,
+            kvCachePreset = recommendation.kvCachePreset ?: baseConfig.kvCachePreset,
             speculativeEnabled = speculativeEnabled,
             speculativeDraftGpuLayers = if (baseConfig.gpuEnabled && speculativeEnabled) {
                 (recommendation.speculativeDraftGpuLayers ?: baseConfig.speculativeDraftGpuLayers)
@@ -634,8 +628,7 @@ class AndroidRuntimeTuningStore(
         val envelope = resolveEnvelope(
             modelId = resolvedModelId,
             targetConfig = targetConfig,
-            kvMethodHint = runtimeStats?.effectiveKvCacheMethod,
-            kvMethodPresetHint = runtimeStats?.kvCacheMethodPreset,
+            kvPresetHint = runtimeStats?.kvCachePreset,
             backendIdentityHint = runtimeStats?.backendIdentity,
         )
         val prefKey = prefKeyFor(resolvedModelId, targetConfig, envelope)
@@ -786,8 +779,7 @@ class AndroidRuntimeTuningStore(
             append("|quant_class=${sanitizeDiagnosticValue(payload.optString("quantClass", UNKNOWN_TUNING_DIMENSION))}")
             append("|artifact_identity=${sanitizeDiagnosticValue(payload.optString("artifactIdentity", UNKNOWN_TUNING_DIMENSION))}")
             append("|context_bucket=${sanitizeDiagnosticValue(payload.optString("contextBucket", UNKNOWN_CONTEXT_BUCKET))}")
-            append("|kv_method=${sanitizeDiagnosticValue(payload.optString("kvMethod", UNKNOWN_TUNING_DIMENSION))}")
-            append("|kv_method_preset=${sanitizeDiagnosticValue(payload.optString("kvMethodPreset", UNKNOWN_TUNING_DIMENSION))}")
+            append("|kv_preset=${sanitizeDiagnosticValue(payload.optString("kvPreset", UNKNOWN_TUNING_DIMENSION))}")
             append("|backend_identity=${sanitizeDiagnosticValue(payload.optString("backendIdentity", UNKNOWN_TUNING_DIMENSION))}")
             append("|recommended_gpu_layers=${payload.optIntOrMinusOne("gpuLayers")}")
             append("|target_gpu_layers=${payload.optIntOrMinusOne("targetGpuLayers")}")
@@ -829,8 +821,7 @@ class AndroidRuntimeTuningStore(
             append("|quant_class=${sanitizeDiagnosticValue(payload.optString("quantClass", UNKNOWN_TUNING_DIMENSION))}")
             append("|artifact_identity=${sanitizeDiagnosticValue(payload.optString("artifactIdentity", UNKNOWN_TUNING_DIMENSION))}")
             append("|context_bucket=${sanitizeDiagnosticValue(payload.optString("contextBucket", UNKNOWN_CONTEXT_BUCKET))}")
-            append("|kv_method=${sanitizeDiagnosticValue(payload.optString("kvMethod", UNKNOWN_TUNING_DIMENSION))}")
-            append("|kv_method_preset=${sanitizeDiagnosticValue(payload.optString("kvMethodPreset", UNKNOWN_TUNING_DIMENSION))}")
+            append("|kv_preset=${sanitizeDiagnosticValue(payload.optString("kvPreset", UNKNOWN_TUNING_DIMENSION))}")
             append("|backend_identity=${sanitizeDiagnosticValue(payload.optString("backendIdentity", UNKNOWN_TUNING_DIMENSION))}")
             append("|sample_index=$exportIndex")
             append("|success=${sample.optBoolean("success", false)}")
@@ -862,8 +853,7 @@ class AndroidRuntimeTuningStore(
             payload.has("quantClass") ||
             payload.has("artifactIdentity") ||
             payload.has("contextBucket") ||
-            payload.has("kvMethod") ||
-            payload.has("kvMethodPreset") ||
+            payload.has("kvPreset") ||
             payload.has("backendIdentity")
         return if (hasEnvelopeFields) {
             buildRuntimeTuningStorageKey(
@@ -877,8 +867,7 @@ class AndroidRuntimeTuningStore(
                     quantClass = payload.optString("quantClass", UNKNOWN_TUNING_DIMENSION),
                     artifactIdentity = payload.optString("artifactIdentity", UNKNOWN_TUNING_DIMENSION),
                     contextBucket = payload.optString("contextBucket", UNKNOWN_CONTEXT_BUCKET),
-                    kvMethod = payload.optString("kvMethod", UNKNOWN_TUNING_DIMENSION),
-                    kvMethodPreset = payload.optString("kvMethodPreset", UNKNOWN_TUNING_DIMENSION),
+                    kvPreset = payload.optString("kvPreset", UNKNOWN_TUNING_DIMENSION),
                     backendIdentity = payload.optString("backendIdentity", UNKNOWN_TUNING_DIMENSION),
                 ),
             )
@@ -975,9 +964,9 @@ class AndroidRuntimeTuningStore(
         val payload = runCatching { JSONObject(raw) }.getOrNull() ?: return null
         return RuntimeTuningRecommendation(
             gpuLayers = payload.takeIf { it.has("gpuLayers") }?.getInt("gpuLayers"),
-            kvCacheMethodPreset = payload.takeIf { it.has("kvCacheMethodPreset") }
-                ?.getString("kvCacheMethodPreset")
-                ?.let { raw -> runCatching { KvCacheMethodPreset.valueOf(raw) }.getOrNull() },
+            kvCachePreset = payload.takeIf { it.has("kvCachePreset") }
+                ?.getString("kvCachePreset")
+                ?.let { raw -> runCatching { KvCachePreset.valueOf(raw) }.getOrNull() },
             speculativeEnabled = payload.takeIf { it.has("speculativeEnabled") }?.getBoolean("speculativeEnabled"),
             speculativeDraftGpuLayers = payload.takeIf { it.has("speculativeDraftGpuLayers") }?.getInt("speculativeDraftGpuLayers"),
             useMmap = payload.takeIf { it.has("useMmap") }?.getBoolean("useMmap"),
@@ -1023,11 +1012,10 @@ class AndroidRuntimeTuningStore(
             put("quantClass", envelope.quantClass)
             put("artifactIdentity", envelope.artifactIdentity)
             put("contextBucket", envelope.contextBucket)
-            put("kvMethod", envelope.kvMethod)
-            put("kvMethodPreset", envelope.kvMethodPreset)
+            put("kvPreset", envelope.kvPreset)
             put("backendIdentity", envelope.backendIdentity)
             recommendation.gpuLayers?.let { put("gpuLayers", it) }
-            recommendation.kvCacheMethodPreset?.let { put("kvCacheMethodPreset", it.name) }
+            recommendation.kvCachePreset?.let { put("kvCachePreset", it.name) }
             recommendation.speculativeEnabled?.let { put("speculativeEnabled", it) }
             recommendation.speculativeDraftGpuLayers?.let { put("speculativeDraftGpuLayers", it) }
             recommendation.useMmap?.let { put("useMmap", it) }
@@ -1094,8 +1082,7 @@ class AndroidRuntimeTuningStore(
     private fun resolveEnvelope(
         modelId: String,
         targetConfig: PerformanceRuntimeConfig,
-        kvMethodHint: String? = null,
-        kvMethodPresetHint: String? = null,
+        kvPresetHint: String? = null,
         backendIdentityHint: String? = null,
     ): RuntimeTuningEnvelopeIdentity {
         // Send preparation can run directly from a UI click path. Preserve the
@@ -1125,8 +1112,7 @@ class AndroidRuntimeTuningStore(
                 absolutePath = modelPath,
             ),
             contextBucket = runtimeTuningContextBucket(targetConfig.nCtx),
-            kvMethod = runtimeTuningKvMethod(kvMethodHint ?: targetConfig.kvCacheMethod.name),
-            kvMethodPreset = runtimeTuningKvMethodPreset(kvMethodPresetHint ?: targetConfig.kvCacheMethodPreset.name),
+            kvPreset = runtimeTuningKvPreset(kvPresetHint ?: targetConfig.kvCachePreset.name),
             backendIdentity = backendIdentityHint
                 ?.trim()
                 ?.lowercase()
@@ -1142,11 +1128,9 @@ class AndroidRuntimeTuningStore(
         private const val MAX_HISTORY_SAMPLES = 8
         private const val HISTORY_EXPORT_LIMIT = 3
         private val KV_CACHE_PRESET_ORDER = listOf(
-            KvCacheMethodPreset.SAFE,
-            KvCacheMethodPreset.BALANCED,
-            KvCacheMethodPreset.AGGRESSIVE,
-            KvCacheMethodPreset.ULTRA,
-            KvCacheMethodPreset.EXTREME,
+            KvCachePreset.SAFE,
+            KvCachePreset.BALANCED,
+            KvCachePreset.AGGRESSIVE,
         )
 
         private fun defaultDeviceKey(): String {
@@ -1157,15 +1141,7 @@ class AndroidRuntimeTuningStore(
     }
 }
 
-internal fun runtimeTuningKvMethod(method: String?): String {
-    return method
-        ?.trim()
-        ?.lowercase()
-        ?.takeIf { it.isNotEmpty() }
-        ?: UNKNOWN_TUNING_DIMENSION
-}
-
-internal fun runtimeTuningKvMethodPreset(preset: String?): String {
+internal fun runtimeTuningKvPreset(preset: String?): String {
     return preset
         ?.trim()
         ?.lowercase()
@@ -1204,4 +1180,3 @@ private fun JSONObject.optDoubleOrMinusOne(key: String): String {
 private fun JSONObject.optStringOr(key: String, fallback: String): String {
     return if (has(key)) sanitizeDiagnosticValue(optString(key, fallback)) else fallback
 }
-

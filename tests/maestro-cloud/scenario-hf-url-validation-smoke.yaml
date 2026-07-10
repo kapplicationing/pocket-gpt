@@ -4,18 +4,24 @@ tags:
   - model-management
   - hf-validation
 ---
-- runFlow: shared/open-model-library-debug.yaml
-
-- assertVisible: "Model library"
-- assertVisible:
-    id: "model_library_add_hugging_face"
-- tapOn:
-    id: "model_library_hf_url_input"
-- eraseText
-- inputText: "https://example.test/owner/repo/resolve/main/model.gguf"
-- hideKeyboard
-- tapOn:
-    id: "model_library_hf_check_url"
+# Cloud uses the deterministic launch hook to avoid a hosted keyboard/tap race.
+# The local Maestro counterpart keeps the full input interaction coverage.
+- launchApp:
+    clearState: true
+    arguments:
+      android.intent.action: "com.pocketagent.android.DEBUG_OPEN_MODEL_LIBRARY"
+      pocketagent.debug.skip_onboarding: "true"
+      pocketagent.debug.open_surface: "model_library"
+      pocketagent.debug.clear_recent_hf: "true"
+      pocketagent.debug.hf_resolve_url: "https://example.test/owner/repo/resolve/main/model.gguf"
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_ready"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "debug_model_library_status_blocked_invalid_url"
+    timeout: 30000
 - scrollUntilVisible:
     element:
       id: "model_library_hf_error"

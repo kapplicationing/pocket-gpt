@@ -29,8 +29,8 @@ option(
 )
 
 # Path from apps/mobile-android/src/main/cpp -> repo root -> vendored llama.cpp.
-# Keep the Android app coupled to this seam rather than to a specific upstream,
-# Prism, or PocketGPT overlay branch so vendor refreshes stay mechanical.
+# Keep the Android app coupled to this seam rather than to a downstream vendor
+# branch so upstream refreshes stay mechanical.
 set(LLAMA_CPP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../../third_party/llama.cpp")
 if(NOT EXISTS "${LLAMA_CPP_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR "Missing vendored llama.cpp source at ${LLAMA_CPP_ROOT}.")
@@ -45,6 +45,10 @@ set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD ON CACHE BOOL "" FORCE)
+set(MTMD_VIDEO OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_CPU ON CACHE BOOL "" FORCE)
 set(GGML_CPU_REPACK ON CACHE BOOL "" FORCE)
@@ -62,10 +66,9 @@ endif()
 set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
 set(GGML_VULKAN_CHECK_RESULTS OFF CACHE BOOL "" FORCE)
 set(GGML_OPENCL ON CACHE BOOL "" FORCE)
-# Target OpenCL 2.0 for compatibility with Adreno 6xx GPUs (Snapdragon 855-870)
-# which only support CL 2.0. CL 3.0 APIs cause compilation constant errors on
-# these devices. CL 2.0 target still works correctly on CL 3.0 capable GPUs.
-set(GGML_OPENCL_TARGET_VERSION "200" CACHE STRING "" FORCE)
+# b9951 uses OpenCL 3.0 API types while retaining runtime capability checks for
+# older devices. FORCE also migrates existing Android CMake caches from 2.0.
+set(GGML_OPENCL_TARGET_VERSION "300" CACHE STRING "" FORCE)
 set(GGML_CUDA OFF CACHE BOOL "" FORCE)
 set(GGML_HIP OFF CACHE BOOL "" FORCE)
 set(GGML_METAL OFF CACHE BOOL "" FORCE)
@@ -120,29 +123,9 @@ endif()
 
 add_subdirectory("${LLAMA_CPP_ROOT}" "${CMAKE_BINARY_DIR}/llama.cpp")
 
-# Build libmtmd (multimodal: vision encoder, clip, image tokenization) as a
-# static library.  The upstream CMakeLists is gated by LLAMA_BUILD_TOOLS which
-# we disable for the minimal Android build, so we add it explicitly.
-# Provide LLAMA_INSTALL_VERSION which mtmd's CMakeLists.txt requires for
-# set_target_properties(VERSION ...).
-if(NOT DEFINED LLAMA_INSTALL_VERSION)
-    set(LLAMA_INSTALL_VERSION "0.0.0")
-endif()
-set(LLAMA_TOOLS_INSTALL OFF CACHE BOOL "" FORCE)
-add_subdirectory(
-    "${LLAMA_CPP_ROOT}/tools/mtmd"
-    "${CMAKE_BINARY_DIR}/llama.cpp-mtmd"
-)
 if(TARGET mtmd)
     target_compile_options(mtmd PRIVATE -O3 -DNDEBUG -fvectorize)
 endif()
-# Remove the CLI executables that mtmd's CMakeLists produces — we only need
-# the library, not the binaries.
-foreach(_mtmd_exe llama-mtmd-cli llama-llava-cli llama-gemma3-cli llama-minicpmv-cli llama-qwen2vl-cli)
-    if(TARGET ${_mtmd_exe})
-        set_target_properties(${_mtmd_exe} PROPERTIES EXCLUDE_FROM_ALL TRUE)
-    endif()
-endforeach()
 
 set(POCKET_LLAMA_COMPILE_FLAGS
     -O3
@@ -273,7 +256,6 @@ endfunction()
 function(add_pocket_llama_variant target_name march_flag linked_llama_target)
     add_library(${target_name} SHARED
         pocket_llama.cpp
-        turboquant.c
     )
     target_include_directories(${target_name} PRIVATE
         "${LLAMA_CPP_ROOT}/include"

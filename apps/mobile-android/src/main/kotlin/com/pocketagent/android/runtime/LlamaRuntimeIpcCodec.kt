@@ -3,8 +3,7 @@ package com.pocketagent.android.runtime
 import android.os.Bundle
 import com.pocketagent.nativebridge.GenerationResult
 import com.pocketagent.nativebridge.GpuExecutionBackend
-import com.pocketagent.nativebridge.KvCacheMethod
-import com.pocketagent.nativebridge.KvCacheMethodPreset
+import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 
 internal fun Bundle?.toProbeRequestOrNull(): GpuProbeRequest? {
@@ -41,8 +40,7 @@ internal fun RuntimeGenerationConfig.toBundle(): Bundle {
         putInt(LlamaRuntimeIpc.EXTRA_GPU_LAYERS, gpuLayers)
         putString(LlamaRuntimeIpc.EXTRA_GPU_BACKEND, gpuBackend.name)
         putBoolean(LlamaRuntimeIpc.EXTRA_STRICT_GPU_OFFLOAD, strictGpuOffload)
-        putString(LlamaRuntimeIpc.EXTRA_KV_METHOD, kvCacheMethod.name)
-        putString(LlamaRuntimeIpc.EXTRA_KV_METHOD_PRESET, kvCacheMethodPreset.name)
+        putString(LlamaRuntimeIpc.EXTRA_KV_PRESET, kvCachePreset.name)
         putFloat(LlamaRuntimeIpc.EXTRA_SAMPLING_TEMPERATURE, sampling.temperature)
         putInt(LlamaRuntimeIpc.EXTRA_SAMPLING_TOP_K, sampling.topK)
         putFloat(LlamaRuntimeIpc.EXTRA_SAMPLING_TOP_P, sampling.topP)
@@ -71,12 +69,9 @@ internal fun Bundle.toRuntimeGenerationConfig(): RuntimeGenerationConfig {
             ?.let { raw -> runCatching { GpuExecutionBackend.valueOf(raw) }.getOrNull() }
             ?: GpuExecutionBackend.AUTO,
         strictGpuOffload = getBoolean(LlamaRuntimeIpc.EXTRA_STRICT_GPU_OFFLOAD, true),
-        kvCacheMethod = getString(LlamaRuntimeIpc.EXTRA_KV_METHOD)
-            ?.let { raw -> runCatching { KvCacheMethod.valueOf(raw) }.getOrNull() }
-            ?: KvCacheMethod.AUTO,
-        kvCacheMethodPreset = getString(LlamaRuntimeIpc.EXTRA_KV_METHOD_PRESET)
-            ?.let { raw -> runCatching { KvCacheMethodPreset.valueOf(raw) }.getOrNull() }
-            ?: KvCacheMethodPreset.SAFE,
+        kvCachePreset = getString(LlamaRuntimeIpc.EXTRA_KV_PRESET)
+            ?.let { raw -> runCatching { KvCachePreset.valueOf(raw) }.getOrNull() }
+            ?: KvCachePreset.SAFE,
         sampling = com.pocketagent.nativebridge.RuntimeSamplingConfig(
             temperature = getFloat(LlamaRuntimeIpc.EXTRA_SAMPLING_TEMPERATURE, 0.7f),
             topK = getInt(LlamaRuntimeIpc.EXTRA_SAMPLING_TOP_K, 40),
@@ -106,10 +101,7 @@ internal fun GenerationResult.toBundle(): Bundle {
         tokensPerSec?.let { putDouble(LlamaRuntimeIpc.EXTRA_RESULT_TOKENS_PER_SEC, it) }
         peakRssMb?.let { putDouble(LlamaRuntimeIpc.EXTRA_RESULT_PEAK_RSS_MB, it) }
         putString(LlamaRuntimeIpc.EXTRA_ERROR_CODE, errorCode)
-        putString(LlamaRuntimeIpc.EXTRA_RESULT_REQUESTED_KV_METHOD, requestedKvCacheMethod?.name)
-        putString(LlamaRuntimeIpc.EXTRA_RESULT_EFFECTIVE_KV_METHOD, effectiveKvCacheMethod?.name)
-        putString(LlamaRuntimeIpc.EXTRA_RESULT_KV_METHOD_PRESET, kvCacheMethodPreset?.name)
-        putString(LlamaRuntimeIpc.EXTRA_RESULT_KV_METHOD_DEMOTION_REASON, kvCacheMethodDemotionReason)
+        putString(LlamaRuntimeIpc.EXTRA_RESULT_KV_PRESET, kvCachePreset?.name)
     }
 }
 

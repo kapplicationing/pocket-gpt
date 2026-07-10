@@ -821,7 +821,6 @@ class NativeStage2BenchmarkInstrumentationTest {
         private const val ARG_MODEL_PATH_0_8B = "stage2_model_0_8b_path"
         private const val ARG_MODEL_PATH_1_7B = "stage2_model_1_7b_path"
         private const val ARG_MODEL_PATH_SMOLLM3_Q4 = "stage2_model_smol_360m_path"
-        private const val ARG_MODEL_PATH_BONSAI = "stage2_model_bonsai_path"
         private const val ARG_MODEL_PATH_SMOLLM3_DRAFT = "stage2_model_smol_135m_path"
         private const val ARG_RUNS = "stage2_runs"
         private const val ARG_MAX_TOKENS = "stage2_max_tokens"

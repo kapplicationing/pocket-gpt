@@ -5,60 +5,49 @@ import kotlin.test.assertEquals
 
 class OpenClRuntimePolicyTest {
     @Test
-    fun `q1 g128 is supported only when qualification succeeds`() {
+    fun `q4 0 version is release supported`() {
         assertEquals(
             OpenClQuantCompatibility.SUPPORTED,
             OpenClRuntimePolicy.releaseQuantCompatibility(
-                modelPath = "/tmp/Bonsai-8B.gguf",
-                modelId = "bonsai-8b-q1_0_g128",
-                modelVersion = "q1_0_g128",
-                qualification = OpenClQualificationSnapshot(
-                    runtimeSupportsGpuOffload = true,
-                    automaticOpenClEligible = true,
-                    probeStatus = OpenClProbeQualificationStatus.QUALIFIED,
-                ),
+                modelPath = "/tmp/model.gguf",
+                modelId = "model",
+                modelVersion = "q4_0",
             ),
         )
     }
 
     @Test
-    fun `q1 g128 is experimental on eligible but unqualified paths`() {
-        val result = OpenClRuntimePolicy.releaseQuantCompatibility(
-            modelPath = "/data/models/Bonsai-8B.gguf",
-            modelId = "some-other-id",
-            modelVersion = "q1_0_g128",
-            qualification = OpenClQualificationSnapshot(
-                runtimeSupportsGpuOffload = true,
-                automaticOpenClEligible = true,
-                probeStatus = OpenClProbeQualificationStatus.PENDING,
+    fun `q6 k filename is release supported`() {
+        assertEquals(
+            OpenClQuantCompatibility.SUPPORTED,
+            OpenClRuntimePolicy.releaseQuantCompatibility(
+                modelPath = "/data/models/model-q6_k.gguf",
+                modelId = "model",
+                modelVersion = null,
             ),
         )
-        assertEquals(OpenClQuantCompatibility.EXPERIMENTAL, result)
     }
 
     @Test
-    fun `q1 g128 is unsupported when device cannot attempt specialized opencl`() {
-        val result = OpenClRuntimePolicy.releaseQuantCompatibility(
-            modelPath = "/data/models/BONSAI-8B-custom.gguf",
-            modelId = "custom-model",
-            modelVersion = "q1_0_g128",
-            qualification = OpenClQualificationSnapshot(
-                runtimeSupportsGpuOffload = false,
-                automaticOpenClEligible = false,
-                probeStatus = OpenClProbeQualificationStatus.FAILED,
-            ),
-        )
-        assertEquals(OpenClQuantCompatibility.UNSUPPORTED, result)
-    }
-
-    @Test
-    fun `generic q1 quantization remains unsupported`() {
+    fun `known unsupported quantization is rejected`() {
         assertEquals(
             OpenClQuantCompatibility.UNSUPPORTED,
             OpenClRuntimePolicy.releaseQuantCompatibility(
-                modelPath = "/tmp/other-q1.gguf",
-                modelId = "other-q1-model",
-                modelVersion = "q1_0_g128",
+                modelPath = "/tmp/model.gguf",
+                modelId = "model",
+                modelVersion = "q8_0",
+            ),
+        )
+    }
+
+    @Test
+    fun `unknown quantization remains experimental`() {
+        assertEquals(
+            OpenClQuantCompatibility.EXPERIMENTAL,
+            OpenClRuntimePolicy.releaseQuantCompatibility(
+                modelPath = "/tmp/model.gguf",
+                modelId = "model",
+                modelVersion = null,
             ),
         )
     }

@@ -3,11 +3,9 @@ package com.pocketagent.android.runtime
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionManifest
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
 import com.pocketagent.inference.ModelCatalog
-import com.pocketagent.nativebridge.ModelRuntimeFormats
 
 enum class ModelSupportLevel {
     SUPPORTED,
-    EXPERIMENTAL,
     UNSUPPORTED,
 }
 
@@ -15,10 +13,6 @@ enum class ModelEligibilityReason {
     NONE,
     RUNTIME_COMPATIBILITY_MISMATCH,
     MODEL_NOT_RUNTIME_ENABLED,
-    DEVICE_GPU_CLASS_UNSUPPORTED,
-    GPU_RUNTIME_UNAVAILABLE,
-    GPU_QUALIFICATION_PENDING,
-    GPU_QUALIFICATION_FAILED,
 }
 
 data class ModelVersionEligibility(
@@ -29,9 +23,6 @@ data class ModelVersionEligibility(
     val reason: ModelEligibilityReason = ModelEligibilityReason.NONE,
     val technicalDetail: String? = null,
 ) {
-    val experimental: Boolean
-        get() = supportLevel == ModelSupportLevel.EXPERIMENTAL
-
     companion object {
         fun supported(): ModelVersionEligibility {
             return ModelVersionEligibility(
@@ -57,19 +48,6 @@ data class ModelVersionEligibility(
             )
         }
 
-        fun experimental(
-            reason: ModelEligibilityReason,
-            technicalDetail: String,
-        ): ModelVersionEligibility {
-            return ModelVersionEligibility(
-                supportLevel = ModelSupportLevel.EXPERIMENTAL,
-                catalogVisible = true,
-                downloadAllowed = true,
-                loadAllowed = true,
-                reason = reason,
-                technicalDetail = technicalDetail,
-            )
-        }
     }
 }
 
@@ -228,79 +206,7 @@ class DefaultModelCatalogEligibilityEvaluator : ModelCatalogEligibilityEvaluator
             )
         }
 
-        val formatHint = ModelRuntimeFormats.infer(
-            modelId = modelId,
-            modelVersion = version,
-            modelPath = null,
-        )
-        if (!formatHint.requiresQualifiedGpu) {
-            return ModelVersionEligibility.supported()
-        }
-
-        if (!signals.runtimeSupportsGpuOffload) {
-            return ModelVersionEligibility.unsupported(
-                reason = ModelEligibilityReason.GPU_RUNTIME_UNAVAILABLE,
-                technicalDetail = buildString {
-                    append("model=").append(modelId)
-                    append("|version=").append(version)
-                    append("|format=").append(formatHint.normalizedToken ?: formatHint.family.name.lowercase())
-                    append("|runtime_gpu_supported=false")
-                    appendBackendDetail(signals)
-                },
-            )
-        }
-        if (!signals.deviceAdvisory.supportedForProbe) {
-            return ModelVersionEligibility.unsupported(
-                reason = ModelEligibilityReason.DEVICE_GPU_CLASS_UNSUPPORTED,
-                technicalDetail = buildString {
-                    append("model=").append(modelId)
-                    append("|version=").append(version)
-                    append("|reason=").append(signals.deviceAdvisory.reason)
-                    appendBackendDetail(signals)
-                },
-            )
-        }
-
-        return when (signals.gpuProbeResult.status) {
-            GpuProbeStatus.QUALIFIED ->
-                ModelVersionEligibility.supported()
-
-            GpuProbeStatus.PENDING ->
-                ModelVersionEligibility.experimental(
-                    reason = ModelEligibilityReason.GPU_QUALIFICATION_PENDING,
-                    technicalDetail = "model=$modelId|version=$version|probe_status=pending",
-                )
-
-            GpuProbeStatus.FAILED ->
-                ModelVersionEligibility.experimental(
-                    reason = ModelEligibilityReason.GPU_QUALIFICATION_FAILED,
-                    technicalDetail = buildString {
-                        append("model=").append(modelId)
-                        append("|version=").append(version)
-                        append("|probe_status=failed")
-                        signals.gpuProbeResult.failureReason?.let { reason ->
-                            append("|probe_reason=").append(reason.name.lowercase())
-                        }
-                        appendBackendDetail(signals)
-                    },
-                )
-        }
-    }
-
-    private fun StringBuilder.appendBackendDetail(signals: ModelEligibilitySignals) {
-        val opencl = signals.backendCapability(RuntimeBackendFamily.OPENCL)
-        if (opencl != null) {
-            append("|opencl_compiled=").append(opencl.compiled)
-            append("|opencl_registered=").append(opencl.registered)
-            append("|opencl_discovered=").append(opencl.discovered ?: "unknown")
-            append("|opencl_device_count=").append(opencl.deviceCount ?: -1)
-            append("|opencl_runtime_available=").append(opencl.runtimeAvailable ?: "unknown")
-            append("|opencl_qualified=").append(opencl.qualified ?: "unknown")
-        }
-        val activeBackend = signals.runtimeDiagnostics?.activeBackend
-        if (!activeBackend.isNullOrBlank()) {
-            append("|active_backend=").append(activeBackend)
-        }
+        return ModelVersionEligibility.supported()
     }
 }
 

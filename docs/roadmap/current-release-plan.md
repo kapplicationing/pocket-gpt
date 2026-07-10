@@ -21,7 +21,6 @@ Ship the controlled Play Store MVP for PocketAgent with complete machine-verifia
 7. AI/agent outputs are valid for machine-verifiable reruns, artifact inspection, and failure classification.
 8. If human moderators are unavailable, a disclosed `AI human-proxy` operating mode may close the controlled-MVP moderation leg by using the same workflow script, setup bundle, and reporting utilities as human moderation.
 9. `docs/architecture/android-performance-contract.md` is mandatory for UI/runtime hot-path launch work; benchmark-only evidence is required when risky hot paths move.
-10. TurboQuant remains outside the launch critical path unless a specific required-lane blocker is traced to it.
 
 ## Current Execution Graph
 

@@ -2,7 +2,6 @@ package com.pocketagent.nativebridge
 
 import com.pocketagent.inference.ModelCatalog
 import java.io.File
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 data class BridgeError(
@@ -19,7 +18,6 @@ class NativeJniLlamaCppBridge(
     private val fallbackEnabled: Boolean = defaultFallbackEnabled(),
     private val gpuOffloadAllowed: Boolean = defaultGpuOffloadEnabled(),
     private val optimizedNativeLibrariesEnabled: Boolean = defaultOptimizedNativeLibrariesEnabled(),
-    private val openClQualificationProvider: (() -> OpenClQualificationSnapshot?)? = null,
 ) : LlamaCppRuntimeBridge {
     private val lifecycleLock = Any()
     private val lifecycleObserverLock = Any()
@@ -56,13 +54,8 @@ class NativeJniLlamaCppBridge(
     private var lastSuccessfulLoadDetail: String? = null
     @Volatile
     private var loadedNativeLibraryName: String? = null
-    private val kvCacheMethodState: AtomicReference<KvCacheMethodResolution> = AtomicReference(
-        KvCacheMethodResolution(
-            requestedMethod = RuntimeGenerationConfig.default().kvCacheMethod,
-            effectiveMethod = RuntimeGenerationConfig.default().kvCacheMethod,
-            preset = RuntimeGenerationConfig.default().kvCacheMethodPreset,
-        ),
-    )
+    @Volatile
+    private var activeKvCachePreset: KvCachePreset = RuntimeGenerationConfig.default().kvCachePreset
 
     init {
         ensureLifecycleDispatcherStarted()
@@ -77,7 +70,7 @@ class NativeJniLlamaCppBridge(
 
     override fun setRuntimeGenerationConfig(config: RuntimeGenerationConfig) {
         runtimeGenerationConfig = config
-        updateKvCacheMethodState(resolveKvCacheMethod(config.kvCacheMethod, config.kvCacheMethodPreset))
+        activeKvCachePreset = config.kvCachePreset
         if (usingFallback) {
             fallbackBridge.setRuntimeGenerationConfig(config)
             return
@@ -298,7 +291,7 @@ class NativeJniLlamaCppBridge(
         val startedMs = System.currentTimeMillis()
         ensureRuntimeInitialized()
         if (!runtimeReady) {
-            return currentKvMethodGenerationResult(
+            return currentGenerationResult(
                 finishReason = GenerationFinishReason.ERROR,
                 tokenCount = 0,
                 firstTokenMs = -1L,
@@ -331,7 +324,7 @@ class NativeJniLlamaCppBridge(
             }.onFailure { error ->
                 recordBridgeError("JNI_GENERATE_MULTIMODAL_EXCEPTION", error)
             }.getOrElse {
-                return currentKvMethodGenerationResult(
+                return currentGenerationResult(
                     finishReason = GenerationFinishReason.ERROR,
                     tokenCount = tokenCount,
                     firstTokenMs = firstTokenMs,
@@ -350,7 +343,7 @@ class NativeJniLlamaCppBridge(
             } else if (finishReason != GenerationFinishReason.CANCELLED) {
                 clearBridgeError()
             }
-            currentKvMethodGenerationResult(
+            currentGenerationResult(
                 finishReason = finishReason,
                 tokenCount = tokenCount,
                 firstTokenMs = firstTokenMs,
@@ -491,14 +484,6 @@ class NativeJniLlamaCppBridge(
             return false
         }
         val normalizedModelPath = validation.normalizedModelPath.orEmpty()
-        validateRuntimeFormatSupport(
-            modelId = modelId,
-            modelPath = normalizedModelPath,
-            modelVersion = options.modelVersion,
-        )?.let { incompatibility ->
-            recordBridgeError(incompatibility.code, incompatibility.detail)
-            return false
-        }
         if (usingFallback) {
             fallbackBridge.setRuntimeGenerationConfig(runtimeGenerationConfig)
             val loaded = fallbackBridge.loadModel(
@@ -516,22 +501,11 @@ class NativeJniLlamaCppBridge(
             return loaded
         }
         val baseConfig = runtimeGenerationConfig
-        val openClQualification = resolveOpenClQualificationSnapshot()
-        validateSpecializedFormatDeviceSupport(
-            modelId = modelId,
-            modelPath = normalizedModelPath,
-            modelVersion = options.modelVersion,
-            qualification = openClQualification,
-        )?.let { incompatibility ->
-            recordBridgeError(incompatibility.code, incompatibility.detail)
-            return false
-        }
         var preferredBackend = resolvePreferredBackend(baseConfig)
         val openclQuantCompatibility = OpenClRuntimePolicy.releaseQuantCompatibility(
             modelPath = normalizedModelPath,
             modelId = modelId,
             modelVersion = options.modelVersion,
-            qualification = openClQualification,
         )
         val openclQuantUnsupported = preferredBackend == GpuExecutionBackend.OPENCL &&
             openclQuantCompatibility == OpenClQuantCompatibility.UNSUPPORTED
@@ -548,24 +522,8 @@ class NativeJniLlamaCppBridge(
         val preferredBackendAvailable = preferredBackendAvailable(preferredBackend)
         val runtimeGpuSupported = gpuOffloadAllowed && gpuEnabledRequested && supportsGpuOffload()
         val gpuEnabledAndSupported = runtimeGpuSupported && preferredBackendAvailable
-        val config = sanitizeRuntimeConfigForLoad(
-            config = backendSanitizedConfig,
-            modelId = modelId,
-            modelPath = normalizedModelPath,
-            modelVersion = options.modelVersion,
-            cpuExecution = !gpuEnabledAndSupported,
-        )
-        val kvMethodResolution = resolveKvCacheMethod(
-            requestedMethod = config.kvCacheMethod,
-            preset = config.kvCacheMethodPreset,
-        )
-        updateKvCacheMethodState(kvMethodResolution)
-        kvMethodResolution.demotionReason?.let { reason ->
-            logBridge(
-                "KV_METHOD_DEMOTE",
-                "model=$normalizedModelPath|model_id=$modelId|requested=${kvMethodResolution.requestedMethod.name.lowercase()}|effective=${kvMethodResolution.effectiveMethod.name.lowercase()}|preset=${kvMethodResolution.preset.name.lowercase()}|reason=$reason",
-            )
-        }
+        val config = backendSanitizedConfig
+        activeKvCachePreset = config.kvCachePreset
         val requestedGpuLayers = if (gpuEnabledAndSupported) config.gpuLayers else 0
         val requestedDraftGpuLayers = if (gpuEnabledAndSupported && config.speculativeEnabled && config.speculativeDraftGpuLayers > 0) {
             config.speculativeDraftGpuLayers.coerceAtLeast(0)
@@ -577,7 +535,7 @@ class NativeJniLlamaCppBridge(
         if (preferredBackend == GpuExecutionBackend.OPENCL) {
             logBridge(
                 "OPENCL_QUANT_POLICY",
-                "model=$normalizedModelPath|model_id=$modelId|demoted_to_cpu=$openclQuantUnsupported|effective_gpu_layers=$effectiveGpuLayers|backend=${preferredBackend.name.lowercase()}|compatibility=${openclQuantCompatibility.name.lowercase()}|probe_status=${openClQualification.probeStatus.name.lowercase()}",
+                "model=$normalizedModelPath|model_id=$modelId|demoted_to_cpu=$openclQuantUnsupported|effective_gpu_layers=$effectiveGpuLayers|backend=${preferredBackend.name.lowercase()}|compatibility=${openclQuantCompatibility.name.lowercase()}",
             )
         }
 
@@ -644,8 +602,7 @@ class NativeJniLlamaCppBridge(
                     nCtx = config.nCtx,
                     nGpuLayers = attempt.targetGpuLayers,
                     flashAttnCode = config.flashAttnMode.code,
-                    kvCacheMethodCode = kvMethodResolution.effectiveMethod.code,
-                    kvCacheMethodPresetCode = kvMethodResolution.preset.code,
+                    kvCachePresetCode = config.kvCachePreset.code,
                     temperature = config.sampling.temperature,
                     topK = config.sampling.topK,
                     topP = config.sampling.topP,
@@ -737,7 +694,7 @@ class NativeJniLlamaCppBridge(
         val startedMs = System.currentTimeMillis()
         ensureRuntimeInitialized()
         if (!runtimeReady) {
-            return currentKvMethodGenerationResult(
+            return currentGenerationResult(
                 finishReason = GenerationFinishReason.ERROR,
                 tokenCount = 0,
                 firstTokenMs = -1L,
@@ -783,7 +740,7 @@ class NativeJniLlamaCppBridge(
             }.onFailure { error ->
                 recordBridgeError("JNI_GENERATE_EXCEPTION", error)
             }.getOrElse {
-                return currentKvMethodGenerationResult(
+                return currentGenerationResult(
                     finishReason = GenerationFinishReason.ERROR,
                     tokenCount = tokenCount,
                     firstTokenMs = firstTokenMs,
@@ -807,7 +764,7 @@ class NativeJniLlamaCppBridge(
             } else if (finishReason != GenerationFinishReason.CANCELLED) {
                 clearBridgeError()
             }
-            currentKvMethodGenerationResult(
+            currentGenerationResult(
                 finishReason = finishReason,
                 tokenCount = tokenCount,
                 firstTokenMs = firstTokenMs,
@@ -1180,33 +1137,8 @@ class NativeJniLlamaCppBridge(
         }
         return config.copy(
             flashAttnMode = FlashAttnMode.OFF,
-            kvCacheMethodPreset = KvCacheMethodPreset.SAFE,
+            kvCachePreset = KvCachePreset.SAFE,
         )
-    }
-
-    private fun sanitizeRuntimeConfigForLoad(
-        config: RuntimeGenerationConfig,
-        modelId: String,
-        modelPath: String,
-        modelVersion: String?,
-        cpuExecution: Boolean,
-    ): RuntimeGenerationConfig {
-        if (!cpuExecution || requiredRuntimeFormat(modelId, modelPath, modelVersion) != "q1_0_g128") {
-            return config
-        }
-        val sanitized = config.copy(
-            flashAttnMode = FlashAttnMode.OFF,
-            kvCacheMethodPreset = KvCacheMethodPreset.SAFE,
-            nBatch = minOf(config.nBatch, BONSAI_CPU_SAFE_BATCH),
-            nUbatch = minOf(config.nUbatch, BONSAI_CPU_SAFE_BATCH),
-        )
-        if (sanitized != config) {
-            logBridge(
-                "BONSAI_CPU_SAFE_CONFIG",
-                "model_id=$modelId|flash_attn=${sanitized.flashAttnMode.name.lowercase()}|kv_preset=${sanitized.kvCacheMethodPreset.name.lowercase()}|n_batch=${sanitized.nBatch}|n_ubatch=${sanitized.nUbatch}",
-            )
-        }
-        return sanitized
     }
 
     private fun preferredBackendAvailable(backend: GpuExecutionBackend): Boolean {
@@ -1287,135 +1219,6 @@ class NativeJniLlamaCppBridge(
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
         return code to detail
-    }
-
-    private fun parseRuntimeSupportFlag(
-        diagnosticsJson: String,
-        regex: Regex,
-    ): Boolean? {
-        if (diagnosticsJson.isBlank()) {
-            return null
-        }
-        return regex.find(diagnosticsJson)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.trim()
-            ?.lowercase()
-            ?.let { value ->
-                when (value) {
-                    "true" -> true
-                    "false" -> false
-                    else -> null
-                }
-            }
-    }
-
-    private fun validateRuntimeFormatSupport(
-        modelId: String,
-        modelPath: String,
-        modelVersion: String?,
-    ): BridgeError? {
-        val requiredFormat = requiredRuntimeFormat(
-            modelId = modelId,
-            modelPath = modelPath,
-            modelVersion = modelVersion,
-        ) ?: return null
-        val diagnostics = backendDiagnosticsJson().orEmpty()
-        val supported = when (requiredFormat) {
-            "q1_0" -> parseRuntimeSupportFlag(diagnostics, SUPPORTS_Q1_0_REGEX)
-            "q1_0_g128" -> parseRuntimeSupportFlag(diagnostics, SUPPORTS_Q1_0_G128_REGEX)
-            else -> null
-        }
-        return if (supported == true) {
-            null
-        } else {
-            BridgeError(
-                code = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT",
-                detail = buildString {
-                    append("modelId=")
-                    append(modelId)
-                    append("|required_format=")
-                    append(requiredFormat)
-                    append("|runtime_support=")
-                    append(supported?.toString() ?: "unknown")
-                    append("|compiled_backends=")
-                    append(parseCompiledBackends(diagnostics).joinToString(separator = ","))
-                },
-            )
-        }
-    }
-
-    private fun resolveOpenClQualificationSnapshot(): OpenClQualificationSnapshot {
-        val provided = runCatching { openClQualificationProvider?.invoke() }.getOrNull()
-        return OpenClQualificationSnapshot(
-            runtimeSupportsGpuOffload = supportsGpuOffload(),
-            automaticOpenClEligible = provided?.automaticOpenClEligible,
-            probeStatus = provided?.probeStatus ?: OpenClProbeQualificationStatus.UNKNOWN,
-        )
-    }
-
-    private fun validateSpecializedFormatDeviceSupport(
-        modelId: String,
-        modelPath: String,
-        modelVersion: String?,
-        qualification: OpenClQualificationSnapshot,
-    ): BridgeError? {
-        val formatHint = ModelRuntimeFormats.infer(
-            modelId = modelId,
-            modelVersion = modelVersion,
-            modelPath = modelPath,
-        )
-        if (!formatHint.requiresQualifiedGpu) {
-            return null
-        }
-        if (supportsGpuOffload()) {
-            if (qualification.automaticOpenClEligible != false) {
-                return null
-            }
-            val diagnostics = backendDiagnosticsJson().orEmpty()
-            return BridgeError(
-                code = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT",
-                detail = buildString {
-                    append("modelId=").append(modelId)
-                    append("|required_format=").append(formatHint.normalizedToken ?: "specialized")
-                    append("|required_backend=gpu")
-                    append("|qualified_gpu_required=true")
-                    append("|device_gpu_path_supported=false")
-                    append("|compiled_backends=").append(parseCompiledBackends(diagnostics).joinToString(separator = ","))
-                },
-            )
-        }
-        val diagnostics = backendDiagnosticsJson().orEmpty()
-        return BridgeError(
-            code = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT",
-            detail = buildString {
-                append("modelId=").append(modelId)
-                append("|required_format=").append(formatHint.normalizedToken ?: "specialized")
-                append("|required_backend=gpu")
-                append("|qualified_gpu_required=true")
-                append("|gpu_runtime_supported=false")
-                append("|compiled_backends=").append(parseCompiledBackends(diagnostics).joinToString(separator = ","))
-            },
-        )
-    }
-
-    private fun requiredRuntimeFormat(
-        modelId: String,
-        modelPath: String,
-        modelVersion: String?,
-    ): String? {
-        val formatHint = ModelRuntimeFormats.infer(
-            modelId = modelId,
-            modelVersion = modelVersion,
-            modelPath = modelPath,
-        )
-        return when (formatHint.family) {
-            ModelRuntimeFormatFamily.Q1_0_G128,
-            ModelRuntimeFormatFamily.Q1_0,
-            ModelRuntimeFormatFamily.UNKNOWN_SPECIALIZED,
-            -> formatHint.normalizedToken
-            ModelRuntimeFormatFamily.STANDARD -> null
-        }
     }
 
     private fun resolveLoadAttemptError(
@@ -1520,11 +1323,7 @@ class NativeJniLlamaCppBridge(
         println("NativeJniLlamaCppBridge|$tag|$message")
     }
 
-    private fun updateKvCacheMethodState(resolution: KvCacheMethodResolution) {
-        kvCacheMethodState.set(resolution)
-    }
-
-    private fun currentKvMethodGenerationResult(
+    private fun currentGenerationResult(
         finishReason: GenerationFinishReason,
         tokenCount: Int,
         firstTokenMs: Long,
@@ -1536,7 +1335,6 @@ class NativeJniLlamaCppBridge(
         peakRssMb: Double? = null,
         errorCode: String? = null,
     ): GenerationResult {
-        val kvState = kvCacheMethodState.get()
         return GenerationResult(
             finishReason = finishReason,
             tokenCount = tokenCount,
@@ -1548,10 +1346,7 @@ class NativeJniLlamaCppBridge(
             tokensPerSec = tokensPerSec,
             peakRssMb = peakRssMb,
             errorCode = errorCode,
-            requestedKvCacheMethod = kvState.requestedMethod,
-            effectiveKvCacheMethod = kvState.effectiveMethod,
-            kvCacheMethodPreset = kvState.preset,
-            kvCacheMethodDemotionReason = kvState.demotionReason,
+            kvCachePreset = activeKvCachePreset,
         )
     }
 
@@ -1599,8 +1394,7 @@ class NativeJniLlamaCppBridge(
             nCtx: Int,
             nGpuLayers: Int,
             flashAttnCode: Int,
-            kvCacheMethodCode: Int,
-            kvCacheMethodPresetCode: Int,
+            kvCachePresetCode: Int,
             temperature: Float,
             topK: Int,
             topP: Float,
@@ -1691,8 +1485,7 @@ class NativeJniLlamaCppBridge(
             nCtx: Int,
             nGpuLayers: Int,
             flashAttnCode: Int,
-            kvCacheMethodCode: Int,
-            kvCacheMethodPresetCode: Int,
+            kvCachePresetCode: Int,
             temperature: Float,
             topK: Int,
             topP: Float,
@@ -1782,8 +1575,7 @@ class NativeJniLlamaCppBridge(
             nCtx: Int,
             nGpuLayers: Int,
             flashAttnCode: Int,
-            kvCacheMethodCode: Int,
-            kvCacheMethodPresetCode: Int,
+            kvCachePresetCode: Int,
             temperature: Float,
             topK: Int,
             topP: Float,
@@ -1819,8 +1611,7 @@ class NativeJniLlamaCppBridge(
                 nCtx,
                 nGpuLayers,
                 flashAttnCode,
-                kvCacheMethodCode,
-                kvCacheMethodPresetCode,
+                kvCachePresetCode,
                 temperature,
                 topK,
                 topP,
@@ -1996,13 +1787,6 @@ class NativeJniLlamaCppBridge(
         private val LAST_ERROR_DETAIL_REGEX = "\"last_error_detail\"\\s*:\\s*\"([^\"]*)\"".toRegex(
             option = RegexOption.IGNORE_CASE,
         )
-        private val SUPPORTS_Q1_0_REGEX = "\"supports_q1_0\"\\s*:\\s*(true|false)".toRegex(
-            option = RegexOption.IGNORE_CASE,
-        )
-        private val SUPPORTS_Q1_0_G128_REGEX = "\"supports_q1_0_g128\"\\s*:\\s*(true|false)".toRegex(
-            option = RegexOption.IGNORE_CASE,
-        )
-        private const val BONSAI_CPU_SAFE_BATCH = 128
         private val RETRYABLE_GPU_LOAD_ERROR_TERMS = setOf(
             "gpu",
             "opencl",

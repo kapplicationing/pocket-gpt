@@ -6,10 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.GpuProbeFailureReason
 import com.pocketagent.android.runtime.GpuProbeStatus
@@ -84,10 +85,9 @@ internal fun AdvancedSettingsSheet(
 
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
             .padding(PocketAgentDimensions.sheetHorizontalPadding)
-            .navigationBarsPadding()
-            .imePadding(),
+            .navigationBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
     ) {
         TabRow(selectedTabIndex = selectedTab) {
@@ -97,6 +97,7 @@ internal fun AdvancedSettingsSheet(
                     haptic.tickLight()
                     selectedTab = 0
                 },
+                modifier = Modifier.testTag("advanced_tab_general"),
                 text = { Text(stringResource(id = R.string.ui_tab_general)) },
             )
             Tab(
@@ -105,6 +106,7 @@ internal fun AdvancedSettingsSheet(
                     haptic.tickLight()
                     selectedTab = 1
                 },
+                modifier = Modifier.testTag("advanced_tab_model"),
                 text = { Text(stringResource(id = R.string.ui_tab_model)) },
             )
             Tab(
@@ -113,6 +115,7 @@ internal fun AdvancedSettingsSheet(
                     haptic.tickLight()
                     selectedTab = 2
                 },
+                modifier = Modifier.testTag("advanced_tab_about"),
                 text = { Text(stringResource(id = R.string.ui_tab_about)) },
             )
         }

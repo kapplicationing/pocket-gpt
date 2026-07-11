@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -243,6 +245,26 @@ class MainActivityUiSmokeTest {
             composeRule.onAllNodesWithTag("advanced_unlock_cue").fetchSemanticsNodes().isNotEmpty(),
         )
         composeRule.captureScreenshotIfEnabled("ui-11-advanced-default-available")
+    }
+
+    @Test
+    fun fullScreenSettingsRetainDraftWithoutRestoringComposerFocus() {
+        composeRule.dismissOnboardingIfVisible()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.hasNodeWithTag("composer_input") &&
+                composeRule.hasNodeWithTag("advanced_sheet_button")
+        }
+        val draft = "retained draft"
+
+        composeRule.onNodeWithTag("composer_input").performTextInput(draft)
+        composeRule.onNodeWithTag("advanced_sheet_button").performClick()
+        composeRule.onNodeWithTag("settings_destination").assertIsDisplayed()
+        composeRule.onNodeWithTag("composer_input").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("settings_destination_close").performClick()
+        composeRule.onNodeWithTag("composer_input")
+            .assertTextContains(draft)
+            .assertIsNotFocused()
     }
 
     @Test

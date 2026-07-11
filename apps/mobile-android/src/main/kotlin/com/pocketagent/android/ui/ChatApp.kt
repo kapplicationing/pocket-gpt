@@ -32,8 +32,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
@@ -45,6 +50,7 @@ import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.components.AppBottomSheet
+import com.pocketagent.android.ui.components.SettingsDestination
 import com.pocketagent.android.ui.components.ConfirmDialog
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
@@ -396,76 +402,105 @@ fun PocketAgentApp(
             }
     }
 
-    ModalNavigationDrawer(
-        modifier = Modifier.semantics {
-            testTagsAsResourceId = true
-        },
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet(modifier = Modifier.fillMaxHeight()) {
-                SessionDrawerHost(
+    val settingsDestinationActive = activeSurface.isSettingsDestination()
+    val retainedShellModifier = Modifier
+        .fillMaxSize()
+        .focusProperties { canFocus = !settingsDestinationActive }
+        .drawWithContent {
+            if (!settingsDestinationActive) {
+                drawContent()
+            }
+        }
+        .then(
+            if (settingsDestinationActive) {
+                Modifier
+                    .clearAndSetSemantics {}
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Initial)
+                                    .changes
+                                    .forEach { change -> change.consume() }
+                            }
+                        }
+                    }
+            } else {
+                Modifier
+            },
+        )
+    Box(modifier = retainedShellModifier) {
+        ModalNavigationDrawer(
+            modifier = Modifier.semantics {
+                testTagsAsResourceId = true
+            },
+            drawerState = drawerState,
+            drawerContent = {
+                ModalDrawerSheet(modifier = Modifier.fillMaxHeight()) {
+                    SessionDrawerHost(
+                        viewModel = viewModel,
+                        onCreateSession = {
+                            viewModel.createSession()
+                            viewModel.dismissSurface()
+                        },
+                        onSwitchSession = { id ->
+                            viewModel.switchSession(id)
+                            viewModel.dismissSurface()
+                        },
+                        onDeleteSession = sessionDeleteUndoState.requestDelete,
+                        hiddenSessionIds = sessionDeleteUndoState.hiddenSessionIds,
+                    )
+                }
+            },
+        ) {
+            Scaffold(
+                snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+                topBar = {
+                    PocketAgentTopBar(
+                        activeRuntimeModelLabel = activeRuntimeModelLabel,
+                        hasInstalledModels = hasInstalledModels,
+                        onOpenSessionDrawer = { viewModel.showSurface(ModalSurface.SessionDrawer) },
+                        onModelPresetSelected = handlePresetSelected,
+                        onOpenModelLibrary = openModelSheet,
+                        onOpenAdvancedSettings = { viewModel.showSurface(ModalSurface.AdvancedSettings) },
+                    )
+                },
+                bottomBar = {
+                    ChatComposerDock(
+                        viewModel = viewModel,
+                        chatGateState = chatGateState,
+                        canAttachImages = canAttachImages,
+                        showThinkingToggle = showThinkingToggle,
+                        consumeImeInsets = activeSurface == ModalSurface.None,
+                        autoFocusEnabled = activeSurface == ModalSurface.None &&
+                            chatGateState.status == ChatGateStatus.READY,
+                        onAttachImage = chatAppLaunchers.launchImageAttachmentPicker,
+                        onBlockedAction = onBlockedAction,
+                    )
+                },
+            ) { innerPadding ->
+                ChatScreenHost(
                     viewModel = viewModel,
-                    onCreateSession = {
-                        viewModel.createSession()
-                        viewModel.dismissSurface()
+                    runtime = runtime,
+                    modelLoadingState = modelLoadingState,
+                    onSuggestedPrompt = viewModel::prefillComposer,
+                    onOpenModels = openModelSheet,
+                    canLoadLastUsedModel = canLoadLastUsedModel,
+                    lastUsedModelLabel = lastUsedModelLabel,
+                    onLoadLastUsedModel = { loadLastUsedModelAction(false) },
+                    activeRuntimeModelLabel = activeRuntimeModelLabel,
+                    onRefresh = refreshAction,
+                    isOffline = isOffline,
+                    onOpenToolDialog = { viewModel.showSurface(ModalSurface.ToolSuggestions) },
+                    onEditMessage = viewModel::editMessage,
+                    onRegenerateMessage = viewModel::regenerateResponse,
+                    onCopiedToClipboard = {
+                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.ui_copied_to_clipboard)) }
                     },
-                    onSwitchSession = { id ->
-                        viewModel.switchSession(id)
-                        viewModel.dismissSurface()
-                    },
-                    onDeleteSession = sessionDeleteUndoState.requestDelete,
-                    hiddenSessionIds = sessionDeleteUndoState.hiddenSessionIds,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
                 )
             }
-        },
-    ) {
-        Scaffold(
-            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-            topBar = {
-                PocketAgentTopBar(
-                    activeRuntimeModelLabel = activeRuntimeModelLabel,
-                    hasInstalledModels = hasInstalledModels,
-                    onOpenSessionDrawer = { viewModel.showSurface(ModalSurface.SessionDrawer) },
-                    onModelPresetSelected = handlePresetSelected,
-                    onOpenModelLibrary = openModelSheet,
-                    onOpenAdvancedSettings = { viewModel.showSurface(ModalSurface.AdvancedSettings) },
-                )
-            },
-            bottomBar = {
-                ChatComposerDock(
-                    viewModel = viewModel,
-                    chatGateState = chatGateState,
-                    canAttachImages = canAttachImages,
-                    showThinkingToggle = showThinkingToggle,
-                    autoFocusEnabled = activeSurface == ModalSurface.None &&
-                        chatGateState.status == ChatGateStatus.READY,
-                    onAttachImage = chatAppLaunchers.launchImageAttachmentPicker,
-                    onBlockedAction = onBlockedAction,
-                )
-            },
-        ) { innerPadding ->
-            ChatScreenHost(
-                viewModel = viewModel,
-                runtime = runtime,
-                modelLoadingState = modelLoadingState,
-                onSuggestedPrompt = viewModel::prefillComposer,
-                onOpenModels = openModelSheet,
-                canLoadLastUsedModel = canLoadLastUsedModel,
-                lastUsedModelLabel = lastUsedModelLabel,
-                onLoadLastUsedModel = { loadLastUsedModelAction(false) },
-                activeRuntimeModelLabel = activeRuntimeModelLabel,
-                onRefresh = refreshAction,
-                isOffline = isOffline,
-                onOpenToolDialog = { viewModel.showSurface(ModalSurface.ToolSuggestions) },
-                onEditMessage = viewModel::editMessage,
-                onRegenerateMessage = viewModel::regenerateResponse,
-                onCopiedToClipboard = {
-                    scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.ui_copied_to_clipboard)) }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
         }
     }
 
@@ -540,6 +575,7 @@ private fun ChatComposerDock(
     chatGateState: ChatGateState,
     canAttachImages: Boolean,
     showThinkingToggle: Boolean,
+    consumeImeInsets: Boolean,
     autoFocusEnabled: Boolean,
     onAttachImage: () -> Unit,
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
@@ -569,6 +605,7 @@ private fun ChatComposerDock(
         onToggleThinking = viewModel::toggleSessionThinking,
         onOpenCompletionSettings = { viewModel.showSurface(ModalSurface.CompletionSettings) },
         onBlockedAction = onBlockedAction,
+        consumeImeInsets = consumeImeInsets,
         autoFocusEnabled = autoFocusEnabled,
     )
 }
@@ -783,11 +820,9 @@ private fun AdvancedSettingsModalHost(
 
     val defaultThinkingEnabled by viewModel.defaultThinkingEnabledFlow.collectAsState()
     val downloadPreferences by provisioningViewModel.downloadPreferencesFlow.collectAsState()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    AppBottomSheet(
+    SettingsDestination(
         title = stringResource(id = R.string.ui_advanced_controls_title),
-        sheetState = sheetState,
-        onDismiss = onDismissSurface,
+        onClose = onDismissSurface,
         modifier = Modifier.testTag("advanced_settings_sheet"),
     ) {
         AdvancedSettingsSheet(
@@ -859,11 +894,9 @@ private fun CompletionSettingsModalHost(
     }
 
     val completionSettings by viewModel.currentCompletionSettingsFlow.collectAsState()
-    val completionSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    AppBottomSheet(
+    SettingsDestination(
         title = stringResource(id = R.string.ui_completion_settings_title),
-        sheetState = completionSheetState,
-        onDismiss = onDismissSurface,
+        onClose = onDismissSurface,
     ) {
         CompletionSettingsSheet(
             settings = completionSettings,
@@ -871,6 +904,11 @@ private fun CompletionSettingsModalHost(
             onClose = onDismissSurface,
         )
     }
+}
+
+private fun ModalSurface.isSettingsDestination(): Boolean = when (this) {
+    ModalSurface.AdvancedSettings, ModalSurface.CompletionSettings -> true
+    else -> false
 }
 
 @Composable

@@ -75,6 +75,7 @@ import com.pocketagent.android.ui.theme.tickLight
 import java.io.File
 
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod", "LongParameterList")
 internal fun ComposerBar(
     text: String,
     isSending: Boolean,
@@ -97,6 +98,7 @@ internal fun ComposerBar(
     onToggleThinking: () -> Unit,
     onOpenCompletionSettings: () -> Unit,
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
+    consumeImeInsets: Boolean = true,
     autoFocusEnabled: Boolean = true,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -111,12 +113,12 @@ internal fun ComposerBar(
             focusManager.clearFocus(force = true)
         }
     }
-    LaunchedEffect(activeSessionId, autoFocusEnabled) {
+    LaunchedEffect(activeSessionId) {
         if (autoFocusEnabled && activeSessionId != null) {
             focusRequester.requestFocus()
         }
     }
-    LaunchedEffect(editingMessageId, autoFocusEnabled) {
+    LaunchedEffect(editingMessageId) {
         if (autoFocusEnabled && editingMessageId != null) {
             focusRequester.requestFocus()
         }
@@ -151,12 +153,14 @@ internal fun ComposerBar(
     }
     val compactSpacing = PocketAgentDimensions.sectionSpacing / 2
 
+    val imePaddingModifier = if (consumeImeInsets) Modifier.imePadding() else Modifier
+    val contentAnimationModifier = if (consumeImeInsets) Modifier.animateContentSize() else Modifier
     Surface(
         tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .imePadding()
-            .animateContentSize(),
+            .then(imePaddingModifier)
+            .then(contentAnimationModifier),
     ) {
         // No verticalScroll on this Column: the inner OutlinedTextField already scrolls its
         // text via maxLines, and the Column is bounded by heightIn(max = 280.dp). Wrapping
@@ -349,6 +353,7 @@ private fun ComposerActionStrip(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod")
 private fun ComposerInputRow(
     text: String,
     isSending: Boolean,

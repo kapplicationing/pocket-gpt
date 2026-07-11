@@ -173,6 +173,73 @@ class PerformanceContractAuditTest {
     }
 
     @Test
+    fun `hidden composer does not consume IME insets behind a modal surface`() {
+        val chatApp = chatAppSourceFile().readText()
+        val composer = composerSourceFile().readText()
+
+        assertTrue(
+            "consumeImeInsets = activeSurface == ModalSurface.None" in chatApp,
+            "ChatApp must stop the covered composer from responding to IME insets while a modal surface owns input.",
+        )
+        assertTrue(
+            "consumeImeInsets: Boolean = true" in composer &&
+                "if (consumeImeInsets) Modifier.imePadding() else Modifier" in composer,
+                "ComposerBar must apply IME padding conditionally instead of relaying modal keyboard changes to the hidden activity root.",
+        )
+        assertTrue(
+            "LaunchedEffect(activeSessionId)" in composer &&
+                "LaunchedEffect(editingMessageId)" in composer &&
+                "LaunchedEffect(activeSessionId, autoFocusEnabled)" !in composer &&
+                "LaunchedEffect(editingMessageId, autoFocusEnabled)" !in composer,
+            "Modal eligibility changes must not masquerade as session or edit focus events and reopen the IME on close.",
+        )
+    }
+
+    @Test
+    fun `content-heavy settings render as single-root destinations`() {
+        val chatAppFile = chatAppSourceFile()
+        val chatApp = chatAppFile.readText()
+        val advancedHost = composableFunctionSource(chatAppFile, "AdvancedSettingsModalHost")
+        val completionHost = composableFunctionSource(chatAppFile, "CompletionSettingsModalHost")
+        val retainedShell = chatApp.substringAfter(
+            "val settingsDestinationActive = activeSurface.isSettingsDestination()",
+        ).substringBefore("ModelLibrarySheetHost(")
+
+        assertTrue(
+            "drawWithContent" in retainedShell &&
+                "if (!settingsDestinationActive)" in retainedShell &&
+                "drawContent()" in retainedShell &&
+                "pointerInput" in retainedShell &&
+                "clearAndSetSemantics" in retainedShell &&
+                "focusProperties { canFocus = !settingsDestinationActive }" in retainedShell &&
+                "if (!activeSurface.isSettingsDestination())" !in chatApp &&
+                "ModalSurface.AdvancedSettings, ModalSurface.CompletionSettings -> true" in chatApp,
+            "The chat shell must retain composition but suppress draw, pointer, focus, and semantics while an opaque settings destination owns the Activity root.",
+        )
+        listOf("advanced" to advancedHost, "completion" to completionHost).forEach { (label, host) ->
+            assertTrue(
+                "SettingsDestination(" in host &&
+                    "AppBottomSheet(" !in host &&
+                    "rememberModalBottomSheetState(" !in host,
+                "$label settings must render in-tree without a dialog-backed ModalBottomSheet.",
+            )
+        }
+    }
+
+    @Test
+    fun `full-screen settings avoid whole-list IME relayout`() {
+        val completionFile = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt")
+        val completionSheet = composableFunctionSource(completionFile, "CompletionSettingsSheet")
+        val advancedFile = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/SettingsSheet.kt")
+        val advancedSheet = composableFunctionSource(advancedFile, "AdvancedSettingsSheet")
+
+        assertTrue(
+            "imePadding()" !in completionSheet && "imePadding()" !in advancedSheet,
+            "Opaque settings roots must not relay every keyboard animation frame through a full settings list; focused fields own visibility.",
+        )
+    }
+
+    @Test
     fun `settings and search hot text fields use TextFieldValue locally`() {
         val hotFields = listOf(
             HotTextFieldContract("CompletionSettingsSheet.kt", "CompletionSettingsSheet", "systemPrompt", "system prompt"),
@@ -567,13 +634,58 @@ class PerformanceContractAuditTest {
     }
 
     @Test
-    fun `settings performance probe is reversible fail closed and redacted`() {
-        val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
-        val chatApp = chatAppSourceFile().readText()
-        val baselineProfileGenerator = resolveRepoSource(
+    fun `baseline profile bootstrap polls shell and onboarding together`() {
+        val generator = resolveRepoSource(
             "apps/mobile-android-baselineprofile/src/main/kotlin/" +
                 "com/pocketagent/android/baselineprofile/BaselineProfileGenerator.kt",
         ).readText()
+        val bootstrap = generator.substringAfter("private fun MacrobenchmarkScope.startCriticalShell()")
+            .substringBefore("private fun exerciseSessionDrawer(")
+
+        assertTrue(
+            "while (SystemClock.uptimeMillis() < deadline)" in bootstrap &&
+                "device.findObject(By.res(\"session_drawer_button\"))" in bootstrap &&
+                "device.findObject(By.res(\"onboarding_skip\"))" in bootstrap &&
+                "device.wait(" !in bootstrap,
+            "Baseline generation must poll the ready shell and onboarding concurrently instead of waiting 30 seconds for an onboarding control that may never exist.",
+        )
+    }
+
+    @Test
+    fun `baseline profile generator exercises navigation search scroll tabs and IME`() {
+        val chatApp = chatAppSourceFile().readText()
+        val generator = resolveRepoSource(
+            "apps/mobile-android-baselineprofile/src/main/kotlin/" +
+                "com/pocketagent/android/baselineprofile/BaselineProfileGenerator.kt",
+        ).readText()
+        val settingsSheet = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/SettingsSheet.kt").readText()
+        val generatorEvidence = listOf(
+            "exerciseSessionDrawer()",
+            "requireResource(\"session_search_input\")",
+            "exerciseAdvancedSettings()",
+            "device.swipe(",
+            "requireResource(\"advanced_tab_model\").click()",
+            "requireResource(\"advanced_tab_about\").click()",
+            "exerciseCompletionSettings()",
+            "requireResource(\"completion_system_prompt_input\").click()",
+        )
+        val tabEvidence = listOf(
+            "Modifier.testTag(\"advanced_tab_model\")",
+            "Modifier.testTag(\"advanced_tab_about\")",
+        )
+
+        assertTrue(
+            "modifier = Modifier.testTag(\"advanced_settings_sheet\")" in chatApp &&
+                generatorEvidence.all { evidence -> evidence in generator } &&
+                tabEvidence.all { evidence -> evidence in settingsSheet } &&
+                "By.text(" !in generator,
+            "Baseline generation must exercise navigation through locale-neutral resources.",
+        )
+    }
+
+    @Test
+    fun `settings performance probe is reversible fail closed and redacted`() {
+        val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
         val cleanupContract = script.substringAfter("cleanup() {")
             .substringBefore("trap cleanup EXIT")
         val settingsJourney = script.substringAfter("adb_shell dumpsys gfxinfo \"\$PACKAGE\" reset")
@@ -617,13 +729,6 @@ class PerformanceContractAuditTest {
                 settingsJourney.indexOf("SETTINGS_PROMPT_MUTATION_PENDING=1") <
                 settingsJourney.indexOf("type_text_slowly"),
             "Settings measurement must append only after capturing the original and arming fail-closed cleanup.",
-        )
-        assertTrue(
-            "modifier = Modifier.testTag(\"advanced_settings_sheet\")" in chatApp &&
-                "openAndCloseSurface(\"advanced_sheet_button\", \"advanced_settings_sheet\")" in
-                baselineProfileGenerator &&
-                "By.text(" !in baselineProfileGenerator,
-            "Advanced settings automation must wait on a locale-neutral modal resource, not visible text.",
         )
         assertTrue(
             handshakeOffsets.all { offset -> offset >= 0 } &&

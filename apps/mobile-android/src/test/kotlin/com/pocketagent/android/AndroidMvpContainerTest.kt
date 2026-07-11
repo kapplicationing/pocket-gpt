@@ -338,7 +338,7 @@ class AndroidMvpContainerTest {
     }
 
     @Test
-    fun `analyze image fails when runtime image model cannot load`() {
+    fun `analyze image cleans up when runtime image model cannot load`() {
         val inference = RecordingInferenceModule(allowLoad = false)
         val container = defaultContainer(inferenceModule = inference)
 
@@ -347,7 +347,7 @@ class AndroidMvpContainerTest {
         }
 
         assertTrue(error.message?.contains("Failed to load runtime model for image analysis") == true)
-        assertEquals(0, inference.unloadCalls)
+        assertEquals(1, inference.unloadCalls)
     }
 
     @Test
@@ -368,8 +368,16 @@ class AndroidMvpContainerTest {
                 ModelCatalog.QWEN3_1_7B_Q4_K_M to "internal-release",
             ),
             artifactProvenanceSignatureByModelId = mapOf(
-                ModelCatalog.QWEN3_0_6B_Q4_K_M to provenanceSignature("internal-release", ModelCatalog.QWEN3_0_6B_Q4_K_M, payloads.getValue(ModelCatalog.QWEN3_0_6B_Q4_K_M)),
-                ModelCatalog.QWEN3_1_7B_Q4_K_M to provenanceSignature("internal-release", ModelCatalog.QWEN3_1_7B_Q4_K_M, payloads.getValue(ModelCatalog.QWEN3_1_7B_Q4_K_M)),
+                ModelCatalog.QWEN3_0_6B_Q4_K_M to provenanceSignature(
+                    "internal-release",
+                    ModelCatalog.QWEN3_0_6B_Q4_K_M,
+                    payloads.getValue(ModelCatalog.QWEN3_0_6B_Q4_K_M),
+                ),
+                ModelCatalog.QWEN3_1_7B_Q4_K_M to provenanceSignature(
+                    "internal-release",
+                    ModelCatalog.QWEN3_1_7B_Q4_K_M,
+                    payloads.getValue(ModelCatalog.QWEN3_1_7B_Q4_K_M),
+                ),
             ),
         )
         val session = container.createSession()
@@ -417,7 +425,8 @@ class AndroidMvpContainerTest {
         val container = defaultContainer(
             policyModule = RecordingPolicyModule(),
             observabilityModule = LeakyObservabilityModule(
-                diagnostics = "inference.total_ms=count:1,avg_ms:65.00|prompt:secret-value;memory=user-ssn;tool_args={\"token\":\"abc\"};thermal_samples=3",
+                diagnostics = "inference.total_ms=count:1,avg_ms:65.00|prompt:secret-value;" +
+                    "memory=user-ssn;tool_args={\"token\":\"abc\"};thermal_samples=3",
             ),
         )
 
@@ -561,7 +570,8 @@ private fun defaultContainer(
     )
 }
 
-private fun testRuntimeModelIds(): List<String> = listOf(ModelCatalog.SMOKE_ECHO_120M) + ModelCatalog.bridgeSupportedModels()
+private fun testRuntimeModelIds(): List<String> =
+    listOf(ModelCatalog.SMOKE_ECHO_120M) + ModelCatalog.bridgeSupportedModels()
 
 private fun testPayloads(): Map<String, ByteArray> {
     return testRuntimeModelIds().associateWith { modelId ->

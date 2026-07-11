@@ -97,6 +97,29 @@ class InferenceExecutorTest {
     }
 
     @Test
+    fun `executor ignores empty stop sequences without truncating the stream`() {
+        val executor = InferenceExecutor(
+            inferenceModule = FakeInferenceModule(tokens = listOf("hello", " ", "world")),
+            runtimeConfig = testRuntimeConfig(),
+        )
+        val streamed = mutableListOf<String>()
+
+        val result = executor.execute(
+            sessionId = "s1",
+            requestId = "r-empty-stop",
+            request = InferenceRequest(prompt = "prompt", maxTokens = 32),
+            cacheKey = null,
+            cachePolicy = CachePolicy.OFF,
+            stopSequences = listOf("", "<never>"),
+            onToken = streamed::add,
+        )
+
+        assertEquals("hello world", result.text)
+        assertEquals("completed", result.finishReason)
+        assertEquals(listOf("hello", " ", "world"), streamed)
+    }
+
+    @Test
     fun `cancel by request respects stream contract flag`() {
         val executor = InferenceExecutor(
             inferenceModule = FakeInferenceModule(emptyList()),

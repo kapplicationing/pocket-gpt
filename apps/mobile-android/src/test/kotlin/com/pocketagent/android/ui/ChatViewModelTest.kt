@@ -42,8 +42,10 @@ import com.pocketagent.core.Turn
 import com.pocketagent.android.runtime.ProvisioningReadiness
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.inference.ModelCatalog
+import com.pocketagent.runtime.ChatStreamCommand
 import com.pocketagent.runtime.ChatStreamEvent
 import com.pocketagent.runtime.ChatStreamDelta
+import com.pocketagent.runtime.ChatStreamRequestPlanner
 import com.pocketagent.runtime.ImageAnalysisResult
 import com.pocketagent.runtime.ImageFailure
 import com.pocketagent.runtime.InteractionContentPart
@@ -51,6 +53,7 @@ import com.pocketagent.runtime.InteractionMessage
 import com.pocketagent.runtime.InteractionRole
 import com.pocketagent.runtime.PreparedChatStream
 import com.pocketagent.runtime.RuntimeLoadedModel
+import com.pocketagent.runtime.RuntimeGenerationFailureException
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import com.pocketagent.runtime.StreamChatRequestV2
 import com.pocketagent.runtime.ToolExecutionResult
@@ -77,6 +80,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -88,6 +92,7 @@ import org.junit.Before
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("MaxLineLength")
 class ChatViewModelTest {
     private val dispatcher: TestDispatcher = StandardTestDispatcher()
 
@@ -172,7 +177,160 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `send message finalizes assistant when stream closes without terminal event`() = runTest(dispatcher) {
+    fun `send preparation retains draft then commits user and assistant atomically`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade(streamDelayMs = 500L)
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+        val initialMessages = viewModel.uiState.value.activeSession()!!.messages
+
+        viewModel.onComposerChanged("transactional draft")
+        viewModel.sendMessage()
+
+        val preparing = viewModel.uiState.value
+        assertEquals("transactional draft", preparing.composer.text)
+        assertTrue(preparing.composer.isSending)
+        assertEquals(initialMessages, preparing.activeSession()!!.messages)
+        assertEquals(null, runtime.lastStreamRequest)
+
+        runCurrent()
+
+        val committed = viewModel.uiState.value
+        val newMessages = committed.activeSession()!!.messages.drop(initialMessages.size)
+        assertEquals("", committed.composer.text)
+        assertTrue(committed.composer.isSending)
+        assertEquals(2, newMessages.size)
+        assertEquals(MessageRole.USER, newMessages[0].role)
+        assertEquals("transactional draft", newMessages[0].content)
+        assertEquals(MessageRole.ASSISTANT, newMessages[1].role)
+        assertTrue(newMessages[1].isStreaming)
+    }
+
+    @Test
+    fun `telemetry preparation failure preserves draft and persists no conversation turns`() = runTest(dispatcher) {
+        val persistence = RecordingPersistence()
+        val runtime = RecordingRuntimeFacade()
+        val sendFlow = ChatSendFlow(
+            runtimeGenerationTimeoutMs = 0L,
+            deviceStateProvider = DeviceStateProvider {
+                error("device telemetry unavailable")
+            },
+            preparationDispatcher = dispatcher,
+        )
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+            sendFlow = sendFlow,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("keep this draft")
+        viewModel.sendMessage()
+
+        val preparing = viewModel.uiState.value
+        assertEquals("keep this draft", preparing.composer.text)
+        assertTrue(preparing.composer.isSending)
+        assertTrue(preparing.activeSession()!!.messages.isEmpty())
+
+        advanceUntilIdle()
+
+        val failed = viewModel.uiState.value
+        assertEquals("keep this draft", failed.composer.text)
+        assertFalse(failed.composer.isSending)
+        assertFalse(failed.composer.isCancelling)
+        assertTrue(failed.activeSession()!!.messages.isEmpty())
+        assertEquals("UI-RUNTIME-001", failed.runtime.lastErrorCode)
+        assertTrue(failed.runtime.lastErrorTechnicalDetail?.contains("device telemetry unavailable") == true)
+        assertEquals(null, runtime.lastStreamRequest)
+        assertTrue(
+            persistence.savedStates.all { stored ->
+                stored.sessions.all { session -> session.messages.isEmpty() }
+            },
+        )
+    }
+
+    @Test
+    fun `runtime preparation failure follows typed error path and allows retry`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade(
+            prepareFailure = RuntimeGenerationFailureException(
+                message = "runtime is busy",
+                errorCode = "busy_generation",
+            ),
+        )
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("retryable draft")
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("retryable draft", state.composer.text)
+        assertFalse(state.composer.isSending)
+        assertTrue(state.activeSession()!!.messages.isEmpty())
+        assertEquals("UI-RUNTIME-001", state.runtime.lastErrorCode)
+        assertEquals("runtime is busy", state.runtime.lastErrorTechnicalDetail)
+        assertEquals(ModelRuntimeStatus.READY, state.runtime.modelRuntimeStatus)
+        assertEquals(1, runtime.prepareCalls)
+    }
+
+    @Test
+    fun `preparation admission rejects a second send before work starts`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade(streamDelayMs = 500L)
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("only once")
+        viewModel.sendMessage()
+        viewModel.sendMessage()
+        runCurrent()
+
+        val messages = viewModel.uiState.value.activeSession()!!.messages
+        assertEquals(1, messages.count { message -> message.role == MessageRole.USER })
+        assertEquals(1, runtime.prepareCalls)
+    }
+
+    @Test
+    fun `draft changes during preparation abort commit without clearing the newer draft`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade()
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("original draft")
+        viewModel.sendMessage()
+        viewModel.onComposerChanged("newer draft")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("newer draft", state.composer.text)
+        assertFalse(state.composer.isSending)
+        assertTrue(state.activeSession()!!.messages.isEmpty())
+        assertEquals(null, runtime.lastStreamRequest)
+    }
+
+    @Test
+    fun `send message preserves partial assistant as interrupted when stream closes without terminal event`() = runTest(dispatcher) {
         val runtime = RecordingRuntimeFacade(
             streamTokens = listOf("hosted ", "reply"),
             streamTerminal = StreamTerminal.NO_TERMINAL,
@@ -197,9 +355,10 @@ class ChatViewModelTest {
         assertEquals("hosted reply", assistant?.content)
         assertFalse(assistant?.isStreaming ?: true)
         assertFalse(assistant?.terminalEventSeen ?: true)
+        assertEquals("interrupted:closed_without_terminal", assistant?.finishReason)
         assertFalse(activeSession.messages.any(::shouldRenderInThreadLoadingPlaceholder))
         assertFalse(state.composer.isSending)
-        assertEquals(null, state.runtime.lastErrorCode)
+        assertEquals("UI-RUNTIME-001", state.runtime.lastErrorCode)
     }
 
     @Test
@@ -543,6 +702,7 @@ class ChatViewModelTest {
         val sendFlow = ChatSendFlow(
             runtimeGenerationTimeoutMs = 0L,
             deviceStateProvider = DeviceStateProvider { expectedDeviceState },
+            preparationDispatcher = dispatcher,
         )
         val viewModel = buildChatViewModel(
             runtimeFacade = runtime,
@@ -971,6 +1131,7 @@ class ChatViewModelTest {
 
         viewModel.onComposerChanged("cancel placeholder")
         viewModel.sendMessage()
+        runCurrent()
         val beforeCancelMessages = viewModel.uiState.value.activeSession()!!.messages
         assertTrue(beforeCancelMessages.any(::shouldRenderInThreadLoadingPlaceholder))
 
@@ -1241,6 +1402,9 @@ class ChatViewModelTest {
 
         assertTrue(runtime.cancelledRequestIds.isNotEmpty())
         assertFalse(viewModel.uiState.value.composer.isCancelling)
+        assertFalse(viewModel.uiState.value.composer.isSending)
+        assertEquals("cancel me", viewModel.uiState.value.composer.text)
+        assertTrue(viewModel.uiState.value.activeSession()!!.messages.isEmpty())
     }
 
     @Test
@@ -1761,6 +1925,7 @@ private class RecordingRuntimeFacade(
     private val runtimeDiagnostics: RuntimeDiagnosticsSnapshot = RuntimeDiagnosticsSnapshot(),
     private val gpuStatusSequence: MutableList<com.pocketagent.android.runtime.GpuProbeResult> = mutableListOf(),
     private val warmupResult: WarmupResult = WarmupResult.skipped("warmup_unsupported"),
+    private val prepareFailure: RuntimeException? = null,
 ) : ChatRuntimeService {
     private var sessionCounter = 0
     private var routingMode: RoutingMode = RoutingMode.AUTO
@@ -1772,10 +1937,17 @@ private class RecordingRuntimeFacade(
     val cancelledRequestIds = mutableListOf<String>()
     var lastStreamRequest: StreamChatRequestV2? = null
     var warmupCalls: Int = 0
+    var prepareCalls: Int = 0
 
     override fun createSession(): SessionId {
         sessionCounter += 1
         return SessionId("session-$sessionCounter")
+    }
+
+    override fun prepareChatStream(command: ChatStreamCommand): PreparedChatStream {
+        prepareCalls += 1
+        prepareFailure?.let { throw it }
+        return ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L).prepare(command)
     }
 
     override fun streamPreparedChat(prepared: PreparedChatStream): Flow<ChatStreamEvent> = flow {
@@ -1790,14 +1962,11 @@ private class RecordingRuntimeFacade(
         if (streamDelayMs > 0L) {
             delay(streamDelayMs)
         }
-        val builder = StringBuilder()
         streamTokens.forEach { token ->
-            builder.append(token)
             emit(
                 ChatStreamEvent.Delta(
                     requestId = request.requestId,
                     delta = ChatStreamDelta.TextDelta(token),
-                    accumulatedText = builder.toString(),
                 ),
             )
         }

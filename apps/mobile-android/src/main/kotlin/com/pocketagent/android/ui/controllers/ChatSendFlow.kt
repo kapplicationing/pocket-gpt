@@ -17,6 +17,9 @@ import com.pocketagent.runtime.PerformanceRuntimeConfig
 import com.pocketagent.runtime.ResolvedPerformancePlan
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import com.pocketagent.runtime.SamplingOverrides
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 fun interface DeviceStateProvider {
     fun current(): DeviceState
@@ -36,6 +39,7 @@ class ChatSendFlow(
     private val runtimeGenerationTimeoutMs: Long,
     private val deviceStateProvider: DeviceStateProvider = DeviceStateProvider.DEFAULT,
     private val runtimeTuning: RuntimeTuning = RuntimeTuning.DISABLED,
+    private val preparationDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     data class PreparedSendStream(
         val deviceState: DeviceState,
@@ -90,7 +94,7 @@ class ChatSendFlow(
         )
     }
 
-    fun prepareChatStream(
+    suspend fun prepareChatStream(
         sessionId: SessionId,
         requestId: String,
         messages: List<InteractionMessage>,
@@ -99,7 +103,7 @@ class ChatSendFlow(
         runtime: RuntimeUiState,
         completionSettings: CompletionSettings? = null,
         prepare: (ChatStreamCommand) -> PreparedChatStream,
-    ): PreparedSendStream {
+    ): PreparedSendStream = withContext(preparationDispatcher) {
         val deviceState = deviceStateProvider.current()
         val command = ChatStreamCommand(
             sessionId = sessionId,
@@ -116,7 +120,7 @@ class ChatSendFlow(
             requestTimeoutOverrideMs = runtimeGenerationTimeoutMs.takeIf { it > 0L },
             samplingOverrides = completionSettings?.toSamplingOverrides(),
         )
-        return PreparedSendStream(
+        PreparedSendStream(
             deviceState = deviceState,
             preparedStream = prepare(command),
         )

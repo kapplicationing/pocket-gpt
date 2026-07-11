@@ -641,14 +641,12 @@ internal class FakeRuntimeFacade : MvpRuntimeFacade {
             ChatStreamEvent.Delta(
                 requestId = request.requestId,
                 delta = ChatStreamDelta.TextDelta("runtime "),
-                accumulatedText = "runtime",
             ),
         )
         emit(
             ChatStreamEvent.Delta(
                 requestId = request.requestId,
                 delta = ChatStreamDelta.TextDelta("response "),
-                accumulatedText = "runtime response",
             ),
         )
         emit(

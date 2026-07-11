@@ -450,7 +450,6 @@ private class RecordingMvpRuntimeFacade(
             Delta(
                 requestId = request.requestId,
                 delta = ChatStreamDelta.TextDelta("hi "),
-                accumulatedText = "hi",
             ),
             Completed(
                 requestId = request.requestId,

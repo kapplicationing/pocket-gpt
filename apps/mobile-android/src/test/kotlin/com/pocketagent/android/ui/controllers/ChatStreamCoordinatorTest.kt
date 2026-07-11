@@ -11,6 +11,7 @@ import com.pocketagent.core.Turn
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.runtime.ChatStreamEvent
 import com.pocketagent.runtime.ChatStreamDelta
+import com.pocketagent.runtime.ChatStreamInterruptionReason
 import com.pocketagent.runtime.ChatStreamPlan
 import com.pocketagent.runtime.ImageAnalysisResult
 import com.pocketagent.runtime.InteractionContentPart
@@ -21,6 +22,8 @@ import com.pocketagent.runtime.StreamChatRequestV2
 import com.pocketagent.runtime.ToolExecutionResult
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
@@ -28,6 +31,7 @@ import kotlinx.coroutines.test.runTest
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -42,7 +46,6 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("hello "),
-                            accumulatedText = "hello",
                         ),
                     )
                     emit(
@@ -136,7 +139,6 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("hello "),
-                            accumulatedText = "hello",
                         ),
                     )
                     delay(80L)
@@ -189,7 +191,6 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("hello "),
-                            accumulatedText = "hello",
                         ),
                     )
                     delay(80L)
@@ -316,6 +317,43 @@ class ChatStreamCoordinatorTest {
     }
 
     @Test
+    fun `parent cancellation propagates without terminal callbacks`() = runTest {
+        val runtime = FlowRuntimeGateway(
+            flowFactory = { request ->
+                flow {
+                    emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+                    awaitCancellation()
+                }
+            },
+        )
+        val coordinator = ChatStreamCoordinator(
+            terminalWatchdogGraceMs = 10L,
+            sendElapsedUpdateIntervalMs = 5L,
+        )
+        var beforeTerminalCalls = 0
+        var terminalCalls = 0
+
+        assertFailsWith<TimeoutCancellationException> {
+            withTimeout(25L) {
+                coordinator.collectStream(
+                    runtimeService = runtime,
+                    preparedStream = preparedRequest("req-parent-cancel", 1_000L),
+                    streamReducer = StreamStateReducer(requestTimeoutMs = 1_000L),
+                    sendStartedAtMs = System.currentTimeMillis(),
+                    onEvent = { _, _ -> },
+                    onElapsed = { _, _ -> },
+                    onBeforeTerminal = { beforeTerminalCalls += 1 },
+                    onTerminal = { terminalCalls += 1 },
+                )
+            }
+        }
+
+        assertEquals(0, beforeTerminalCalls)
+        assertEquals(0, terminalCalls)
+        assertEquals(0, runtime.cancelByRequestCalls)
+    }
+
+    @Test
     fun `collect stream accepts legacy blank request ids`() = runTest {
         val runtime = FlowRuntimeGateway(
             flowFactory = { request ->
@@ -325,7 +363,6 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = "",
                             delta = ChatStreamDelta.TextDelta("legacy "),
-                            accumulatedText = "legacy",
                         ),
                     )
                     emit(
@@ -368,7 +405,7 @@ class ChatStreamCoordinatorTest {
     }
 
     @Test
-    fun `collect stream synthesizes completed terminal when stream closes after deltas`() = runTest {
+    fun `collect stream emits typed interruption when stream closes after deltas`() = runTest {
         val runtime = FlowRuntimeGateway(
             flowFactory = { request ->
                 flow {
@@ -377,14 +414,12 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("hello "),
-                            accumulatedText = "hello ",
                         ),
                     )
                     emit(
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("world"),
-                            accumulatedText = "hello world",
                         ),
                     )
                 }
@@ -396,26 +431,33 @@ class ChatStreamCoordinatorTest {
         )
         val reducer = StreamStateReducer(requestTimeoutMs = 200L)
         var terminalState: StreamTerminalState? = null
+        var interruptedEvent: ChatStreamEvent.Interrupted? = null
 
         coordinator.collectStream(
             runtimeService = runtime,
             preparedStream = preparedRequest("req-synth-complete", 200L),
             streamReducer = reducer,
             sendStartedAtMs = System.currentTimeMillis(),
-            onEvent = { _, _ -> },
+            onEvent = { event, _ ->
+                if (event is ChatStreamEvent.Interrupted) interruptedEvent = event
+            },
             onElapsed = { _, _ -> },
             onBeforeTerminal = { },
             onTerminal = { terminal -> terminalState = terminal },
         )
 
         assertNotNull(terminalState)
-        assertEquals("completed", terminalState?.finishReason)
+        assertEquals("interrupted:closed_without_terminal", terminalState?.finishReason)
         assertEquals(false, terminalState?.terminalEventSeen)
         assertEquals("hello world", terminalState?.responseText)
+        assertEquals("stream_closed_without_terminal", terminalState?.errorCode)
+        assertNotNull(terminalState?.uiError)
+        assertEquals(ChatStreamInterruptionReason.CLOSED_WITHOUT_TERMINAL, interruptedEvent?.reason)
+        assertEquals("hello world", interruptedEvent?.partialText)
     }
 
     @Test
-    fun `collect stream synthesizes completed terminal when runtime idles after deltas but stream never closes`() = runTest {
+    fun `collect stream emits typed interruption when runtime idles after deltas`() = runTest {
         val runtime = FlowRuntimeGateway(
             flowFactory = { request ->
                 flow {
@@ -424,14 +466,12 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("hello "),
-                            accumulatedText = "hello ",
                         ),
                     )
                     emit(
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("world"),
-                            accumulatedText = "hello world",
                         ),
                     )
                     awaitCancellation()
@@ -445,13 +485,16 @@ class ChatStreamCoordinatorTest {
         )
         val reducer = StreamStateReducer(requestTimeoutMs = 30L)
         var terminalState: StreamTerminalState? = null
+        var interruptedEvent: ChatStreamEvent.Interrupted? = null
 
         coordinator.collectStream(
             runtimeService = runtime,
             preparedStream = preparedRequest("req-hung-complete", 30L),
             streamReducer = reducer,
             sendStartedAtMs = System.currentTimeMillis(),
-            onEvent = { _, _ -> },
+            onEvent = { event, _ ->
+                if (event is ChatStreamEvent.Interrupted) interruptedEvent = event
+            },
             onElapsed = { _, _ -> },
             onBeforeTerminal = { },
             onTerminal = { terminal -> terminalState = terminal },
@@ -459,13 +502,16 @@ class ChatStreamCoordinatorTest {
 
         assertEquals(1, runtime.cancelByRequestCalls)
         assertNotNull(terminalState)
-        assertEquals("completed", terminalState?.finishReason)
+        assertEquals("interrupted:stalled_without_terminal", terminalState?.finishReason)
         assertEquals(false, terminalState?.terminalEventSeen)
         assertEquals("hello world", terminalState?.responseText)
+        assertEquals("stream_stalled_without_terminal", terminalState?.errorCode)
+        assertNotNull(terminalState?.uiError)
+        assertEquals(ChatStreamInterruptionReason.STALLED_WITHOUT_TERMINAL, interruptedEvent?.reason)
     }
 
     @Test
-    fun `collect stream synthesizes completed terminal when runtime stays active after visible text but stream stalls`() = runTest {
+    fun `collect stream emits typed interruption when active runtime stalls after visible text`() = runTest {
         val runtime = FlowRuntimeGateway(
             flowFactory = { request ->
                 flow {
@@ -474,7 +520,6 @@ class ChatStreamCoordinatorTest {
                         ChatStreamEvent.Delta(
                             requestId = request.requestId,
                             delta = ChatStreamDelta.TextDelta("hello world"),
-                            accumulatedText = "hello world",
                         ),
                     )
                     awaitCancellation()
@@ -488,13 +533,16 @@ class ChatStreamCoordinatorTest {
         )
         val reducer = StreamStateReducer(requestTimeoutMs = 30L)
         var terminalState: StreamTerminalState? = null
+        var interruptedEvent: ChatStreamEvent.Interrupted? = null
 
         coordinator.collectStream(
             runtimeService = runtime,
             preparedStream = preparedRequest("req-stuck-active-after-token", 30L),
             streamReducer = reducer,
             sendStartedAtMs = System.currentTimeMillis(),
-            onEvent = { _, _ -> },
+            onEvent = { event, _ ->
+                if (event is ChatStreamEvent.Interrupted) interruptedEvent = event
+            },
             onElapsed = { _, _ -> },
             onBeforeTerminal = { },
             onTerminal = { terminal -> terminalState = terminal },
@@ -502,9 +550,10 @@ class ChatStreamCoordinatorTest {
 
         assertEquals(1, runtime.cancelByRequestCalls)
         assertNotNull(terminalState)
-        assertEquals("completed", terminalState?.finishReason)
+        assertEquals("interrupted:stalled_without_terminal", terminalState?.finishReason)
         assertEquals(false, terminalState?.terminalEventSeen)
         assertEquals("hello world", terminalState?.responseText)
+        assertEquals(ChatStreamInterruptionReason.STALLED_WITHOUT_TERMINAL, interruptedEvent?.reason)
     }
 
     @Test
@@ -546,7 +595,7 @@ class ChatStreamCoordinatorTest {
             flowFactory = { request ->
                 flow {
                     emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
-                    throw IllegalStateException("stream exploded")
+                    error("stream exploded")
                 }
             },
         )

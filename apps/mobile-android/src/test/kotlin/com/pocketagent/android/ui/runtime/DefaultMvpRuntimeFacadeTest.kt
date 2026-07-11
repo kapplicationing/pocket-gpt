@@ -19,12 +19,17 @@ import com.pocketagent.runtime.InteractionRole
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import com.pocketagent.runtime.RuntimeRequestContext
 import com.pocketagent.runtime.SamplingOverrides
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.CountDownLatch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.test.assertFailsWith
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultMvpRuntimeFacadeTest {
@@ -42,9 +47,7 @@ class DefaultMvpRuntimeFacadeTest {
         assertTrue(events.first() is ChatStreamEvent.Started)
         assertEquals(2, tokenEvents.size)
         assertEquals(ChatStreamDelta.TextDelta("hello "), tokenEvents[0].delta)
-        assertEquals("hello ", tokenEvents[0].accumulatedText)
         assertEquals(ChatStreamDelta.TextDelta("world "), tokenEvents[1].delta)
-        assertEquals("hello world ", tokenEvents[1].accumulatedText)
         assertEquals("response", completed.response.text)
         assertTrue(phases.contains(ChatStreamPhase.CHAT_START))
         assertTrue(phases.contains(ChatStreamPhase.MODEL_LOAD))
@@ -265,6 +268,48 @@ class DefaultMvpRuntimeFacadeTest {
         assertEquals(0, container.cancelByRequestCalls)
         assertEquals(0, container.cancelBySessionCalls)
     }
+
+    @Test
+    fun `stale request cleanup cannot cancel newer session owner when exact cancellation misses`() = runTest {
+        val container = FakeRuntimeContainer().apply {
+            sendGate = CountDownLatch(1)
+            cancelByRequestResult = false
+            activeRequestId = "req-B"
+        }
+        val facade = DefaultMvpRuntimeFacade(container)
+
+        facade.streamChat(
+            requestV2(
+                requestId = "req-A",
+                sessionId = SessionId("shared-session"),
+            ),
+        ).take(1).toList()
+
+        assertEquals(1, container.cancelByRequestCalls)
+        assertEquals(listOf("req-A"), container.cancelledRequestIds)
+        assertEquals(0, container.cancelBySessionCalls)
+        assertEquals(emptyList<String>(), container.sessionCancelledRequestIds)
+        assertEquals("req-B", container.activeRequestId)
+    }
+
+    @Test
+    fun `producer cancellation propagates without becoming a failed stream event`() = runTest {
+        val cancellation = CancellationException("parent cancelled")
+        val container = FakeRuntimeContainer().apply {
+            sendError = cancellation
+        }
+        val facade = DefaultMvpRuntimeFacade(container)
+        val observed = mutableListOf<ChatStreamEvent>()
+
+        val thrown = assertFailsWith<CancellationException> {
+            facade.streamChat(requestV2(requestId = "req-parent-cancel")).collect(observed::add)
+        }
+
+        assertEquals(cancellation.message, thrown.message)
+        assertTrue(observed.none { event -> event is ChatStreamEvent.Failed })
+        assertEquals(1, container.cancelByRequestCalls)
+        assertEquals(0, container.cancelBySessionCalls)
+    }
 }
 
 private fun requestV2(
@@ -296,6 +341,11 @@ private class FakeRuntimeContainer : RuntimeContainer {
     var beforeSend: (() -> Unit)? = null
     var cancelByRequestCalls: Int = 0
     var cancelBySessionCalls: Int = 0
+    var cancelByRequestResult: Boolean = true
+    var activeRequestId: String? = null
+    var sendGate: CountDownLatch? = null
+    val cancelledRequestIds: MutableList<String> = mutableListOf()
+    val sessionCancelledRequestIds: MutableList<String> = mutableListOf()
     var lastContext: RuntimeRequestContext? = null
 
     override fun createSession(): SessionId = SessionId("session-1")
@@ -310,6 +360,7 @@ private class FakeRuntimeContainer : RuntimeContainer {
     ): ChatResponse {
         beforeSend?.invoke()
         sendError?.let { throw it }
+        sendGate?.await()
         lastContext = context
         lastUserText = messages.lastOrNull { it.role == InteractionRole.USER }
             ?.parts
@@ -367,12 +418,16 @@ private class FakeRuntimeContainer : RuntimeContainer {
 
     override fun cancelGeneration(sessionId: SessionId): Boolean {
         cancelBySessionCalls += 1
+        activeRequestId?.let(sessionCancelledRequestIds::add)
+        sendGate?.countDown()
         return true
     }
 
     override fun cancelGenerationByRequest(requestId: String): Boolean {
         cancelByRequestCalls += 1
-        return true
+        cancelledRequestIds += requestId
+        sendGate?.countDown()
+        return cancelByRequestResult
     }
 
     override fun restoreSession(sessionId: SessionId, turns: List<Turn>) {

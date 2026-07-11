@@ -1,17 +1,17 @@
 package com.pocketagent.android.ui.state
 
 import androidx.compose.runtime.Immutable
-import com.pocketagent.core.RuntimeExecutionStats
 import com.pocketagent.core.ChatToolCall
-import com.pocketagent.runtime.ChatStreamEvent
+import com.pocketagent.core.RuntimeExecutionStats
 import com.pocketagent.runtime.ChatStreamDelta
+import com.pocketagent.runtime.ChatStreamEvent
+import com.pocketagent.runtime.ChatStreamInterruptionReason
 import com.pocketagent.runtime.RuntimeGenerationTimeoutException
 import kotlinx.coroutines.TimeoutCancellationException
 
 @Immutable
 data class StreamReducerState(
     val requestId: String,
-    val accumulatedText: String = "",
     val isThinking: Boolean = false,
     val firstTokenMs: Long? = null,
     val lastPhase: String? = null,
@@ -41,6 +41,13 @@ data class StreamTerminalState(
 class StreamStateReducer(
     private val requestTimeoutMs: Long,
 ) {
+    private val textAccumulator = StreamTextAccumulator()
+
+    fun snapshotText(): String = textAccumulator.snapshot()
+
+    fun hasVisibleText(): Boolean = textAccumulator.hasVisibleText()
+
+    @Suppress("CyclomaticComplexMethod")
     fun onEvent(
         state: StreamReducerState,
         event: ChatStreamEvent,
@@ -59,8 +66,8 @@ class StreamStateReducer(
             }
             is ChatStreamEvent.Delta -> reduceDelta(state, event, elapsedMs)
             is ChatStreamEvent.Completed -> {
+                textAccumulator.replace(event.response.text)
                 state.copy(
-                    accumulatedText = event.response.text,
                     isThinking = false,
                     terminal = StreamTerminalState(
                         requestId = event.requestId,
@@ -76,6 +83,35 @@ class StreamStateReducer(
                     ),
                 )
             }
+            is ChatStreamEvent.Interrupted -> {
+                val errorCode = when (event.reason) {
+                    ChatStreamInterruptionReason.CLOSED_WITHOUT_TERMINAL -> "stream_closed_without_terminal"
+                    ChatStreamInterruptionReason.STALLED_WITHOUT_TERMINAL -> "stream_stalled_without_terminal"
+                }
+                val detail = when (event.reason) {
+                    ChatStreamInterruptionReason.CLOSED_WITHOUT_TERMINAL ->
+                        "Response stream closed before the runtime sent a terminal event."
+                    ChatStreamInterruptionReason.STALLED_WITHOUT_TERMINAL ->
+                        "Response stream stalled before the runtime sent a terminal event."
+                }
+                textAccumulator.replace(event.partialText)
+                state.copy(
+                    isThinking = false,
+                    terminal = StreamTerminalState(
+                        requestId = event.requestId,
+                        finishReason = "interrupted:${event.reason.name.lowercase()}",
+                        terminalEventSeen = false,
+                        uiError = UiErrorMapper.runtimeFailure(
+                            errorCode = errorCode,
+                            detail = detail,
+                        ),
+                        responseText = event.partialText,
+                        completionMs = event.completionMs,
+                        firstTokenMs = state.firstTokenMs ?: event.firstTokenMs,
+                        errorCode = errorCode,
+                    ),
+                )
+            }
             is ChatStreamEvent.Cancelled -> {
                 val timedOut = event.reason.equals("timeout", ignoreCase = true)
                 val uiError = if (timedOut) {
@@ -84,12 +120,13 @@ class StreamStateReducer(
                     null
                 }
                 state.copy(
+                    isThinking = false,
                     terminal = StreamTerminalState(
                         requestId = event.requestId,
                         finishReason = event.reason,
                         terminalEventSeen = event.terminalEventSeen,
                         uiError = uiError,
-                        responseText = state.accumulatedText,
+                        responseText = snapshotText(),
                         completionMs = event.completionMs,
                         firstTokenMs = state.firstTokenMs ?: event.firstTokenMs,
                     ),
@@ -107,7 +144,7 @@ class StreamStateReducer(
                             detail = event.message,
                             recoveryDisposition = event.recoveryDisposition,
                         ),
-                        responseText = state.accumulatedText,
+                        responseText = snapshotText(),
                         completionMs = event.completionMs,
                         firstTokenMs = state.firstTokenMs ?: event.firstTokenMs,
                         errorCode = event.errorCode,
@@ -124,13 +161,13 @@ class StreamStateReducer(
     ): StreamReducerState {
         return when (val delta = event.delta) {
             is ChatStreamDelta.TextDelta -> {
+                textAccumulator.append(delta.text)
                 val firstToken = if (state.firstTokenMs == null && delta.text.isNotEmpty()) {
                     elapsedMs.coerceAtLeast(0L)
                 } else {
                     state.firstTokenMs
                 }
                 state.copy(
-                    accumulatedText = event.accumulatedText,
                     isThinking = state.isThinking,
                     firstTokenMs = firstToken,
                 )
@@ -159,7 +196,7 @@ class StreamStateReducer(
                 finishReason = reason,
                 terminalEventSeen = true,
                 uiError = uiError,
-                responseText = state.accumulatedText,
+                responseText = snapshotText(),
             ),
         )
     }
@@ -175,9 +212,36 @@ class StreamStateReducer(
                 finishReason = "timeout",
                 terminalEventSeen = true,
                 uiError = UiErrorMapper.runtimeTimeout(requestTimeoutMs),
-                responseText = state.accumulatedText,
+                responseText = snapshotText(),
             ),
         )
     }
+}
 
+private class StreamTextAccumulator {
+    private val lock = Any()
+    private val text = StringBuilder()
+    private var containsVisibleText = false
+
+    fun append(delta: String) {
+        if (delta.isEmpty()) return
+        synchronized(lock) {
+            text.append(delta)
+            if (!containsVisibleText && delta.any { character -> !character.isWhitespace() }) {
+                containsVisibleText = true
+            }
+        }
+    }
+
+    fun replace(value: String) {
+        synchronized(lock) {
+            text.setLength(0)
+            text.append(value)
+            containsVisibleText = value.any { character -> !character.isWhitespace() }
+        }
+    }
+
+    fun snapshot(): String = synchronized(lock) { text.toString() }
+
+    fun hasVisibleText(): Boolean = synchronized(lock) { containsVisibleText }
 }

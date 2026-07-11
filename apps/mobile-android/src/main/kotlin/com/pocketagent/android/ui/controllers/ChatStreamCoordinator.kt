@@ -7,7 +7,9 @@ import com.pocketagent.android.ui.state.StreamStateReducer
 import com.pocketagent.android.ui.state.StreamTerminalState
 import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.runtime.ChatStreamEvent
+import com.pocketagent.runtime.ChatStreamInterruptionReason
 import com.pocketagent.runtime.PreparedChatStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -21,6 +23,7 @@ class ChatStreamCoordinator(
     private val noFirstTokenWarnMs: Long = 150_000L,
     private val noFirstTokenStallMs: Long = 600_000L,
 ) {
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     suspend fun collectStream(
         runtimeService: ChatRuntimeService,
         preparedStream: PreparedChatStream,
@@ -39,7 +42,9 @@ class ChatStreamCoordinator(
         var streamState = StreamReducerState.initial(requestId = request.requestId)
         var lastEventElapsedMs = 0L
 
-        fun reduce(block: (StreamReducerState) -> StreamReducerState): Pair<StreamTerminalState?, StreamReducerState> {
+        fun reduce(
+            block: (StreamReducerState) -> StreamReducerState,
+        ): Pair<StreamTerminalState?, StreamReducerState> {
             synchronized(streamReducerLock) {
                 val previous = streamState.terminal
                 streamState = block(streamState)
@@ -68,8 +73,11 @@ class ChatStreamCoordinator(
                 val elapsed = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
                 val slowState = when {
                     streamFirstTokenMs() != null -> null
-                    elapsed >= noFirstTokenStallMs -> "Still working on this device. You can keep waiting, or tap Cancel to stop."
-                    elapsed >= noFirstTokenWarnMs -> "Loading model and prefill can take longer on older phones. You can keep waiting or cancel."
+                    elapsed >= noFirstTokenStallMs ->
+                        "Still working on this device. You can keep waiting, or tap Cancel to stop."
+                    elapsed >= noFirstTokenWarnMs ->
+                        "Loading model and prefill can take longer on older phones. " +
+                            "You can keep waiting or cancel."
                     else -> null
                 }
                 onElapsed(elapsed, slowState)
@@ -103,12 +111,16 @@ class ChatStreamCoordinator(
             var postTokenIdleObservationCount = 0
             delay(requestTimeoutMs + terminalWatchdogGraceMs)
             while (!hasTerminal()) {
+                var interruptedEvent: ChatStreamEvent.Interrupted? = null
                 val (previousTerminal, nextState) = reduce { state ->
                     if (state.terminal != null) {
                         state
                     } else {
-                        val watchdogElapsedMs = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
-                        val activeGenerationCount = runCatching { runtimeService.activeGenerationCount() }.getOrDefault(0)
+                        val watchdogElapsedMs =
+                            (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
+                        val activeGenerationCount = runCatching {
+                            runtimeService.activeGenerationCount()
+                        }.getOrDefault(0)
                         val postTokenSilenceMs = (watchdogElapsedMs - lastEventElapsedMs).coerceAtLeast(0L)
                         when {
                             state.firstTokenMs == null -> {
@@ -116,7 +128,7 @@ class ChatStreamCoordinator(
                                 streamReducer.onWatchdogTimeout(state)
                             }
 
-                            state.accumulatedText.isNotBlank() &&
+                            streamReducer.hasVisibleText() &&
                                 (activeGenerationCount <= 0 || postTokenSilenceMs >= terminalWatchdogGraceMs) -> {
                                 postTokenIdleObservationCount += 1
                                 if (postTokenIdleObservationCount < POST_TOKEN_IDLE_OBSERVATIONS_REQUIRED) {
@@ -125,21 +137,25 @@ class ChatStreamCoordinator(
                                     runCatching {
                                         Log.w(
                                             "PocketGPTStream",
-                                            "Stream exceeded timeout without terminal; finalizing from accumulated text. " +
-                                                "request_id=${request.requestId}|active_generations=$activeGenerationCount|" +
+                                            "Stream exceeded timeout without terminal; " +
+                                                "preserving interrupted partial text. " +
+                                                "request_id=${request.requestId}|" +
+                                                "active_generations=$activeGenerationCount|" +
                                                 "post_token_silence_ms=$postTokenSilenceMs",
                                         )
                                     }
-                                    state.copy(
-                                        isThinking = false,
-                                        terminal = StreamTerminalState(
-                                            requestId = request.requestId,
-                                            finishReason = "completed",
-                                            terminalEventSeen = false,
-                                            responseText = state.accumulatedText,
-                                            completionMs = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L),
-                                            firstTokenMs = state.firstTokenMs,
-                                        ),
+                                    val event = ChatStreamEvent.Interrupted(
+                                        requestId = request.requestId,
+                                        reason = ChatStreamInterruptionReason.STALLED_WITHOUT_TERMINAL,
+                                        partialText = streamReducer.snapshotText(),
+                                        firstTokenMs = state.firstTokenMs,
+                                        completionMs = watchdogElapsedMs,
+                                    )
+                                    interruptedEvent = event
+                                    streamReducer.onEvent(
+                                        state = state,
+                                        event = event,
+                                        elapsedMs = watchdogElapsedMs,
                                     )
                                 }
                             }
@@ -157,6 +173,7 @@ class ChatStreamCoordinator(
                     }
                 }
                 if (previousTerminal == null && nextState.terminal != null) {
+                    interruptedEvent?.let { event -> onEvent(event, nextState) }
                     dispatchTerminal(
                         previousTerminal = previousTerminal,
                         nextState = nextState,
@@ -208,54 +225,66 @@ class ChatStreamCoordinator(
                     return@onSuccess
                 }
                 val completionMs = (System.currentTimeMillis() - sendStartedAtMs).coerceAtLeast(0L)
+                var interruptedEvent: ChatStreamEvent.Interrupted? = null
                 val (previousTerminal, nextState) = reduce { state ->
                     if (state.terminal != null) {
                         state
                     } else {
-                        val accumulatedText = state.accumulatedText
-                        val synthesizedTerminal = if (accumulatedText.isNotBlank()) {
+                        val accumulatedText = streamReducer.snapshotText()
+                        if (accumulatedText.isNotBlank()) {
                             runCatching {
                                 Log.w(
                                     "PocketGPTStream",
-                                    "Stream closed without terminal event; finalizing from accumulated text. request_id=${request.requestId}",
+                                    "Stream closed without terminal event; preserving interrupted partial text. " +
+                                        "request_id=${request.requestId}",
                                 )
                             }
-                            StreamTerminalState(
+                            val event = ChatStreamEvent.Interrupted(
                                 requestId = request.requestId,
-                                finishReason = "completed",
-                                terminalEventSeen = false,
-                                responseText = accumulatedText,
+                                reason = ChatStreamInterruptionReason.CLOSED_WITHOUT_TERMINAL,
+                                partialText = accumulatedText,
                                 completionMs = completionMs,
                                 firstTokenMs = state.firstTokenMs,
+                            )
+                            interruptedEvent = event
+                            streamReducer.onEvent(
+                                state = state,
+                                event = event,
+                                elapsedMs = completionMs,
                             )
                         } else {
                             runCatching {
                                 Log.w(
                                     "PocketGPTStream",
-                                    "Stream closed without terminal event or visible text. request_id=${request.requestId}",
+                                    "Stream closed without terminal event or visible text. " +
+                                        "request_id=${request.requestId}",
                                 )
                             }
-                            StreamTerminalState(
-                                requestId = request.requestId,
-                                finishReason = "runtime_error",
-                                terminalEventSeen = false,
-                                uiError = UiErrorMapper.runtimeFailure("Stream closed before a terminal event."),
-                                completionMs = completionMs,
-                                firstTokenMs = state.firstTokenMs,
+                            state.copy(
+                                isThinking = false,
+                                terminal = StreamTerminalState(
+                                    requestId = request.requestId,
+                                    finishReason = "runtime_error",
+                                    terminalEventSeen = false,
+                                    uiError = UiErrorMapper.runtimeFailure("Stream closed before a terminal event."),
+                                    completionMs = completionMs,
+                                    firstTokenMs = state.firstTokenMs,
+                                ),
                             )
                         }
-                        state.copy(
-                            isThinking = false,
-                            terminal = synthesizedTerminal,
-                        )
                     }
                 }
                 terminalTimeoutWatchdog.cancel()
+                interruptedEvent?.let { event -> onEvent(event, nextState) }
                 dispatchTerminal(
                     previousTerminal = previousTerminal,
                     nextState = nextState,
+                    cancelRequest = interruptedEvent != null,
                 )
             }.onFailure { error ->
+                if (error is CancellationException) {
+                    throw error
+                }
                 val (previousTerminal, nextState) = reduce { state ->
                     streamReducer.onFailure(state = state, error = error)
                 }

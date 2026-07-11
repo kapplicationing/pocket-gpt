@@ -20,6 +20,7 @@ import com.pocketagent.tools.SafeLocalToolRuntime
 import com.pocketagent.tools.ToolModule
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -72,7 +73,6 @@ sealed interface ChatStreamEvent {
     data class Delta(
         override val requestId: String,
         val delta: ChatStreamDelta,
-        val accumulatedText: String,
     ) : ChatStreamEvent
 
     data class Thinking(
@@ -107,6 +107,23 @@ sealed interface ChatStreamEvent {
         val firstTokenMs: Long? = null,
         val completionMs: Long? = null,
     ) : ChatStreamEvent
+
+    /**
+     * The stream produced visible output but ended without an authoritative runtime terminal event.
+     * Partial text remains usable, but callers must not treat it as a completed response.
+     */
+    data class Interrupted(
+        override val requestId: String,
+        val reason: ChatStreamInterruptionReason,
+        val partialText: String,
+        val firstTokenMs: Long? = null,
+        val completionMs: Long? = null,
+    ) : ChatStreamEvent
+}
+
+enum class ChatStreamInterruptionReason {
+    CLOSED_WITHOUT_TERMINAL,
+    STALLED_WITHOUT_TERMINAL,
 }
 
 interface MvpRuntimeFacade {
@@ -292,7 +309,6 @@ class DefaultMvpRuntimeFacade(
                 ),
             )
         }
-        val textBuilder = StringBuilder()
         var firstTokenMs: Long? = null
         var tokenStreamPhaseEmitted = false
         var thinkingActive = false
@@ -344,13 +360,10 @@ class DefaultMvpRuntimeFacade(
                                 ),
                             )
                         }
-                        textBuilder.append(token)
-                        val accumulatedText = textBuilder.toString()
                         trySend(
                             ChatStreamEvent.Delta(
                                 requestId = request.requestId,
                                 delta = ChatStreamDelta.TextDelta(text = token),
-                                accumulatedText = accumulatedText,
                             ),
                         )
                     },
@@ -390,6 +403,10 @@ class DefaultMvpRuntimeFacade(
                 }
                 close()
             }.onFailure { error ->
+                if (error is CancellationException) {
+                    close(error)
+                    throw error
+                }
                 finished.set(true)
                 if (thinkingActive) {
                     thinkingActive = false
@@ -452,7 +469,7 @@ class DefaultMvpRuntimeFacade(
         awaitClose {
             producer.cancel()
             if (!finished.get()) {
-                container.cancelGenerationByRequest(request.requestId) || container.cancelGeneration(request.sessionId)
+                container.cancelGenerationByRequest(request.requestId)
             }
         }
     }

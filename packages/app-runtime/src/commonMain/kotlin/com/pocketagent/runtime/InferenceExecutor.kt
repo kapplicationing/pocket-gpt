@@ -51,9 +51,9 @@ internal class InferenceExecutor(
                     cacheKey = cacheKey,
                     cachePolicy = cachePolicy,
                     onToken = { token ->
+                        if (stoppedBySequence) return@generateStreamWithCache
                         streamedText.append(token)
-                        val projected = streamedText.toString()
-                        if (stopSequences.any { projected.endsWith(it) }) {
+                        if (streamedText.endsWithAny(stopSequences)) {
                             stoppedBySequence = true
                             nativeInference.cancelGeneration(requestId)
                             return@generateStreamWithCache
@@ -97,8 +97,7 @@ internal class InferenceExecutor(
                     }
                     tokenCount += 1
                     streamedText.append(token)
-                    val projected = streamedText.toString()
-                    if (stopSequences.any { projected.endsWith(it) }) {
+                    if (streamedText.endsWithAny(stopSequences)) {
                         stoppedBySequence = true
                         ignoreFurtherTokens = true
                         finishReason = "stop_sequence"
@@ -195,16 +194,10 @@ internal class InferenceExecutor(
                 onToken = { token ->
                     if (stoppedBySequence) return@generateWithImages
                     streamedText.append(token)
-                    val maxStopLen = stopSequences.maxOfOrNull { it.length } ?: 0
-                    if (maxStopLen > 0) {
-                        val tail = streamedText.substring(
-                            (streamedText.length - maxStopLen).coerceAtLeast(0),
-                        )
-                        if (stopSequences.any { tail.endsWith(it) }) {
-                            stoppedBySequence = true
-                            runtimeInferencePorts.cacheAwareGeneration?.cancelGeneration(requestId)
-                            return@generateWithImages
-                        }
+                    if (streamedText.endsWithAny(stopSequences)) {
+                        stoppedBySequence = true
+                        runtimeInferencePorts.cacheAwareGeneration?.cancelGeneration(requestId)
+                        return@generateWithImages
                     }
                     tokenCount++
                     if (firstTokenMs < 0L && token.isNotEmpty()) {
@@ -381,4 +374,16 @@ private fun String.trimStopSequences(stopSequences: List<String>): String {
         }
     }
     return value
+}
+
+private fun StringBuilder.endsWithAny(suffixes: List<String>): Boolean {
+    return suffixes.any { suffix ->
+        if (suffix.isEmpty() || suffix.length > length) {
+            false
+        } else {
+            suffix.indices.all { suffixIndex ->
+                this[length - suffix.length + suffixIndex] == suffix[suffixIndex]
+            }
+        }
+    }
 }

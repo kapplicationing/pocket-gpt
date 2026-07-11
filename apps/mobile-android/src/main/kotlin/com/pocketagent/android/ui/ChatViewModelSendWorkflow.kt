@@ -1,8 +1,10 @@
 package com.pocketagent.android.ui
 
 import com.pocketagent.android.runtime.AppOperationTrace
+import com.pocketagent.android.runtime.RuntimeDomainException
 import com.pocketagent.android.ui.state.activeSession
 import androidx.lifecycle.viewModelScope
+import com.pocketagent.android.ui.controllers.ChatSendFlow
 import com.pocketagent.android.ui.controllers.ToolLoopOutcome
 import com.pocketagent.android.ui.state.ComposerUiState
 import com.pocketagent.android.ui.state.MessageKind
@@ -13,10 +15,12 @@ import com.pocketagent.android.ui.state.PersistedInteractionMessage
 import com.pocketagent.android.ui.state.PersistedInteractionPart
 import com.pocketagent.android.ui.state.PersistedToolCall
 import com.pocketagent.android.ui.state.PersistedToolCallStatus
+import com.pocketagent.android.ui.state.RecoveryAction
 import com.pocketagent.android.ui.state.StartupProbeState
 import com.pocketagent.android.ui.state.StreamStateReducer
 import com.pocketagent.android.ui.state.StreamTerminalState
 import com.pocketagent.android.ui.state.UiError
+import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.core.ChatToolCall
 import com.pocketagent.core.RuntimeExecutionStats
 import com.pocketagent.core.SessionId
@@ -24,104 +28,229 @@ import com.pocketagent.inference.DeviceState
 import com.pocketagent.runtime.PerformanceRuntimeConfig
 import com.pocketagent.runtime.ChatStreamDelta
 import com.pocketagent.runtime.ChatStreamEvent
+import com.pocketagent.runtime.RuntimeArtifactVerificationException
+import com.pocketagent.runtime.RuntimeGenerationCancelledException
+import com.pocketagent.runtime.RuntimeGenerationFailureException
+import com.pocketagent.runtime.RuntimeGenerationTimeoutException
+import com.pocketagent.runtime.RuntimeImageAttachmentUnsupportedException
+import com.pocketagent.runtime.RuntimeModelLoadPlanningException
+import com.pocketagent.runtime.RuntimeTemplateUnavailableException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+@Suppress("ComplexCondition", "CyclomaticComplexMethod", "LongMethod", "TooGenericExceptionCaught")
 internal fun ChatViewModel.sendMessageInternal() {
-    val snapshot = _uiState.value
-    val activeSession = snapshot.activeSession() ?: return
-    val prompt = snapshot.composer.text.trim()
-    if (prompt.isBlank() || snapshot.composer.isSending) {
+    val initialSnapshot = _uiState.value
+    val initialSession = initialSnapshot.activeSession() ?: return
+    val prompt = initialSnapshot.composer.text.trim()
+    if (prompt.isBlank() || initialSnapshot.composer.isSending) {
         return
     }
 
-    if (!sendFlow.isRuntimeReadyForSend(snapshot.runtime)) {
-        val uiError = startupFlow.startupBlockError(snapshot.runtime)
+    if (!sendFlow.isRuntimeReadyForSend(initialSnapshot.runtime)) {
+        val uiError = startupFlow.startupBlockError(initialSnapshot.runtime)
         applyBlockedRuntimeGuardrail(
-            sessionId = activeSession.id,
+            sessionId = initialSession.id,
             uiError = uiError,
         )
         return
     }
-    val attachedImages = launchSafeSingleImagePaths(snapshot.composer.attachedImages)
-    val userMessage = createMessage(
-        role = MessageRole.USER,
-        content = prompt,
-        kind = if (attachedImages.isNotEmpty()) MessageKind.IMAGE else MessageKind.TEXT,
-        imagePath = attachedImages.firstOrNull(),
-        imagePaths = attachedImages,
-    )
 
-    updateActiveSession(activeSession.id) { session ->
-        val updatedMessages = session.messages + userMessage
-        session.copy(
-            messages = updatedMessages,
-            updatedAtEpochMs = System.currentTimeMillis(),
-            title = deriveSessionTitle(updatedMessages),
-        )
-    }
-    _uiState.update { state ->
-        state.copy(
-            composer = ComposerUiState(text = "", isSending = true, isCancelling = false),
+    val requestId = newRequestId()
+    var snapshot = initialSnapshot
+    var activeSession = initialSession
+    var admitted = false
+    var admissionAttemptsRemaining = SEND_ADMISSION_CAS_MAX_ATTEMPTS
+    while (!admitted && admissionAttemptsRemaining > 0) {
+        admissionAttemptsRemaining -= 1
+        val current = _uiState.value
+        val currentSession = current.activeSession() ?: return
+        if (
+            current.composer.isSending ||
+            current.composer.text.trim() != prompt ||
+            currentSession.id != initialSession.id ||
+            !sendFlow.isRuntimeReadyForSend(current.runtime)
+        ) {
+            return
+        }
+        val next = current.copy(
+            composer = current.composer.copy(isSending = true, isCancelling = false),
             runtime = sendReducer.onSendStarted(
-                runtime = state.runtime,
+                runtime = current.runtime,
                 toolDriven = false,
             ),
         )
+        if (_uiState.compareAndSet(current, next)) {
+            snapshot = current
+            activeSession = currentSession
+            admitted = true
+            break
+        }
     }
-    persistState()
-    val sessionAfterUserMessage = _uiState.value.activeSession() ?: return
-
-    val assistantMessageId = newMessageId(prefix = "assistant-stream")
-    val requestId = newRequestId()
-    val previousResponseId = timelineProjector.latestAssistantRequestId(sessionAfterUserMessage)
-    val transcriptMessages = timelineProjector.toTranscript(sessionAfterUserMessage)
-    val sendPreparation = AppOperationTrace.section(
-        name = "chat.prepare_stream",
-        detail = { "messages=${transcriptMessages.size}" },
-    ) {
-        sendFlow.prepareChatStream(
-            sessionId = SessionId(activeSession.id),
-            requestId = requestId,
-            messages = transcriptMessages,
-            promptHint = prompt,
-            previousResponseId = previousResponseId,
-            runtime = snapshot.runtime,
-            completionSettings = activeSession.completionSettings,
-            prepare = runtimeFacade::prepareChatStream,
-        )
+    if (!admitted) {
+        return
     }
-    val currentDeviceState = sendPreparation.deviceState
-    val preparedStream = sendPreparation.preparedStream
-    val performanceConfig = preparedStream.plan.effectiveConfig
-    val targetPerformanceConfig = preparedStream.plan.baseConfig
-    val requestTimeoutMs = preparedStream.plan.requestTimeoutMs
     activeSendRequestId = requestId
-    val assistantPlaceholder = MessageUiModel(
-        id = assistantMessageId,
-        role = MessageRole.ASSISTANT,
-        content = "",
-        timestampEpochMs = System.currentTimeMillis(),
-        kind = MessageKind.TEXT,
-        isStreaming = true,
-        requestId = requestId,
-        finishReason = null,
-        terminalEventSeen = false,
-        interaction = PersistedInteractionMessage(
-            role = MessageRole.ASSISTANT.name,
-            parts = listOf(PersistedInteractionPart(type = "text", text = "")),
-            metadata = mapOf("state" to "streaming"),
-        ),
-    )
-    updateActiveSession(activeSession.id) { session ->
-        session.copy(
-            messages = session.messages + assistantPlaceholder,
-            updatedAtEpochMs = System.currentTimeMillis(),
-        )
-    }
 
     viewModelScope.launch(ioDispatcher) {
-        var pendingStreamingText: String? = null
+        fun releasePreparation(
+            uiError: UiError? = null,
+            userCancelled: Boolean = false,
+        ) {
+            if (activeSendRequestId != requestId) {
+                return
+            }
+            activeSendRequestId = null
+            _uiState.update { state ->
+                val restoredRuntime = state.runtime.copy(
+                    startupProbeState = snapshot.runtime.startupProbeState,
+                    modelRuntimeStatus = snapshot.runtime.modelRuntimeStatus,
+                    modelStatusDetail = when {
+                        uiError != null -> uiError.userMessage
+                        userCancelled -> "Generation cancelled."
+                        else -> snapshot.runtime.modelStatusDetail
+                    },
+                    sendElapsedMs = null,
+                    sendSlowState = null,
+                )
+                state.copy(
+                    composer = state.composer.copy(isSending = false, isCancelling = false),
+                    runtime = if (uiError == null) {
+                        restoredRuntime.clearError()
+                    } else {
+                        restoredRuntime.withUiError(uiError)
+                    },
+                )
+            }
+        }
+
+        val preparation = try {
+            val attachedImages = launchSafeSingleImagePaths(snapshot.composer.attachedImages)
+            val userMessage = createMessage(
+                role = MessageRole.USER,
+                content = prompt,
+                kind = if (attachedImages.isNotEmpty()) MessageKind.IMAGE else MessageKind.TEXT,
+                imagePath = attachedImages.firstOrNull(),
+                imagePaths = attachedImages,
+            )
+            val projectedMessages = activeSession.messages + userMessage
+            val projectedSession = activeSession.copy(
+                messages = projectedMessages,
+                updatedAtEpochMs = System.currentTimeMillis(),
+                title = deriveSessionTitle(projectedMessages),
+            )
+            val transcriptMessages = timelineProjector.toTranscript(projectedSession)
+            AppOperationTrace.suspendSection(
+                name = "chat.prepare_stream",
+                detail = { "messages=${transcriptMessages.size}" },
+            ) {
+                InitialSendPreparation(
+                    userMessage = userMessage,
+                    assistantMessageId = newMessageId(prefix = "assistant-stream"),
+                    preparedSendStream = sendFlow.prepareChatStream(
+                        sessionId = SessionId(activeSession.id),
+                        requestId = requestId,
+                        messages = transcriptMessages,
+                        promptHint = prompt,
+                        previousResponseId = timelineProjector.latestAssistantRequestId(projectedSession),
+                        runtime = snapshot.runtime,
+                        completionSettings = activeSession.completionSettings,
+                        prepare = runtimeFacade::prepareChatStream,
+                    ),
+                )
+            }
+        } catch (error: CancellationException) {
+            val userCancelled = consumeUserCancellationRequest(requestId)
+            releasePreparation(userCancelled = userCancelled)
+            throw error
+        } catch (error: Exception) {
+            releasePreparation(uiError = error.toSendPreparationUiError())
+            persistState()
+            return@launch
+        }
+
+        val userMessage = preparation.userMessage
+        val assistantMessageId = preparation.assistantMessageId
+        val sendPreparation = preparation.preparedSendStream
+        if (consumeUserCancellationRequest(requestId)) {
+            releasePreparation(userCancelled = true)
+            persistState()
+            return@launch
+        }
+
+        val currentDeviceState = sendPreparation.deviceState
+        val preparedStream = sendPreparation.preparedStream
+        val performanceConfig = preparedStream.plan.effectiveConfig
+        val targetPerformanceConfig = preparedStream.plan.baseConfig
+        val requestTimeoutMs = preparedStream.plan.requestTimeoutMs
+        val assistantPlaceholder = MessageUiModel(
+            id = assistantMessageId,
+            role = MessageRole.ASSISTANT,
+            content = "",
+            timestampEpochMs = System.currentTimeMillis(),
+            kind = MessageKind.TEXT,
+            isStreaming = true,
+            requestId = requestId,
+            finishReason = null,
+            terminalEventSeen = false,
+            interaction = PersistedInteractionMessage(
+                role = MessageRole.ASSISTANT.name,
+                parts = listOf(PersistedInteractionPart(type = "text", text = "")),
+                metadata = mapOf("state" to "streaming"),
+            ),
+        )
+        var committed = false
+        while (!committed) {
+            val state = _uiState.value
+            val targetSession = state.sessions.firstOrNull { session -> session.id == activeSession.id }
+            if (
+                activeSendRequestId != requestId ||
+                targetSession == null ||
+                targetSession.messages != activeSession.messages ||
+                !state.composer.isSending ||
+                state.composer.text.trim() != prompt ||
+                state.composer.attachedImages != snapshot.composer.attachedImages ||
+                isUserCancellationRequested(requestId)
+            ) {
+                break
+            }
+            val committedMessages = targetSession.messages + userMessage + assistantPlaceholder
+            val nextState = state.copy(
+                sessions = state.sessions.map { session ->
+                    if (session.id == activeSession.id) {
+                        sessionService.normalize(
+                            session.copy(
+                                messages = committedMessages,
+                                updatedAtEpochMs = System.currentTimeMillis(),
+                                title = deriveSessionTitle(committedMessages),
+                            ),
+                        )
+                    } else {
+                        session
+                    }
+                },
+                composer = ComposerUiState(text = "", isSending = true, isCancelling = false),
+            )
+            committed = _uiState.compareAndSet(state, nextState)
+        }
+        if (!committed) {
+            val userCancelled = consumeUserCancellationRequest(requestId)
+            if (userCancelled) {
+                releasePreparation(userCancelled = true)
+            } else {
+                releasePreparation(
+                    uiError = UiErrorMapper.runtimeFailure(
+                        "Conversation changed while the request was being prepared.",
+                    ),
+                )
+            }
+            persistState()
+            return@launch
+        }
+        persistState()
+
+        var pendingStreamingText: (() -> String)? = null
         var lastStreamingUiUpdateAtMs = 0L
         val sendStartedAtMs = System.currentTimeMillis()
         val streamReducer = StreamStateReducer(requestTimeoutMs = requestTimeoutMs)
@@ -131,18 +260,17 @@ internal fun ChatViewModel.sendMessageInternal() {
             triggerToken: String? = null,
             isThinking: Boolean = false,
         ) {
-            val text = pendingStreamingText?.trim().orEmpty()
-            if (text.isBlank()) {
-                return
-            }
+            val snapshotText = pendingStreamingText ?: return
             val now = System.currentTimeMillis()
-            val forceByToken = triggerToken?.let { token ->
-                token.contains('\n') || token.trim().endsWith(".") || token.trim().endsWith("!") || token.trim().endsWith("?")
-            } ?: false
+            val forceByToken = triggerToken?.let(::shouldFlushStreamingToken) ?: false
             val canFlush = force || lastStreamingUiUpdateAtMs == 0L ||
                 (now - lastStreamingUiUpdateAtMs) >= STREAM_UI_UPDATE_MIN_INTERVAL_MS ||
                 forceByToken
             if (!canFlush) {
+                return
+            }
+            val text = snapshotText().trim()
+            if (text.isBlank()) {
                 return
             }
             updateStreamingMessage(
@@ -209,12 +337,23 @@ internal fun ChatViewModel.sendMessageInternal() {
                 }.getOrNull() ?: snapshot.runtime.activeBackend,
                 thermalThrottled = deviceState.thermalLevel >= 5,
             )
+            val requestCanRetry = terminalReason == "timeout" ||
+                uiError.recoveryAction == RecoveryAction.RETRY_LOAD
             _uiState.update { state ->
                 state.copy(
                     composer = state.composer.copy(isSending = false, isCancelling = false),
                     runtime = state.runtime
                         .copy(
-                            modelRuntimeStatus = ModelRuntimeStatus.ERROR,
+                            startupProbeState = if (requestCanRetry) {
+                                StartupProbeState.READY
+                            } else {
+                                state.runtime.startupProbeState
+                            },
+                            modelRuntimeStatus = if (requestCanRetry) {
+                                ModelRuntimeStatus.READY
+                            } else {
+                                ModelRuntimeStatus.ERROR
+                            },
                             modelStatusDetail = uiError.userMessage,
                             sendElapsedMs = null,
                             sendSlowState = null,
@@ -330,7 +469,9 @@ internal fun ChatViewModel.sendMessageInternal() {
             } else {
                 null
             }
-            val tokensPerSecEstimate = runtimeStats?.tokensPerSec ?: if (!finalText.isBlank() && effectiveDecode != null && effectiveDecode > 0L) {
+            val tokensPerSecEstimate = runtimeStats?.tokensPerSec ?: if (
+                finalText.isNotBlank() && effectiveDecode != null && effectiveDecode > 0L
+            ) {
                 val approxTokens = finalText.split(WHITESPACE_REGEX).count { it.isNotBlank() }
                 if (approxTokens > 0) {
                     approxTokens.toDouble() / (effectiveDecode.toDouble() / 1000.0)
@@ -491,6 +632,7 @@ internal fun ChatViewModel.sendMessageInternal() {
             return true
         }
 
+        @Suppress("LongMethod")
         suspend fun runAutomaticToolLoop(initialToolCalls: List<ChatToolCall>, initialPromptHint: String) {
             var pendingToolCalls = initialToolCalls
             var promptHint = initialPromptHint
@@ -505,7 +647,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                 val followUpAssistantMessageId = newMessageId(prefix = "assistant-stream")
                 val followUpRequestId = newRequestId()
                 val followUpTranscript = timelineProjector.toTranscript(loopSession)
-                val followUpSendPreparation = AppOperationTrace.section(
+                val followUpSendPreparation = AppOperationTrace.suspendSection(
                     name = "chat.prepare_stream.tool_follow_up",
                     detail = { "messages=${followUpTranscript.size}|round=$round" },
                 ) {
@@ -527,7 +669,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                 val followUpRequestTimeoutMs = followUpPreparedStream.plan.requestTimeoutMs
                 val followUpStartedAtMs = System.currentTimeMillis()
                 val followUpStreamReducer = StreamStateReducer(requestTimeoutMs = followUpRequestTimeoutMs)
-                var followUpPendingStreamingText: String? = null
+                var followUpPendingStreamingText: (() -> String)? = null
                 var followUpLastStreamingUiUpdateAtMs = 0L
                 var followUpTerminal: StreamTerminalState? = null
                 activeSendRequestId = followUpRequestId
@@ -569,18 +711,17 @@ internal fun ChatViewModel.sendMessageInternal() {
                     triggerToken: String? = null,
                     isThinking: Boolean = false,
                 ) {
-                    val text = followUpPendingStreamingText?.trim().orEmpty()
-                    if (text.isBlank()) {
-                        return
-                    }
+                    val snapshotText = followUpPendingStreamingText ?: return
                     val now = System.currentTimeMillis()
-                    val forceByToken = triggerToken?.let { token ->
-                        token.contains('\n') || token.trim().endsWith(".") || token.trim().endsWith("!") || token.trim().endsWith("?")
-                    } ?: false
+                    val forceByToken = triggerToken?.let(::shouldFlushStreamingToken) ?: false
                     val canFlush = force || followUpLastStreamingUiUpdateAtMs == 0L ||
                         (now - followUpLastStreamingUiUpdateAtMs) >= STREAM_UI_UPDATE_MIN_INTERVAL_MS ||
                         forceByToken
                     if (!canFlush) {
+                        return
+                    }
+                    val text = snapshotText().trim()
+                    if (text.isBlank()) {
                         return
                     }
                     updateStreamingMessage(
@@ -601,7 +742,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                         if (event is ChatStreamEvent.Delta) {
                             when (val delta = event.delta) {
                                 is ChatStreamDelta.TextDelta -> {
-                                    followUpPendingStreamingText = nextState.accumulatedText
+                                    followUpPendingStreamingText = followUpStreamReducer::snapshotText
                                     flushFollowUpPendingStreamingText(
                                         triggerToken = delta.text,
                                         isThinking = nextState.isThinking,
@@ -612,7 +753,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                             updateStreamingMessage(
                                 sessionId = activeSession.id,
                                 messageId = followUpAssistantMessageId,
-                                text = nextState.accumulatedText,
+                                text = followUpStreamReducer.snapshotText(),
                                 isThinking = nextState.isThinking,
                             )
                         }
@@ -680,7 +821,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                 if (event is ChatStreamEvent.Delta) {
                     when (val delta = event.delta) {
                         is ChatStreamDelta.TextDelta -> {
-                            pendingStreamingText = nextState.accumulatedText
+                            pendingStreamingText = streamReducer::snapshotText
                             flushPendingStreamingText(
                                 triggerToken = delta.text,
                                 isThinking = nextState.isThinking,
@@ -691,7 +832,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                     updateStreamingMessage(
                         sessionId = activeSession.id,
                         messageId = assistantMessageId,
-                        text = nextState.accumulatedText,
+                        text = streamReducer.snapshotText(),
                         isThinking = nextState.isThinking,
                     )
                 }
@@ -755,4 +896,51 @@ private fun List<ChatToolCall>.toPersistedToolCalls(): List<PersistedToolCall> {
     }
 }
 
+private fun Exception.toSendPreparationUiError(): UiError {
+    return when (this) {
+        is RuntimeDomainException -> UiErrorMapper.runtimeFailure(
+            errorCode = domainError.code,
+            detail = domainError.technicalDetail ?: message,
+        )
+        is RuntimeModelLoadPlanningException -> UiErrorMapper.runtimeFailure(
+            errorCode = errorCode,
+            detail = message,
+        )
+        is RuntimeImageAttachmentUnsupportedException -> UiErrorMapper.runtimeFailure(
+            errorCode = errorCode,
+            detail = message,
+        )
+        is RuntimeArtifactVerificationException -> UiErrorMapper.runtimeFailure(
+            errorCode = errorCode,
+            detail = message,
+        )
+        is RuntimeGenerationFailureException -> UiErrorMapper.runtimeFailure(
+            errorCode = errorCode,
+            detail = message,
+        )
+        is RuntimeTemplateUnavailableException -> UiErrorMapper.runtimeFailure(
+            errorCode = "template_unavailable",
+            detail = message,
+        )
+        is RuntimeGenerationTimeoutException -> UiErrorMapper.runtimeTimeout(timeoutMs)
+        is RuntimeGenerationCancelledException -> UiErrorMapper.runtimeCancelled(message)
+        else -> UiErrorMapper.runtimeFailure(message ?: this::class.simpleName)
+    }
+}
+
+private data class InitialSendPreparation(
+    val userMessage: MessageUiModel,
+    val assistantMessageId: String,
+    val preparedSendStream: ChatSendFlow.PreparedSendStream,
+)
+
+private fun shouldFlushStreamingToken(token: String): Boolean {
+    val trimmed = token.trim()
+    return token.contains('\n') ||
+        trimmed.endsWith(".") ||
+        trimmed.endsWith("!") ||
+        trimmed.endsWith("?")
+}
+
 private const val MAX_AUTOMATIC_TOOL_LOOP_ROUNDS = 2
+private const val SEND_ADMISSION_CAS_MAX_ATTEMPTS = 8

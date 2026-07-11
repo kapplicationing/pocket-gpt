@@ -116,6 +116,7 @@ class ChatViewModel internal constructor(
         runtimeGenerationTimeoutMs = runtimeGenerationTimeoutMs,
         deviceStateProvider = deviceStateProvider,
         runtimeTuning = runtimeTuning,
+        preparationDispatcher = ioDispatcher,
     ),
     internal val sendReducer: SendReducer = SendReducer(),
     internal val toolLoopUseCase: ToolLoopUseCase = ToolLoopUseCase(sendController),
@@ -435,6 +436,7 @@ class ChatViewModel internal constructor(
         onAdvancedUnlockedInternal()
     }
 
+    @Suppress("ComplexCondition")
     internal fun updateStreamingMessage(
         sessionId: String,
         messageId: String,
@@ -833,6 +835,7 @@ internal fun lifecycleErrorMessage(
 
 internal const val MODEL_OPERATION_DEBOUNCE_MS = 500L
 
+@Suppress("CyclomaticComplexMethod")
 internal fun modelLoadingStatesEquivalentForUi(a: ModelLoadingState, b: ModelLoadingState): Boolean {
     if (a::class != b::class) {
         return false

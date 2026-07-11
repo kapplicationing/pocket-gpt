@@ -9,6 +9,7 @@ import com.pocketagent.core.Turn
 import com.pocketagent.inference.DeviceState
 import com.pocketagent.runtime.ChatStreamCommand
 import com.pocketagent.runtime.ChatStreamEvent
+import com.pocketagent.runtime.ChatStreamInterruptionReason
 import com.pocketagent.runtime.ChatStreamRequestPlanner
 import com.pocketagent.runtime.InteractionContentPart
 import com.pocketagent.runtime.PreparedChatStream
@@ -103,6 +104,34 @@ class OffscreenRuntimeClientTest {
         }
 
         assertTrue(error.message.orEmpty().contains("generation failed"))
+        assertEquals(listOf(SessionId("session-1")), runtimeGateway.deletedSessions)
+    }
+
+    @Test
+    fun `run voice turn rejects interrupted partial output as incomplete`() = runTest {
+        val runtimeGateway = RecordingOffscreenRuntimeGateway(
+            streamEvents = listOf(
+                ChatStreamEvent.Interrupted(
+                    requestId = "ignored",
+                    reason = ChatStreamInterruptionReason.CLOSED_WITHOUT_TERMINAL,
+                    partialText = "partial answer",
+                ),
+            ),
+        )
+        val client = OffscreenRuntimeClient(
+            runtimeGateway = runtimeGateway,
+            loadLastUsedModel = { RuntimeModelLifecycleCommandResult.applied() },
+            deviceStateProvider = { TEST_DEVICE_STATE },
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            client.runVoiceTurn(
+                transcript = "Open Maps",
+                systemPrompt = "voice-system",
+            )
+        }
+
+        assertTrue(error.message.orEmpty().contains("closed_without_terminal"))
         assertEquals(listOf(SessionId("session-1")), runtimeGateway.deletedSessions)
     }
 

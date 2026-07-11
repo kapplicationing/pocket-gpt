@@ -87,11 +87,15 @@ internal class OffscreenRuntimeClient(
             val terminalEvent = runtimeGateway.streamPreparedChat(preparedStream).first { event ->
                 event is ChatStreamEvent.Completed ||
                     event is ChatStreamEvent.Failed ||
-                    event is ChatStreamEvent.Cancelled
+                    event is ChatStreamEvent.Cancelled ||
+                    event is ChatStreamEvent.Interrupted
             }
         ) {
             is ChatStreamEvent.Completed -> terminalEvent.response
             is ChatStreamEvent.Cancelled -> throw CancellationException("Voice turn cancelled: ${terminalEvent.reason}")
+            is ChatStreamEvent.Interrupted -> error(
+                "Voice turn interrupted: ${terminalEvent.reason.name.lowercase()}",
+            )
             is ChatStreamEvent.Failed -> error(
                 "Voice turn failed: ${terminalEvent.errorCode}: ${terminalEvent.message}",
             )

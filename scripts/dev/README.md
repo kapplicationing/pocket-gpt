@@ -122,6 +122,21 @@ The gate holds one atomic device/package lock for build, install, and all three
 samples. On contention, inspect the reported owner PID/start/command. Remove a
 reported stale lock only after proving its owner is dead.
 
+Regenerate the app Baseline Profile on one pinned API 33+ device after critical
+startup or normal-navigation changes:
+
+```bash
+ANDROID_SERIAL=<serial> bash scripts/dev/baseline-profile.sh generate
+```
+
+The journey cold-starts PocketGPT and visits the session drawer, settings, and
+model library without model inference. It then verifies app-specific profile
+rules in both benchmark and release APKs. To recheck packaging without a device:
+
+```bash
+bash scripts/dev/baseline-profile.sh verify
+```
+
 ## Stage-2 Benchmark Wrapper
 
 ```bash

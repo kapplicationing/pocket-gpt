@@ -18,6 +18,7 @@ rootProject.name = "pocket-gpt"
 
 include(
     ":apps:mobile-android",
+    ":apps:mobile-android-baselineprofile",
     ":apps:mobile-android-host",
     ":packages:core-domain",
     ":packages:inference-adapters",

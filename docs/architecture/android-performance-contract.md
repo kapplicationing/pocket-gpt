@@ -65,6 +65,12 @@ onboarding, voice, and tooling gates, see
 - `bash scripts/dev/test.sh core|merge` includes `:apps:mobile-android:assembleBenchmark`
   when Android SDK is configured, so the benchmark variant remains buildable even
   when no physical device is attached.
+- The app ships a physical-device-generated, app-only Baseline Profile. The
+  `apps/mobile-android-baselineprofile` generator covers cold launch, the session
+  drawer, settings, and model library without model inference. `ProfileInstaller`
+  enables profile installation for sideloaded builds, and
+  `scripts/dev/baseline-profile.sh verify` proves both benchmark and release APK
+  packaging instead of accepting transitive library profiles as app coverage.
 
 ## Build Variant Policy
 

@@ -2,6 +2,7 @@ import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
+    id("androidx.baselineprofile")
     kotlin("android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
@@ -192,12 +193,25 @@ android {
         buildConfig = true
     }
 
+    sourceSets.getByName("benchmark").baselineProfiles.srcDir(
+        "src/main/generated/baselineProfiles",
+    )
+
 }
 
 composeCompiler {
     stabilityConfigurationFile = layout.projectDirectory.file("compose-stability.conf")
     reportsDestination = layout.buildDirectory.dir("compose-reports/$composeReportVariant")
     metricsDestination = layout.buildDirectory.dir("compose-metrics/$composeReportVariant")
+}
+
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    filter {
+        include("com.pocketagent.**")
+    }
+    mergeIntoMain = true
+    saveInSrc = true
 }
 
 dependencies {
@@ -227,6 +241,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+
+    baselineProfile(project(":apps:mobile-android-baselineprofile"))
 
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")

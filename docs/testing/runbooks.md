@@ -21,6 +21,7 @@ Use these recipes after choosing the evidence type in
 | Selector/flow health | `maestro-android lint` or `maestro-android audit-selectors` |
 | Non-generation UI jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario <name> --runtime-state <state> --download-state <state> --voice-state <state>` |
 | Composer typing jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build` |
+| Regenerate app Baseline Profile | `ANDROID_SERIAL=<api-33+-serial> bash scripts/dev/baseline-profile.sh generate` |
 
 ## Fast Engineer Loop
 
@@ -231,6 +232,30 @@ owner PID, start time, and command. If `SIGKILL` leaves a stale lock under
 `POCKETGPT_ANDROID_PERF_LOCK_ROOT`), verify that exact owner process is dead
 before removing only the reported hashed lock directory. Never bypass a live
 owner.
+
+## Baseline Profile Generation
+
+Regenerate the app profile only when startup or critical normal-navigation code
+changes. Pin one rooted device or API 33+ device; the generator cold-starts the
+app and opens the session drawer, settings, and model library without loading a
+model or running inference:
+
+```bash
+ANDROID_SERIAL=<serial> bash scripts/dev/baseline-profile.sh generate
+```
+
+The generated app-only rules are committed at
+`apps/mobile-android/src/main/generated/baselineProfiles/baseline-prof.txt`.
+Generation also assembles `benchmark` and `release`, then fails unless each APK
+contains non-empty `assets/dexopt/baseline.prof` and `baseline.profm` files and
+the generated PocketGPT rules reached the merged ART profile input. Recheck
+packaging without a device using:
+
+```bash
+bash scripts/dev/baseline-profile.sh verify
+```
+
+Raw generation and verification output stays under `tmp/baseline-profile/`.
 
 ## Perfetto Capture For Worst Jank
 

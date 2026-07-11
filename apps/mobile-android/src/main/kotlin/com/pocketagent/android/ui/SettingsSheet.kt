@@ -3,6 +3,7 @@ package com.pocketagent.android.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -118,6 +120,7 @@ internal fun AdvancedSettingsSheet(
 
         when (selectedTab) {
             0 -> GeneralTabContent(
+                modifier = Modifier.weight(1f),
                 runtime = runtime,
                 defaultThinkingEnabled = defaultThinkingEnabled,
                 voiceState = voiceState,
@@ -152,6 +155,7 @@ internal fun AdvancedSettingsSheet(
 
 @Composable
 private fun GeneralTabContent(
+    modifier: Modifier,
     runtime: RuntimeUiState,
     defaultThinkingEnabled: Boolean,
     voiceState: VoiceActivationUiState,
@@ -166,11 +170,63 @@ private fun GeneralTabContent(
     onOpenBatteryOptimizationSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
 ) {
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(bottom = PocketAgentDimensions.screenPadding),
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
+    ) {
+        item(key = "settings_general_performance") {
+            PerformanceSettingsSection(
+                selectedProfile = runtime.performanceProfile,
+                haptic = haptic,
+                onProfileSelected = onPerformanceProfileSelected,
+            )
+        }
+
+        item(key = "settings_general_downloads") {
+            DownloadSettingsSection(
+                wifiOnlyDownloadsEnabled = wifiOnlyDownloadsEnabled,
+                haptic = haptic,
+                onWifiOnlyDownloadsChanged = onWifiOnlyDownloadsChanged,
+            )
+        }
+
+        item(key = "settings_general_keep_alive") {
+            KeepAliveSettingsSection(
+                selectedPreference = runtime.keepAlivePreference,
+                haptic = haptic,
+                onPreferenceSelected = onKeepAlivePreferenceSelected,
+            )
+        }
+
+        item(key = "settings_general_voice") {
+            VoiceSettingsSection(
+                voiceState = voiceState,
+                haptic = haptic,
+                onVoiceActivationChanged = onVoiceActivationChanged,
+                onRequestAssistantRole = onRequestAssistantRole,
+                onOpenBatteryOptimizationSettings = onOpenBatteryOptimizationSettings,
+                onOpenAppSettings = onOpenAppSettings,
+            )
+        }
+
+        item(key = "settings_general_reasoning") {
+            ReasoningSettingsSection(
+                defaultThinkingEnabled = defaultThinkingEnabled,
+                haptic = haptic,
+                onDefaultThinkingEnabledChanged = onDefaultThinkingEnabledChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PerformanceSettingsSection(
+    selectedProfile: RuntimePerformanceProfile,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onProfileSelected: (RuntimePerformanceProfile) -> Unit,
+) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = PocketAgentDimensions.screenPadding),
         verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
     ) {
         SectionHeader(
@@ -184,15 +240,15 @@ private fun GeneralTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .selectable(
-                        selected = runtime.performanceProfile == profile,
-                        onClick = { haptic.tickLightThen { onPerformanceProfileSelected(profile) } },
+                        selected = selectedProfile == profile,
+                        onClick = { haptic.tickLightThen { onProfileSelected(profile) } },
                         role = Role.RadioButton,
                     )
                     .semantics { contentDescription = profileDescription },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(
-                    selected = runtime.performanceProfile == profile,
+                    selected = selectedProfile == profile,
                     onClick = null,
                 )
                 Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
@@ -206,9 +262,19 @@ private fun GeneralTabContent(
                 }
             }
         }
+    }
+}
 
+@Composable
+private fun DownloadSettingsSection(
+    wifiOnlyDownloadsEnabled: Boolean,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onWifiOnlyDownloadsChanged: (Boolean) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
+    ) {
         HorizontalDivider()
-
         SectionHeader(
             title = stringResource(id = R.string.ui_download_controls_title),
             subtitle = stringResource(id = R.string.ui_download_controls_subtitle),
@@ -233,9 +299,19 @@ private fun GeneralTabContent(
             Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
             Text(stringResource(id = R.string.ui_download_wifi_only_toggle))
         }
+    }
+}
 
+@Composable
+private fun KeepAliveSettingsSection(
+    selectedPreference: RuntimeKeepAlivePreference,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onPreferenceSelected: (RuntimeKeepAlivePreference) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
+    ) {
         HorizontalDivider()
-
         SectionHeader(
             title = stringResource(id = R.string.ui_keep_alive_title),
             subtitle = stringResource(id = R.string.ui_keep_alive_subtitle),
@@ -245,26 +321,42 @@ private fun GeneralTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .selectable(
-                        selected = runtime.keepAlivePreference == preference,
-                        onClick = { haptic.tickLightThen { onKeepAlivePreferenceSelected(preference) } },
+                        selected = selectedPreference == preference,
+                        onClick = { haptic.tickLightThen { onPreferenceSelected(preference) } },
                         role = Role.RadioButton,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(
-                    selected = runtime.keepAlivePreference == preference,
+                    selected = selectedPreference == preference,
                     onClick = null,
                 )
                 Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
                 Text(keepAlivePreferenceLabel(preference))
             }
         }
+    }
+}
 
+@Composable
+private fun VoiceSettingsSection(
+    voiceState: VoiceActivationUiState,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onVoiceActivationChanged: (Boolean) -> Unit,
+    onRequestAssistantRole: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
+    ) {
         HorizontalDivider()
-
         SectionHeader(
             title = stringResource(id = R.string.ui_voice_activation_title),
-            subtitle = stringResource(id = R.string.ui_voice_activation_subtitle, voiceState.settings.wakePhrase),
+            subtitle = stringResource(
+                id = R.string.ui_voice_activation_subtitle,
+                voiceState.settings.wakePhrase,
+            ),
         )
         Row(
             modifier = Modifier
@@ -284,147 +376,189 @@ private fun GeneralTabContent(
                 onCheckedChange = null,
             )
             Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
-            Column {
-                Text(stringResource(id = R.string.ui_voice_activation_toggle))
-                Text(
-                    text = stringResource(
-                        id = if (voiceState.betaContract.canEnableAlwaysOnListening) {
-                            R.string.ui_voice_activation_beta_ready
-                        } else {
-                            R.string.ui_voice_activation_beta_setup_required
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (voiceState.betaContract.canEnableAlwaysOnListening) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                )
-                Column(
-                    modifier = Modifier.semantics {
-                        liveRegion = LiveRegionMode.Polite
-                    },
-                    verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
-                ) {
-                    Text(
-                        text = stringResource(
-                            id = if (voiceState.microphonePermissionGranted) {
-                                R.string.ui_voice_activation_microphone_ready
-                            } else {
-                                R.string.ui_voice_activation_microphone_missing
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (voiceState.betaContract.blockingIssue == VoiceBetaBlockingIssue.MICROPHONE_PERMISSION) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                    Text(
-                        text = stringResource(
-                            id = if (voiceState.modelsReady) {
-                                R.string.ui_voice_activation_models_ready
-                            } else {
-                                R.string.ui_voice_activation_models_missing
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (voiceState.betaContract.blockingIssue == VoiceBetaBlockingIssue.MODELS_MISSING) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                    Text(
-                        text = stringResource(
-                            id = R.string.ui_voice_activation_status_line,
-                            voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (voiceState.assistantRoleSupported || voiceState.betaContract.needsAssistantRole) {
-                        Text(
-                            text = stringResource(
-                                id = if (!voiceState.betaContract.needsAssistantRole) {
-                                    R.string.ui_voice_activation_assistant_ready
-                                } else {
-                                    R.string.ui_voice_activation_assistant_missing
-                                },
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Text(
-                            text = stringResource(id = R.string.ui_voice_activation_assistant_unavailable),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        text = stringResource(
-                            id = if (!voiceState.betaContract.needsBatteryGuidance) {
-                                R.string.ui_voice_activation_battery_ready
-                            } else {
-                                R.string.ui_voice_activation_battery_missing
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                voiceState.settings.lastError?.takeIf { it.isNotBlank() }?.let { error ->
-                    Text(
-                        text = error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                if (!voiceState.modelsReady) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.ui_voice_activation_models_root,
-                            voiceState.modelsRootPath,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            VoiceSettingsStatus(voiceState = voiceState)
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
-        ) {
-            if (voiceState.assistantRoleSupported && voiceState.betaContract.needsAssistantRole) {
-                TextButton(onClick = { haptic.tickLightThen(onRequestAssistantRole) }) {
-                    Text(stringResource(id = R.string.ui_voice_activation_set_assistant))
-                }
-            }
-            if (voiceState.betaContract.needsBatteryGuidance) {
-                TextButton(onClick = { haptic.tickLightThen(onOpenBatteryOptimizationSettings) }) {
-                    Text(stringResource(id = R.string.ui_voice_activation_battery_settings))
-                }
-            }
-            if (!voiceState.microphonePermissionGranted) {
-                TextButton(onClick = { haptic.tickLightThen(onOpenAppSettings) }) {
-                    Text(stringResource(id = R.string.ui_voice_activation_open_app_settings))
-                }
-            }
-        }
-        if (voiceState.betaContract.needsBatteryGuidance) {
+        VoiceSettingsActions(
+            voiceState = voiceState,
+            haptic = haptic,
+            onRequestAssistantRole = onRequestAssistantRole,
+            onOpenBatteryOptimizationSettings = onOpenBatteryOptimizationSettings,
+            onOpenAppSettings = onOpenAppSettings,
+        )
+    }
+}
+
+@Composable
+private fun VoiceSettingsStatus(voiceState: VoiceActivationUiState) {
+    Column {
+        Text(stringResource(id = R.string.ui_voice_activation_toggle))
+        Text(
+            text = stringResource(
+                id = if (voiceState.betaContract.canEnableAlwaysOnListening) {
+                    R.string.ui_voice_activation_beta_ready
+                } else {
+                    R.string.ui_voice_activation_beta_setup_required
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (voiceState.betaContract.canEnableAlwaysOnListening) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+        )
+        VoiceReadinessStatus(voiceState = voiceState)
+        voiceState.settings.lastError?.takeIf { it.isNotBlank() }?.let { error ->
             Text(
-                text = voiceState.oemGuide?.summary.orEmpty(),
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (!voiceState.modelsReady) {
+            Text(
+                text = stringResource(
+                    id = R.string.ui_voice_activation_models_root,
+                    voiceState.modelsRootPath,
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
 
+@Composable
+private fun VoiceReadinessStatus(voiceState: VoiceActivationUiState) {
+    Column(
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+        },
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
+    ) {
+        Text(
+            text = stringResource(
+                id = if (voiceState.microphonePermissionGranted) {
+                    R.string.ui_voice_activation_microphone_ready
+                } else {
+                    R.string.ui_voice_activation_microphone_missing
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (voiceState.betaContract.blockingIssue == VoiceBetaBlockingIssue.MICROPHONE_PERMISSION) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Text(
+            text = stringResource(
+                id = if (voiceState.modelsReady) {
+                    R.string.ui_voice_activation_models_ready
+                } else {
+                    R.string.ui_voice_activation_models_missing
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (voiceState.betaContract.blockingIssue == VoiceBetaBlockingIssue.MODELS_MISSING) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Text(
+            text = stringResource(
+                id = R.string.ui_voice_activation_status_line,
+                voiceState.settings.voiceServiceState.name.lowercase().replace('_', ' '),
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        AssistantRoleStatus(voiceState = voiceState)
+        Text(
+            text = stringResource(
+                id = if (!voiceState.betaContract.needsBatteryGuidance) {
+                    R.string.ui_voice_activation_battery_ready
+                } else {
+                    R.string.ui_voice_activation_battery_missing
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun AssistantRoleStatus(voiceState: VoiceActivationUiState) {
+    if (voiceState.assistantRoleSupported || voiceState.betaContract.needsAssistantRole) {
+        Text(
+            text = stringResource(
+                id = if (!voiceState.betaContract.needsAssistantRole) {
+                    R.string.ui_voice_activation_assistant_ready
+                } else {
+                    R.string.ui_voice_activation_assistant_missing
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        Text(
+            text = stringResource(id = R.string.ui_voice_activation_assistant_unavailable),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun VoiceSettingsActions(
+    voiceState: VoiceActivationUiState,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onRequestAssistantRole: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing),
+    ) {
+        if (voiceState.assistantRoleSupported && voiceState.betaContract.needsAssistantRole) {
+            TextButton(onClick = { haptic.tickLightThen(onRequestAssistantRole) }) {
+                Text(stringResource(id = R.string.ui_voice_activation_set_assistant))
+            }
+        }
+        if (voiceState.betaContract.needsBatteryGuidance) {
+            TextButton(onClick = { haptic.tickLightThen(onOpenBatteryOptimizationSettings) }) {
+                Text(stringResource(id = R.string.ui_voice_activation_battery_settings))
+            }
+        }
+        if (!voiceState.microphonePermissionGranted) {
+            TextButton(onClick = { haptic.tickLightThen(onOpenAppSettings) }) {
+                Text(stringResource(id = R.string.ui_voice_activation_open_app_settings))
+            }
+        }
+    }
+    if (voiceState.betaContract.needsBatteryGuidance) {
+        Text(
+            text = voiceState.oemGuide?.summary.orEmpty(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ReasoningSettingsSection(
+    defaultThinkingEnabled: Boolean,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onDefaultThinkingEnabledChanged: (Boolean) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.screenPadding),
+    ) {
         HorizontalDivider()
-
         SectionHeader(title = stringResource(id = R.string.ui_reasoning_title))
         Row(
             modifier = Modifier

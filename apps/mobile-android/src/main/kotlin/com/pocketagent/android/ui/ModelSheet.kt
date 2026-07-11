@@ -46,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -457,6 +458,12 @@ private fun HuggingFaceAcquisitionSection(
     onClearRecent: () -> Unit,
     onRecheckRecent: (HuggingFaceRecentModel) -> Unit,
 ) {
+    var inputFieldValue by remember { mutableStateOf(TextFieldValue(input)) }
+    LaunchedEffect(input) {
+        if (input != inputFieldValue.text) {
+            inputFieldValue = TextFieldValue(input)
+        }
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -477,8 +484,14 @@ private fun HuggingFaceAcquisitionSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
+                value = inputFieldValue,
+                onValueChange = { value ->
+                    val textChanged = value.text != inputFieldValue.text
+                    inputFieldValue = value
+                    if (textChanged) {
+                        onInputChange(value.text)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("model_library_hf_url_input"),
@@ -636,6 +649,12 @@ private fun HuggingFaceSearchSection(
     onUseResult: (HuggingFaceSearchFileResult) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
 ) {
+    var queryFieldValue by remember { mutableStateOf(TextFieldValue(query)) }
+    LaunchedEffect(query) {
+        if (query != queryFieldValue.text) {
+            queryFieldValue = TextFieldValue(query)
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -653,8 +672,14 @@ private fun HuggingFaceSearchSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
+            value = queryFieldValue,
+            onValueChange = { value ->
+                val textChanged = value.text != queryFieldValue.text
+                queryFieldValue = value
+                if (textChanged) {
+                    onQueryChange(value.text)
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("model_library_hf_search_input"),

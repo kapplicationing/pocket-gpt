@@ -37,20 +37,26 @@ onboarding, voice, and tooling gates, see
   stable, plus `kotlin.collections.{List,Set,Map,Collection}` so read-only collection
   parameters skip cleanly.
 - `PerformanceContractAuditTest` (under `apps/mobile-android/src/test/.../audit/`)
-  enforces seven static rules on every `bash scripts/dev/test.sh fast`:
+  enforces static rules on every `bash scripts/dev/test.sh fast`, including:
   - No `getSharedPreferences`, `readText`, `writeText`, `getExternalFilesDir`, or
     `runBlocking` in `ui/`.
   - `ChatComposerDock` does not observe `activeSessionFlow`.
   - `PocketAgentApp` root does not collect full `uiState` / `provisioningViewModel.uiState`.
   - `ChatUiState` does not declare an `activeSession` property getter.
-  - `ComposerInputRow` uses the `TextFieldValue` overload of `OutlinedTextField`.
+  - Every named composer/settings/search hot field binds its own local
+    `TextFieldValue`; a declaration elsewhere in the file cannot mask a String overload.
   - Every `data class` in `ui/state/` is `@Immutable` or listed in `compose-stability.conf`.
   - `scripts/dev/perf-baseline.sh` checks `DEBUGGABLE` flag and builds `assembleBenchmark`.
 - `scripts/dev/perf-baseline.sh` is the device evidence gate for UI/runtime refactors.
   It refuses to measure debuggable builds without `--allow-debuggable`.
-- `scripts/dev/compose-report-hotpath.sh --build` regenerates Compose compiler reports
-  and highlights hot-path instability/non-skippable churn. Use `--strict` only after
-  the current baseline is intentionally cleaned up.
+- `scripts/dev/compose-report-hotpath.sh --build` forcibly regenerates benchmark-scoped
+  Compose compiler reports, fails on empty/stale/incomplete metrics or missing expected
+  hot composables, and highlights instability/non-skippable churn. Use `--strict` only
+  after the current instability baseline is intentionally cleaned up.
+- `scripts/dev/perf-interaction-gate.sh` requires explicit runtime/download/voice
+  conditions and retains device, refresh-rate, thermal, battery, package-compilation,
+  and frame-window evidence for each sample. Acceptance rejects missing
+  refresh/compilation provenance, fewer than 20 frames, or any nonzero thermal status.
 - `bash scripts/dev/test.sh core|merge` includes `:apps:mobile-android:assembleBenchmark`
   when Android SDK is configured, so the benchmark variant remains buildable even
   when no physical device is attached.

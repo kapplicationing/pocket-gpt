@@ -164,46 +164,74 @@ class PerformanceContractAuditTest {
 
     @Test
     fun `composer text field uses TextFieldValue overload not String overload`() {
-        val source = composerSourceFile().readText()
-        val inputRow = source.substringAfter("private fun ComposerInputRow(")
-            .substringBefore("\n}\n")
-        // Must NOT use the String overload (value = text, onValueChange = onTextChanged).
-        val usesStringOverload = Regex(
-            """OutlinedTextField\s*\(\s*\n\s*value\s*=\s*text\s*,\s*\n\s*onValueChange\s*=\s*onTextChanged""",
-        ).containsMatchIn(inputRow)
-        assertTrue(
-            !usesStringOverload,
-            "ComposerInputRow must use OutlinedTextField with the TextFieldValue overload and a local mutableStateOf. " +
-                "The String overload forces a TextFieldValue rebuild (selection + composition span) on every recomposition, " +
-                "doubling the per-keystroke recompose cost and stalling the IME. See the 2026-05-02 RCA.",
-        )
-        assertTrue(
-            "TextFieldValue" in inputRow,
-            "ComposerInputRow must reference TextFieldValue locally; without it the composer reverts to the slow String overload.",
+        assertHotTextFieldUsesLocalValue(
+            file = composerSourceFile(),
+            functionName = "ComposerInputRow",
+            valueName = "fieldValue",
+            label = "composer",
         )
     }
 
     @Test
     fun `settings and search hot text fields use TextFieldValue locally`() {
         val hotFields = listOf(
-            resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt") to "system prompt",
-            resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/SessionDrawer.kt") to "session search",
-            resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/ModelSheet.kt") to "model search",
+            HotTextFieldContract("CompletionSettingsSheet.kt", "CompletionSettingsSheet", "systemPrompt", "system prompt"),
+            HotTextFieldContract("SessionDrawer.kt", "SessionDrawer", "searchQueryValue", "session search"),
+            HotTextFieldContract("ModelSheet.kt", "ModelSheet", "searchQueryValue", "model search"),
+            HotTextFieldContract("ModelSheet.kt", "HuggingFaceAcquisitionSection", "inputFieldValue", "model URL"),
+            HotTextFieldContract("ModelSheet.kt", "HuggingFaceSearchSection", "queryFieldValue", "Hugging Face search"),
         )
 
-        val offenders = hotFields.mapNotNull { (file, label) ->
-            val source = file.readText()
-            if ("TextFieldValue" in source) {
-                null
-            } else {
-                "${file.relativePath()}: $label must use TextFieldValue for hot input"
-            }
+        val offenders = hotFields.mapNotNull { contract ->
+            hotTextFieldViolation(contract)
         }
 
         assertTrue(
             offenders.isEmpty(),
             "High-frequency settings/search text fields must keep local TextFieldValue state. Offenders:\n${offenders.joinToString("\n")}",
         )
+    }
+
+    private fun assertHotTextFieldUsesLocalValue(
+        file: File,
+        functionName: String,
+        valueName: String,
+        label: String,
+    ) {
+        val violation = hotTextFieldViolation(
+            HotTextFieldContract(file.name, functionName, valueName, label),
+        )
+        assertTrue(
+            violation == null,
+            violation ?: "expected $label to satisfy the local TextFieldValue contract",
+        )
+    }
+
+    private fun hotTextFieldViolation(contract: HotTextFieldContract): String? {
+        val file = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/${contract.fileName}")
+        val functionSource = composableFunctionSource(file, contract.functionName)
+        val localValue = Regex(
+            """(?:var|val)\s+${Regex.escape(contract.valueName)}\s+by\s+remember[\s\S]{0,240}?TextFieldValue\s*\(""",
+        ).containsMatchIn(functionSource)
+        val exactBinding = Regex(
+            """OutlinedTextField\s*\(\s*value\s*=\s*${Regex.escape(contract.valueName)}\s*,""",
+        ).containsMatchIn(functionSource)
+        return if (localValue && exactBinding) {
+            null
+        } else {
+            "${file.relativePath()}: ${contract.functionName} ${contract.label} must bind its own local " +
+                "TextFieldValue `${contract.valueName}` to OutlinedTextField"
+        }
+    }
+
+    private fun composableFunctionSource(file: File, functionName: String): String {
+        val source = file.readText()
+        val marker = "fun $functionName("
+        val start = source.indexOf(marker)
+        assertTrue(start >= 0, "Could not find $marker in ${file.relativePath()}")
+        val remainder = source.substring(start)
+        val nextComposable = remainder.indexOf("\n@Composable", startIndex = marker.length)
+        return if (nextComposable >= 0) remainder.substring(0, nextComposable) else remainder
     }
 
     @Test
@@ -282,6 +310,76 @@ class PerformanceContractAuditTest {
         assertTrue(
             "assembleBenchmark" in script,
             "scripts/dev/perf-baseline.sh must build the `benchmark` variant (assembleBenchmark), not assembleDebug.",
+        )
+    }
+
+    @Test
+    fun `compose hotpath evidence is fresh benchmark scoped and fail closed`() {
+        val buildScript = resolveAppSource("build.gradle.kts").readText()
+        val reportScript = resolveRepoSource("scripts/dev/compose-report-hotpath.sh").readText()
+        val validator = resolveRepoSource("scripts/dev/validate_compose_hotpath_reports.py").readText()
+
+        assertTrue(
+            "pocketgpt.composeReportVariant" in buildScript &&
+                "compose-reports/\$composeReportVariant" in buildScript &&
+                "compose-metrics/\$composeReportVariant" in buildScript,
+            "Compose compiler outputs must be isolated by an explicit report variant.",
+        )
+        assertTrue(
+            "compileBenchmarkKotlin" in reportScript &&
+                "--rerun-tasks" in reportScript &&
+                "validate_compose_hotpath_reports.py" in reportScript,
+            "The hotpath helper must regenerate benchmark reports and validate the resulting bundle.",
+        )
+        val expectedNames = listOf(
+            "PocketAgentApp",
+            "ComposerInputRow",
+            "ModelSheet",
+            "SessionDrawer",
+            "CompletionSettingsSheet",
+        )
+        assertTrue(
+            expectedNames.all { name -> name in reportScript } &&
+                "totalComposables" in validator &&
+                "stale" in validator &&
+                "expected exactly one" in validator,
+            "Compose evidence must reject missing hot composables and empty, stale, or incomplete metrics.",
+        )
+    }
+
+    @Test
+    fun `interaction perf evidence records device state and declared workload conditions`() {
+        val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
+        val evaluator = resolveRepoSource(
+            "scripts/benchmarks/evaluate_android_frame_thresholds.py",
+        ).readText()
+        val requiredScriptEvidence = listOf(
+            "device-properties.txt",
+            "display-\${phase}.txt",
+            "thermal-\${phase}.txt",
+            "package-dump.txt",
+            "--runtime-state",
+            "--download-state",
+            "--voice-state",
+            "TOTAL_FRAMES",
+        )
+        val requiredEvaluationFields = listOf(
+            "total_frames",
+            "refresh_rate_hz",
+            "thermal_status_before",
+            "compilation_filter",
+            "runtime_condition",
+            "download_condition",
+            "voice_condition",
+        )
+
+        assertTrue(
+            requiredScriptEvidence.all { evidence -> evidence in script },
+            "Performance samples must capture external device state and declare workload conditions.",
+        )
+        assertTrue(
+            requiredEvaluationFields.all { field -> field in evaluator },
+            "Frame-threshold evaluation must reject incomplete or mixed device/workload evidence.",
         )
     }
 
@@ -376,6 +474,13 @@ class PerformanceContractAuditTest {
     private fun File.relativePath(): String = invariantSeparatorsPath
 
     private companion object {
+        data class HotTextFieldContract(
+            val fileName: String,
+            val functionName: String,
+            val valueName: String,
+            val label: String,
+        )
+
         val forbiddenUiHotPathPatterns = listOf(
             "getSharedPreferences(",
             ".readText(",

@@ -147,7 +147,8 @@ selector lint, or scoped device flow can fail faster and with clearer artifacts.
    `scripts/benchmarks/runs/...`.
 2. Retained human-readable evidence belongs under `docs/operations/evidence/...`.
 3. Performance evidence must state build variant, device serial, command, samples,
-   medians, and artifact roots.
+   medians, artifact roots, refresh/thermal/compilation state, and the declared
+   runtime/download/voice conditions. A median group must not mix those conditions.
 4. CI evidence must include the run URL and the first failing job/artifact when it
    fails.
 5. A skipped broad gate is acceptable only when the final report says what narrower

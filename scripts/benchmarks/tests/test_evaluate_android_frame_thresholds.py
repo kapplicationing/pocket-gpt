@@ -35,11 +35,14 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
             "last_update_time": "2026-07-11 10:00:00",
             "installed_apk_path": "/data/app/example/base.apk",
             "started_at_utc": f"2026-07-11T03:00:0{index}Z",
+            "completed_at_utc": f"2026-07-11T03:00:1{index}Z",
+            "total_frames": 120,
             "janky_pct": [10.0, 12.0, 14.0][index - 1],
             "p50_ms": [10.0, 11.0, 12.0][index - 1],
             "p90_ms": [20.0, 21.0, 22.0][index - 1],
             "p99_ms": [28.0, 29.0, 30.0][index - 1],
             "artifact_dir": str(artifact_dir),
+            "device_state": self.sample_device_state(),
         }
         payload.update(overrides)
         path = artifact_dir / "summary.json"
@@ -48,6 +51,27 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
 
     def three_samples(self, **third_overrides):
         return [self.write_sample(1), self.write_sample(2), self.write_sample(3, **third_overrides)]
+
+    def sample_device_state(self):
+        return {
+            "manufacturer": "Google",
+            "model": "Pixel 8",
+            "android_release": "16",
+            "api_level": 36,
+            "refresh_rate_hz": 120.0,
+            "refresh_rate_source": "dumpsys-display-active-mode",
+            "refresh_rate_evidence_available": True,
+            "thermal_status_before": 0,
+            "thermal_status_after": 0,
+            "battery_temperature_c_before": 31.2,
+            "battery_temperature_c_after": 31.4,
+            "compilation_filter": "speed-profile",
+            "compilation_reason": "bg-dexopt",
+            "compilation_evidence_available": True,
+            "runtime_condition": "unloaded",
+            "download_condition": "idle",
+            "voice_condition": "inactive",
+        }
 
     def test_passes_with_three_matching_native_benchmark_samples(self):
         report = evaluate_samples(self.three_samples(), expected_scenario="settings-nav")
@@ -118,6 +142,40 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
     def test_rejects_non_numeric_metric(self):
         with self.assertRaisesRegex(ValidationError, "p90_ms must be a number"):
             evaluate_samples(self.three_samples(p90_ms="fast"))
+
+    def test_rejects_zero_frame_samples(self):
+        with self.assertRaisesRegex(ValidationError, "total_frames"):
+            evaluate_samples(self.three_samples(total_frames=19))
+
+    def test_rejects_thermal_drift_or_pressure(self):
+        pressured = {
+            **self.sample_device_state(),
+            "thermal_status_after": 1,
+        }
+        with self.assertRaisesRegex(ValidationError, "thermal_status_after"):
+            evaluate_samples(self.three_samples(device_state=pressured))
+
+    def test_rejects_missing_refresh_or_compilation_provenance(self):
+        incomplete = {
+            **self.sample_device_state(),
+            "compilation_filter": "unavailable",
+            "compilation_reason": "unavailable",
+            "compilation_evidence_available": False,
+        }
+        with self.assertRaisesRegex(ValidationError, "compilation evidence"):
+            evaluate_samples(self.three_samples(device_state=incomplete))
+
+    def test_rejects_missing_device_state_metadata(self):
+        with self.assertRaisesRegex(ValidationError, "device_state"):
+            evaluate_samples(self.three_samples(device_state=None))
+
+    def test_rejects_mixed_runtime_download_or_voice_conditions(self):
+        mixed = {
+            **self.sample_device_state(),
+            "runtime_condition": "loaded-idle",
+        }
+        with self.assertRaisesRegex(ValidationError, "runtime_condition"):
+            evaluate_samples(self.three_samples(device_state=mixed))
 
     def test_rejects_wrong_sample_count(self):
         with self.assertRaisesRegex(ValidationError, "expected exactly 3 summaries"):

@@ -102,16 +102,19 @@ ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
 Non-generation UI journeys:
 
 ```bash
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario settings-nav
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario model-sheet
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario drawer-search
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario settings-nav --runtime-state unloaded --download-state idle --voice-state inactive
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario model-sheet --runtime-state unloaded --download-state idle --voice-state inactive
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario drawer-search --runtime-state unloaded --download-state idle --voice-state inactive
 ```
 
 Run only the scenario that matches the changed risk. The gate builds one
 native-enabled benchmark APK, captures three samples on that same installed
 build, validates their provenance, and enforces the median targets in
-`docs/testing/test-strategy.md`. Use `perf-interaction.sh` directly only for a
-single diagnostic sample; it does not provide three-sample acceptance evidence.
+`docs/testing/test-strategy.md`. Runtime, download, and voice conditions are
+required declarations and must remain constant across the three samples. Device,
+refresh-rate, thermal, battery, and compilation evidence is retained alongside
+the frame metrics. Use `perf-interaction.sh` directly only for a single diagnostic
+sample; it does not provide three-sample acceptance evidence.
 
 ## Stage-2 Benchmark Wrapper
 

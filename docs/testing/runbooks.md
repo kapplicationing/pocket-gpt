@@ -19,7 +19,7 @@ Use these recipes after choosing the evidence type in
 | Screenshot contract | `python3 tools/devctl/main.py lane screenshot-pack` |
 | One UI repro with artifacts | `maestro-android scoped --flow tmp/<flow>.yaml --device <serial>` |
 | Selector/flow health | `maestro-android lint` or `maestro-android audit-selectors` |
-| Non-generation UI jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario <name>` |
+| Non-generation UI jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario <name> --runtime-state <state> --download-state <state> --voice-state <state>` |
 | Composer typing jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build` |
 
 ## Fast Engineer Loop
@@ -182,23 +182,26 @@ ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
 Non-generation UI journeys:
 
 ```bash
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario settings-nav
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario model-sheet
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario drawer-search
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario settings-nav --runtime-state unloaded --download-state idle --voice-state inactive
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario model-sheet --runtime-state unloaded --download-state idle --voice-state inactive
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario drawer-search --runtime-state unloaded --download-state idle --voice-state inactive
 ```
 
 Run only the scenario that matches the changed risk. The gate builds and installs
 one native-enabled `benchmark` APK, captures three samples without rebuilding,
-validates that scenario, device, package, and installed-build identity stayed
-constant, rejects debuggable or unproven builds, and fails when a metric median
-exceeds its target. The machine-readable result is `evaluation.json` in the gate
-artifact root.
+validates that scenario, device, package, installed-build identity, refresh rate,
+compilation mode, and declared runtime/download/voice conditions stayed constant,
+rejects debuggable, empty-frame, or incomplete samples, and fails when a metric
+median exceeds its target. Thermal and battery state remain per-sample evidence in
+`evaluation.json` instead of being silently averaged away. Acceptance also requires
+at least 20 rendered frames per sample, available refresh/compilation provenance,
+and thermal status 0 before and after every journey.
 
 Use `perf-interaction.sh` directly only for one diagnostic sample that will not be
 used as acceptance evidence:
 
 ```bash
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav --build
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav --runtime-state unloaded --download-state idle --voice-state inactive --build
 ```
 
 Compare medians, not one run. Current targets:
@@ -211,7 +214,9 @@ Compare medians, not one run. Current targets:
 | p99 | `<= 32 ms` |
 
 Artifacts land under `tmp/perf-interaction/...`; each gate root contains three
-sample directories and `evaluation.json`.
+sample directories and `evaluation.json`. Run separate three-sample groups for
+`loaded-idle`, active downloads, or active voice. Never mix conditions inside one
+median group.
 
 ## Perfetto Capture For Worst Jank
 

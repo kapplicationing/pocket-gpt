@@ -14,18 +14,21 @@ SCENARIO=""
 DO_BUILD=0
 ALLOW_DEBUGGABLE=0
 OUT_DIR=""
+RUNTIME_CONDITION=""
+DOWNLOAD_CONDITION=""
+VOICE_CONDITION=""
 BUILD_SOURCE="preinstalled-nondebuggable"
 BUILD_VARIANT="unverified-nondebuggable"
 NATIVE_RUNTIME_PACKAGED_JSON="null"
 DEBUGGABLE=0
-STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+STARTED_AT_UTC=""
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-interaction.xml"
 LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-interaction.XXXXXX.xml)"
 trap 'rm -f "$LOCAL_UI_XML"' EXIT
 
 usage() {
   cat <<EOF
-Usage: $0 --scenario settings-nav|model-sheet|drawer-search [--serial SERIAL] [--build] [--allow-debuggable] [--out-dir DIR]
+Usage: $0 --scenario settings-nav|model-sheet|drawer-search --runtime-state unloaded|loading|loaded-idle --download-state idle|active --voice-state inactive|active [--serial SERIAL] [--build] [--allow-debuggable] [--out-dir DIR]
 
 Measures PocketGPT non-generation UI frame stats on the benchmark variant.
 For acceptance evidence, use perf-interaction-gate.sh to capture and evaluate
@@ -45,6 +48,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --scenario)
       SCENARIO="$2"
+      shift 2
+      ;;
+    --runtime-state)
+      RUNTIME_CONDITION="$2"
+      shift 2
+      ;;
+    --download-state)
+      DOWNLOAD_CONDITION="$2"
+      shift 2
+      ;;
+    --voice-state)
+      VOICE_CONDITION="$2"
       shift 2
       ;;
     --build)
@@ -80,6 +95,27 @@ case "$SCENARIO" in
   *)
     echo "--scenario must be settings-nav, model-sheet, or drawer-search" >&2
     usage >&2
+    exit 64
+    ;;
+esac
+case "$RUNTIME_CONDITION" in
+  unloaded|loading|loaded-idle) ;;
+  *)
+    echo "--runtime-state must be unloaded, loading, or loaded-idle" >&2
+    exit 64
+    ;;
+esac
+case "$DOWNLOAD_CONDITION" in
+  idle|active) ;;
+  *)
+    echo "--download-state must be idle or active" >&2
+    exit 64
+    ;;
+esac
+case "$VOICE_CONDITION" in
+  inactive|active) ;;
+  *)
+    echo "--voice-state must be inactive or active" >&2
     exit 64
     ;;
 esac
@@ -246,6 +282,24 @@ type_text_slowly() {
   done
 }
 
+capture_device_state_snapshot() {
+  local phase="$1"
+  adb_shell dumpsys display >"$OUT_DIR/display-${phase}.txt" 2>&1 || true
+  {
+    adb_shell cmd thermalservice get-current-status 2>/dev/null || true
+    adb_shell dumpsys thermalservice 2>/dev/null || true
+  } >"$OUT_DIR/thermal-${phase}.txt"
+  adb_shell dumpsys battery >"$OUT_DIR/battery-${phase}.txt" 2>&1 || true
+  {
+    printf 'peak_refresh_rate='
+    adb_shell settings get system peak_refresh_rate 2>/dev/null || true
+    printf 'min_refresh_rate='
+    adb_shell settings get system min_refresh_rate 2>/dev/null || true
+    printf 'user_refresh_rate='
+    adb_shell settings get system user_refresh_rate 2>/dev/null || true
+  } >"$OUT_DIR/refresh-settings-${phase}.txt"
+}
+
 if [[ "$DO_BUILD" -eq 1 ]]; then
   echo "[perf-interaction] building native-enabled :apps:mobile-android:assembleBenchmark"
   (cd "$REPO_ROOT" && ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleBenchmark -q)
@@ -266,6 +320,7 @@ if [[ "$DO_BUILD" -eq 1 ]]; then
 fi
 
 PACKAGE_DUMP="$(adb -s "$SERIAL" shell dumpsys package "$PACKAGE" 2>/dev/null || true)"
+printf '%s\n' "$PACKAGE_DUMP" >"$OUT_DIR/package-dump.txt"
 INSTALLED_FLAGS="$(awk '/pkgFlags=/ {print; exit}' <<<"$PACKAGE_DUMP")"
 if [[ -z "$INSTALLED_FLAGS" ]]; then
   echo "[perf-interaction] $PACKAGE is not installed on $SERIAL. Re-run with --build or install manually." >&2
@@ -290,6 +345,12 @@ if [[ -z "$VERSION_CODE" || -z "$VERSION_NAME" || -z "$LAST_UPDATE_TIME" || -z "
   exit 67
 fi
 
+adb_shell getprop >"$OUT_DIR/device-properties.txt" 2>&1 || true
+printf 'runtime_condition=%s\ndownload_condition=%s\nvoice_condition=%s\n' \
+  "$RUNTIME_CONDITION" "$DOWNLOAD_CONDITION" "$VOICE_CONDITION" \
+  >"$OUT_DIR/declared-conditions.txt"
+STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+capture_device_state_snapshot before
 wake_and_dismiss_keyguard
 adb_shell am force-stop "$PACKAGE" >/dev/null
 adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
@@ -326,6 +387,7 @@ case "$SCENARIO" in
 esac
 
 sleep 2
+capture_device_state_snapshot after
 RAW_DUMP="$OUT_DIR/gfxinfo.txt"
 gfxinfo_dump >"$RAW_DUMP" || {
   echo "[perf-interaction] failed to dump gfxinfo" >&2
@@ -336,10 +398,15 @@ JANKY="$(parse_metric janky "$RAW_DUMP")"
 P50="$(parse_metric p50 "$RAW_DUMP")"
 P90="$(parse_metric p90 "$RAW_DUMP")"
 P99="$(parse_metric p99 "$RAW_DUMP")"
-[[ -n "$JANKY" && -n "$P50" && -n "$P90" && -n "$P99" ]] || {
+TOTAL_FRAMES="$(awk '/Total frames rendered:/ {print $4; exit}' "$RAW_DUMP" | tr -d '[:space:]')"
+[[ -n "$JANKY" && -n "$P50" && -n "$P90" && -n "$P99" && -n "$TOTAL_FRAMES" ]] || {
   echo "[perf-interaction] failed to parse gfxinfo metrics" >&2
   exit 65
 }
+if ! [[ "$TOTAL_FRAMES" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[perf-interaction] invalid or empty gfxinfo frame window: total_frames=$TOTAL_FRAMES" >&2
+  exit 70
+fi
 if awk -v p="$P50" 'BEGIN { exit !(p + 0 >= 1000) }'; then
   echo "[perf-interaction] invalid harness state: p50=${P50}ms suggests gfxinfo captured a blocked or non-interactive window." >&2
   cp "$LOCAL_UI_XML" "$OUT_DIR/last-ui.xml" 2>/dev/null || true
@@ -350,71 +417,31 @@ if [[ "$DEBUGGABLE" -eq 1 ]]; then
 else
   DEBUGGABLE_JSON=false
 fi
+COMPLETED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-python3 - \
-  "$OUT_DIR/summary.json" \
-  "$SCENARIO" \
-  "$SERIAL" \
-  "$PACKAGE" \
-  "$BUILD_SOURCE" \
-  "$BUILD_VARIANT" \
-  "$NATIVE_RUNTIME_PACKAGED_JSON" \
-  "$DEBUGGABLE_JSON" \
-  "$VERSION_CODE" \
-  "$VERSION_NAME" \
-  "$LAST_UPDATE_TIME" \
-  "$INSTALLED_APK_PATH" \
-  "$STARTED_AT_UTC" \
-  "$JANKY" \
-  "$P50" \
-  "$P90" \
-  "$P99" \
-  "$OUT_DIR" <<'PY'
-import json
-import sys
-
-(
-    output_path,
-    scenario,
-    serial,
-    package,
-    build_source,
-    build_variant,
-    native_runtime_packaged,
-    debuggable,
-    version_code,
-    version_name,
-    last_update_time,
-    installed_apk_path,
-    started_at_utc,
-    janky_pct,
-    p50_ms,
-    p90_ms,
-    p99_ms,
-    artifact_dir,
-) = sys.argv[1:]
-payload = {
-    "scenario": scenario,
-    "serial": serial,
-    "package": package,
-    "build_source": build_source,
-    "build_variant": build_variant,
-    "native_runtime_packaged": True if native_runtime_packaged == "true" else None,
-    "debuggable": debuggable == "true",
-    "version_code": version_code,
-    "version_name": version_name,
-    "last_update_time": last_update_time,
-    "installed_apk_path": installed_apk_path,
-    "started_at_utc": started_at_utc,
-    "janky_pct": float(janky_pct),
-    "p50_ms": float(p50_ms),
-    "p90_ms": float(p90_ms),
-    "p99_ms": float(p99_ms),
-    "artifact_dir": artifact_dir,
-}
-with open(output_path, "w", encoding="utf-8") as handle:
-    json.dump(payload, handle, indent=2, sort_keys=True)
-    handle.write("\n")
-PY
+python3 "$SCRIPT_DIR/build_android_perf_summary.py" \
+  --output "$OUT_DIR/summary.json" \
+  --artifact-dir "$OUT_DIR" \
+  --scenario "$SCENARIO" \
+  --serial "$SERIAL" \
+  --package "$PACKAGE" \
+  --build-source "$BUILD_SOURCE" \
+  --build-variant "$BUILD_VARIANT" \
+  --native-runtime-packaged "$NATIVE_RUNTIME_PACKAGED_JSON" \
+  --debuggable "$DEBUGGABLE_JSON" \
+  --version-code "$VERSION_CODE" \
+  --version-name "$VERSION_NAME" \
+  --last-update-time "$LAST_UPDATE_TIME" \
+  --installed-apk-path "$INSTALLED_APK_PATH" \
+  --started-at-utc "$STARTED_AT_UTC" \
+  --completed-at-utc "$COMPLETED_AT_UTC" \
+  --runtime-condition "$RUNTIME_CONDITION" \
+  --download-condition "$DOWNLOAD_CONDITION" \
+  --voice-condition "$VOICE_CONDITION" \
+  --total-frames "$TOTAL_FRAMES" \
+  --janky-pct "$JANKY" \
+  --p50-ms "$P50" \
+  --p90-ms "$P90" \
+  --p99-ms "$P99"
 
 echo "scenario=${SCENARIO} janky=${JANKY}% p50=${P50}ms p90=${P90}ms p99=${P99}ms artifacts=${OUT_DIR}"

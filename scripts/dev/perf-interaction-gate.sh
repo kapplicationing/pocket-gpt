@@ -10,10 +10,13 @@ SERIAL="${ANDROID_SERIAL:-}"
 PACKAGE="com.pocketagent.android"
 SCENARIO=""
 OUT_DIR=""
+RUNTIME_CONDITION=""
+DOWNLOAD_CONDITION=""
+VOICE_CONDITION=""
 
 usage() {
   cat <<EOF
-Usage: $0 --scenario settings-nav|model-sheet|drawer-search [--serial SERIAL] [--package PACKAGE] [--out-dir DIR]
+Usage: $0 --scenario settings-nav|model-sheet|drawer-search --runtime-state unloaded|loading|loaded-idle --download-state idle|active --voice-state inactive|active [--serial SERIAL] [--package PACKAGE] [--out-dir DIR]
 
 Builds and installs the native-enabled benchmark APK for sample 1, captures
 three samples on the same installed package, then enforces median thresholds.
@@ -32,6 +35,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --scenario)
       SCENARIO="$2"
+      shift 2
+      ;;
+    --runtime-state)
+      RUNTIME_CONDITION="$2"
+      shift 2
+      ;;
+    --download-state)
+      DOWNLOAD_CONDITION="$2"
+      shift 2
+      ;;
+    --voice-state)
+      VOICE_CONDITION="$2"
       shift 2
       ;;
     --out-dir)
@@ -62,6 +77,18 @@ case "$SCENARIO" in
     exit 64
     ;;
 esac
+case "$RUNTIME_CONDITION" in
+  unloaded|loading|loaded-idle) ;;
+  *) echo "--runtime-state must be unloaded, loading, or loaded-idle" >&2; exit 64 ;;
+esac
+case "$DOWNLOAD_CONDITION" in
+  idle|active) ;;
+  *) echo "--download-state must be idle or active" >&2; exit 64 ;;
+esac
+case "$VOICE_CONDITION" in
+  inactive|active) ;;
+  *) echo "--voice-state must be inactive or active" >&2; exit 64 ;;
+esac
 
 if [[ -z "$OUT_DIR" ]]; then
   OUT_DIR="$REPO_ROOT/tmp/perf-interaction/$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}-gate"
@@ -77,6 +104,9 @@ for sample_number in 1 2 3; do
     --serial "$SERIAL"
     --package "$PACKAGE"
     --scenario "$SCENARIO"
+    --runtime-state "$RUNTIME_CONDITION"
+    --download-state "$DOWNLOAD_CONDITION"
+    --voice-state "$VOICE_CONDITION"
     --out-dir "$sample_dir"
   )
   if [[ "$sample_number" -eq 1 ]]; then

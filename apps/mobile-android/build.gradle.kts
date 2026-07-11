@@ -81,6 +81,15 @@ val hfFixtureBaseUrl = providers.gradleProperty("pocketgpt.hfFixtureBaseUrl")
     .orElse("")
     .get()
     .replace("\"", "\\\"")
+val composeReportVariant = providers.gradleProperty("pocketgpt.composeReportVariant")
+    .orElse("unscoped")
+    .map { value ->
+        value.takeIf { it.matches(Regex("[a-z0-9_-]+")) }
+            ?: throw GradleException(
+                "pocketgpt.composeReportVariant must contain only lowercase letters, digits, underscores, or hyphens",
+            )
+    }
+    .get()
 
 android {
     namespace = "com.pocketagent.android"
@@ -187,8 +196,8 @@ android {
 
 composeCompiler {
     stabilityConfigurationFile = layout.projectDirectory.file("compose-stability.conf")
-    reportsDestination = layout.buildDirectory.dir("compose-reports")
-    metricsDestination = layout.buildDirectory.dir("compose-metrics")
+    reportsDestination = layout.buildDirectory.dir("compose-reports/$composeReportVariant")
+    metricsDestination = layout.buildDirectory.dir("compose-metrics/$composeReportVariant")
 }
 
 dependencies {

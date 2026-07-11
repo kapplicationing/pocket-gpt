@@ -15,6 +15,7 @@ import com.pocketagent.android.runtime.RuntimeModelImportResult
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
 import com.pocketagent.android.runtime.RuntimeDiagnosticsSnapshot
 import com.pocketagent.android.runtime.RuntimeProvisioningSnapshot
+import com.pocketagent.android.runtime.RuntimeTuning
 import com.pocketagent.android.runtime.ProvisioningRecoverySignal
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.ui.controllers.ChatSendFlow
@@ -23,12 +24,16 @@ import com.pocketagent.android.ui.controllers.DeviceStateProvider
 import com.pocketagent.android.ui.controllers.StartupProbeController
 import com.pocketagent.android.ui.controllers.StartupReadinessCoordinator
 import com.pocketagent.core.ChatResponse
+import com.pocketagent.core.ChatToolCall
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.android.ui.state.ChatSessionUiModel
 import com.pocketagent.android.ui.state.FirstSessionStage
 import com.pocketagent.android.ui.state.MessageKind
 import com.pocketagent.android.ui.state.MessageRole
 import com.pocketagent.android.ui.state.MessageUiModel
+import com.pocketagent.android.ui.state.PersistedInteractionMessage
+import com.pocketagent.android.ui.state.PersistedToolCall
+import com.pocketagent.android.ui.state.PersistedToolCallStatus
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateStatus
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
@@ -115,6 +120,7 @@ class ChatViewModelTest {
         runtimeStartupProbeTimeoutMs: Long = DEFAULT_RUNTIME_STARTUP_PROBE_TIMEOUT_MS,
         startupProbeController: StartupProbeController = StartupProbeController(),
         sendFlow: ChatSendFlow? = null,
+        runtimeTuning: RuntimeTuning = RuntimeTuning.DISABLED,
     ): ChatViewModel {
         val startupFlow = ChatStartupFlow(
             runtimeGateway = runtimeFacade,
@@ -134,6 +140,7 @@ class ChatViewModelTest {
                 runtimeStartupProbeTimeoutMs = runtimeStartupProbeTimeoutMs,
                 startupProbeController = startupProbeController,
                 startupFlow = startupFlow,
+                runtimeTuning = runtimeTuning,
             )
         } else {
             ChatViewModel(
@@ -146,6 +153,7 @@ class ChatViewModelTest {
                 startupProbeController = startupProbeController,
                 startupFlow = startupFlow,
                 sendFlow = sendFlow,
+                runtimeTuning = runtimeTuning,
             )
         }
     }
@@ -327,6 +335,281 @@ class ChatViewModelTest {
         assertFalse(state.composer.isSending)
         assertTrue(state.activeSession()!!.messages.isEmpty())
         assertEquals(null, runtime.lastStreamRequest)
+    }
+
+    @Test
+    fun `terminal cleanup cannot erase a newly admitted request owner`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade(streamDelayByCall = mapOf(2 to 500L))
+        lateinit var viewModel: ChatViewModel
+        var admittedRequestB: String? = null
+        var attemptedRequestB = false
+        val tuning = object : RuntimeTuning {
+            override fun recordSuccess(
+                modelId: String?,
+                appliedConfig: com.pocketagent.runtime.PerformanceRuntimeConfig,
+                targetConfig: com.pocketagent.runtime.PerformanceRuntimeConfig,
+                runtimeStats: com.pocketagent.core.RuntimeExecutionStats?,
+                thermalThrottled: Boolean,
+            ) {
+                if (attemptedRequestB) return
+                attemptedRequestB = true
+                viewModel.onComposerChanged("request B")
+                viewModel.sendMessage()
+                admittedRequestB = viewModel.activeSendRequestId
+            }
+        }
+        viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+            runtimeTuning = tuning,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("request A")
+        viewModel.sendMessage()
+        runCurrent()
+
+        val requestB = requireNotNull(admittedRequestB)
+        assertEquals(requestB, viewModel.activeSendRequestId)
+        viewModel.cancelActiveSend()
+        assertTrue(requestB in runtime.cancelledRequestIds)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `automatic tool chain rejects a second user send during tool execution`() = runTest(dispatcher) {
+        lateinit var viewModel: ChatViewModel
+        var requestBWasAdmitted = false
+        val runtime = RecordingRuntimeFacade(
+            firstResponseToolCalls = listOf(automaticToolCall()),
+            onRunTool = {
+                val ownerBefore = viewModel.activeSendRequestId
+                viewModel.onComposerChanged("request B")
+                viewModel.sendMessage()
+                requestBWasAdmitted = viewModel.activeSendRequestId != ownerBefore
+            },
+        )
+        viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("request A")
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        val messages = viewModel.uiState.value.activeSession()!!.messages
+        assertFalse(requestBWasAdmitted)
+        assertEquals(2, runtime.prepareCalls)
+        assertEquals(1, messages.count { message -> message.role == MessageRole.USER })
+        assertTrue(messages.any { message -> message.role == MessageRole.TOOL && message.content == "tool:calculator" })
+        assertEquals(null, viewModel.activeSendRequestId)
+    }
+
+    @Test
+    fun `tool follow up preparation failure preserves completed tool exchange and typed error`() = runTest(dispatcher) {
+        val persistence = RecordingPersistence()
+        val runtime = RecordingRuntimeFacade(
+            firstResponseToolCalls = listOf(automaticToolCall()),
+            prepareFailure = RuntimeGenerationFailureException(
+                message = "follow-up prepare failed",
+                errorCode = "busy_generation",
+            ),
+            prepareFailureAtCall = 2,
+        )
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("run a calculation")
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        val messages = state.activeSession()!!.messages
+        val assistantToolCall = messages
+            .first { message -> message.role == MessageRole.ASSISTANT }
+            .interaction
+            ?.toolCalls
+            ?.single()
+        assertEquals(PersistedToolCallStatus.COMPLETED, assistantToolCall?.status)
+        assertTrue(messages.any { message -> message.role == MessageRole.TOOL && message.content == "tool:calculator" })
+        assertTrue(messages.any { message -> message.role == MessageRole.SYSTEM && message.content.contains("UI-RUNTIME-001") })
+        assertFalse(messages.any { message -> message.isStreaming })
+        assertFalse(state.composer.isSending)
+        assertFalse(state.composer.isCancelling)
+        assertEquals(null, viewModel.activeSendRequestId)
+        assertEquals("UI-RUNTIME-001", state.runtime.lastErrorCode)
+        assertEquals("follow-up prepare failed", state.runtime.lastErrorTechnicalDetail)
+        val persistedMessages = persistence.savedStates.last().sessions.single().messages
+        assertTrue(persistedMessages.any { message -> message.role == MessageRole.TOOL })
+        assertFalse(persistedMessages.any { message -> message.isStreaming })
+    }
+
+    @Test
+    fun `system cancellation racing tool terminal leaves no pending calls and preserves lifecycle state`() =
+        runTest(dispatcher) {
+            lateinit var viewModel: ChatViewModel
+            val runtime = RecordingRuntimeFacade(
+                firstResponseToolCalls = listOf(automaticToolCall()),
+                onBeforeCompleted = {
+                    requireNotNull(viewModel.currentSendOperation())
+                        .requestCancellation(userInitiated = false)
+                    val state = viewModel._uiState.value
+                    viewModel._uiState.value = state.copy(
+                        runtime = state.runtime.copy(
+                            startupProbeState = StartupProbeState.BLOCKED,
+                            modelRuntimeStatus = ModelRuntimeStatus.ERROR,
+                            modelStatusDetail = "fresh probe blocked",
+                        ),
+                    )
+                },
+            )
+            viewModel = buildChatViewModel(
+                runtimeFacade = runtime,
+                sessionPersistence = RecordingPersistence(),
+                presetBackingStore = FakePresetBackingStore(),
+                ioDispatcher = dispatcher,
+            )
+            advanceUntilIdle()
+
+            viewModel.onComposerChanged("race cancellation with tools")
+            viewModel.sendMessage()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            val messages = state.activeSession()!!.messages
+            val assistant = messages.last { message -> message.role == MessageRole.ASSISTANT }
+            assertTrue(messages.flatMap { message -> message.interaction?.toolCalls.orEmpty() }.isEmpty())
+            assertEquals("cancelled", assistant.finishReason)
+            assertFalse(assistant.isStreaming)
+            assertFalse(state.composer.isSending)
+            assertEquals(null, viewModel.activeSendRequestId)
+            assertEquals(StartupProbeState.BLOCKED, state.runtime.startupProbeState)
+            assertEquals(ModelRuntimeStatus.ERROR, state.runtime.modelRuntimeStatus)
+            assertEquals("fresh probe blocked", state.runtime.modelStatusDetail)
+        }
+
+    @Test
+    fun `unexpected owned send failure terminalizes the exchange and releases admission`() = runTest(dispatcher) {
+        val persistence = RecordingPersistence()
+        val runtime = RecordingRuntimeFacade(
+            firstResponseToolCalls = listOf(automaticToolCall()),
+        )
+        val throwingTuning = object : RuntimeTuning {
+            override fun recordSuccess(
+                modelId: String?,
+                appliedConfig: com.pocketagent.runtime.PerformanceRuntimeConfig,
+                targetConfig: com.pocketagent.runtime.PerformanceRuntimeConfig,
+                runtimeStats: com.pocketagent.core.RuntimeExecutionStats?,
+                thermalThrottled: Boolean,
+            ) {
+                error("runtime tuning exploded")
+            }
+        }
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = persistence,
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+            runtimeTuning = throwingTuning,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("trigger unexpected failure")
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        val messages = state.activeSession()!!.messages
+        val ownedToolCall = messages
+            .flatMap { message -> message.interaction?.toolCalls.orEmpty() }
+            .single { toolCall -> toolCall.id == "tool-call-1" }
+        assertEquals(PersistedToolCallStatus.FAILED, ownedToolCall.status)
+        assertTrue(messages.any { message -> message.role == MessageRole.SYSTEM && message.content.contains("UI-RUNTIME-001") })
+        assertFalse(messages.any { message -> message.isStreaming })
+        assertFalse(state.composer.isSending)
+        assertFalse(state.composer.isCancelling)
+        assertEquals(null, viewModel.activeSendRequestId)
+        assertEquals("UI-RUNTIME-001", state.runtime.lastErrorCode)
+        assertEquals(
+            "Send operation completed without terminal cleanup.",
+            state.runtime.lastErrorTechnicalDetail,
+        )
+        val persisted = persistence.savedStates.last().sessions.single().messages
+        assertFalse(persisted.any { message -> message.isStreaming })
+        assertTrue(persisted.any { message -> message.role == MessageRole.SYSTEM })
+    }
+
+    @Test
+    fun `cancelling during tool execution stops the chain before follow up preparation`() = runTest(dispatcher) {
+        lateinit var viewModel: ChatViewModel
+        val runtime = RecordingRuntimeFacade(
+            firstResponseToolCalls = listOf(automaticToolCall()),
+            onRunTool = { viewModel.cancelActiveSend() },
+        )
+        viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        val beforeSend = viewModel._uiState.value
+        val activeSessionId = requireNotNull(beforeSend.activeSessionId)
+        val historicalMessage = MessageUiModel(
+            id = "historical-assistant",
+            role = MessageRole.ASSISTANT,
+            content = "historical pending tool",
+            timestampEpochMs = 1L,
+            interaction = PersistedInteractionMessage(
+                role = MessageRole.ASSISTANT.name,
+                toolCalls = listOf(
+                    PersistedToolCall(
+                        id = "historical-tool-call",
+                        name = "calculator",
+                        argumentsJson = "{}",
+                        status = PersistedToolCallStatus.PENDING,
+                    ),
+                ),
+            ),
+        )
+        viewModel._uiState.value = beforeSend.copy(
+            sessions = beforeSend.sessions.map { session ->
+                if (session.id == activeSessionId) {
+                    session.copy(messages = session.messages + historicalMessage)
+                } else {
+                    session
+                }
+            },
+        )
+
+        viewModel.onComposerChanged("cancel tool chain")
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        val toolCalls = state.activeSession()!!.messages
+            .flatMap { message -> message.interaction?.toolCalls.orEmpty() }
+            .associateBy { toolCall -> toolCall.id }
+        assertEquals(1, runtime.prepareCalls)
+        assertEquals(PersistedToolCallStatus.FAILED, toolCalls["tool-call-1"]?.status)
+        assertEquals(PersistedToolCallStatus.PENDING, toolCalls["historical-tool-call"]?.status)
+        assertFalse(state.composer.isSending)
+        assertFalse(state.composer.isCancelling)
+        assertEquals(null, viewModel.activeSendRequestId)
+        assertEquals("Generation cancelled.", state.runtime.modelStatusDetail)
+        assertEquals(null, state.runtime.lastErrorCode)
     }
 
     @Test
@@ -1441,7 +1724,40 @@ class ChatViewModelTest {
 
         assertEquals("NATIVE_JNI", viewModel.uiState.value.runtime.runtimeBackend)
         assertEquals(null, viewModel.uiState.value.runtime.lastErrorCode)
-        assertTrue(runtime.cancelledSessions.isNotEmpty())
+        assertTrue(runtime.cancelledSessions.isEmpty())
+    }
+
+    @Test
+    fun `readiness refresh exact cancels active send without clobbering fresh probe state`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade(
+            runtimeBackend = "NATIVE_JNI",
+            streamDelayMs = 500L,
+        )
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.onComposerChanged("cancel for readiness")
+        viewModel.sendMessage()
+        runCurrent()
+        val requestId = requireNotNull(viewModel.activeSendRequestId)
+
+        viewModel.refreshRuntimeReadiness(statusDetailOverride = "fresh readiness")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(requestId in runtime.cancelledRequestIds)
+        assertTrue(runtime.cancelledSessions.isEmpty())
+        assertEquals(null, viewModel.activeSendRequestId)
+        assertFalse(state.composer.isSending)
+        assertFalse(state.composer.isCancelling)
+        assertEquals(StartupProbeState.READY, state.runtime.startupProbeState)
+        assertEquals(ModelRuntimeStatus.READY, state.runtime.modelRuntimeStatus)
+        assertEquals("fresh readiness", state.runtime.modelStatusDetail)
     }
 
     @Test
@@ -1926,6 +2242,11 @@ private class RecordingRuntimeFacade(
     private val gpuStatusSequence: MutableList<com.pocketagent.android.runtime.GpuProbeResult> = mutableListOf(),
     private val warmupResult: WarmupResult = WarmupResult.skipped("warmup_unsupported"),
     private val prepareFailure: RuntimeException? = null,
+    private val prepareFailureAtCall: Int? = null,
+    private val streamDelayByCall: Map<Int, Long> = emptyMap(),
+    private val firstResponseToolCalls: List<com.pocketagent.core.ChatToolCall> = emptyList(),
+    private val onBeforeCompleted: (() -> Unit)? = null,
+    private val onRunTool: (() -> Unit)? = null,
 ) : ChatRuntimeService {
     private var sessionCounter = 0
     private var routingMode: RoutingMode = RoutingMode.AUTO
@@ -1938,6 +2259,8 @@ private class RecordingRuntimeFacade(
     var lastStreamRequest: StreamChatRequestV2? = null
     var warmupCalls: Int = 0
     var prepareCalls: Int = 0
+    var streamCalls: Int = 0
+    val preparedRequestIds = mutableListOf<String>()
 
     override fun createSession(): SessionId {
         sessionCounter += 1
@@ -1946,11 +2269,17 @@ private class RecordingRuntimeFacade(
 
     override fun prepareChatStream(command: ChatStreamCommand): PreparedChatStream {
         prepareCalls += 1
-        prepareFailure?.let { throw it }
+        preparedRequestIds += command.requestId
+        if (prepareFailureAtCall == prepareCalls) {
+            throw prepareFailure ?: error("simulated preparation failure")
+        }
+        prepareFailure?.takeIf { prepareFailureAtCall == null }?.let { throw it }
         return ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L).prepare(command)
     }
 
     override fun streamPreparedChat(prepared: PreparedChatStream): Flow<ChatStreamEvent> = flow {
+        streamCalls += 1
+        val streamCall = streamCalls
         val request = prepared.runtimeRequest
         lastStreamRequest = request
         emit(
@@ -1959,8 +2288,9 @@ private class RecordingRuntimeFacade(
                 startedAtEpochMs = System.currentTimeMillis(),
             ),
         )
-        if (streamDelayMs > 0L) {
-            delay(streamDelayMs)
+        val effectiveStreamDelayMs = streamDelayByCall[streamCall] ?: streamDelayMs
+        if (effectiveStreamDelayMs > 0L) {
+            delay(effectiveStreamDelayMs)
         }
         streamTokens.forEach { token ->
             emit(
@@ -1977,8 +2307,22 @@ private class RecordingRuntimeFacade(
             ?.filterIsInstance<InteractionContentPart.Text>()
             ?.joinToString(separator = "\n") { it.text }
             .orEmpty()
-        when (streamTerminal) {
-            StreamTerminal.COMPLETED -> emit(
+        terminalEventFor(
+            request = request,
+            latestUser = latestUser,
+            streamCall = streamCall,
+        )?.let { terminalEvent -> emit(terminalEvent) }
+    }
+
+    private fun terminalEventFor(
+        request: StreamChatRequestV2,
+        latestUser: String,
+        streamCall: Int,
+    ): ChatStreamEvent? {
+        val firstTokenMs = if (streamTokens.isNotEmpty()) 25L else null
+        return when (streamTerminal) {
+            StreamTerminal.COMPLETED -> {
+                onBeforeCompleted?.invoke()
                 ChatStreamEvent.Completed(
                     requestId = request.requestId,
                     response = ChatResponse(
@@ -1987,44 +2331,42 @@ private class RecordingRuntimeFacade(
                         text = "response for $latestUser",
                         firstTokenLatencyMs = 25,
                         totalLatencyMs = 75,
+                        toolCalls = if (streamCall == 1) firstResponseToolCalls else emptyList(),
                     ),
-                    finishReason = "completed",
+                    finishReason = if (streamCall == 1 && firstResponseToolCalls.isNotEmpty()) {
+                        "tool_calls"
+                    } else {
+                        "completed"
+                    },
                     firstTokenMs = 25,
                     completionMs = 75,
-                ),
+                )
+            }
+
+            StreamTerminal.NO_TERMINAL -> null
+            StreamTerminal.CANCELLED_TIMEOUT -> ChatStreamEvent.Cancelled(
+                requestId = request.requestId,
+                reason = "timeout",
+                terminalEventSeen = true,
+                firstTokenMs = firstTokenMs,
+                completionMs = 75,
             )
 
-            StreamTerminal.NO_TERMINAL -> Unit
-
-            StreamTerminal.CANCELLED_TIMEOUT -> emit(
-                ChatStreamEvent.Cancelled(
-                    requestId = request.requestId,
-                    reason = "timeout",
-                    terminalEventSeen = true,
-                    firstTokenMs = if (streamTokens.isNotEmpty()) 25 else null,
-                    completionMs = 75,
-                ),
+            StreamTerminal.CANCELLED_MANUAL -> ChatStreamEvent.Cancelled(
+                requestId = request.requestId,
+                reason = "cancelled",
+                terminalEventSeen = true,
+                firstTokenMs = firstTokenMs,
+                completionMs = 75,
             )
 
-            StreamTerminal.CANCELLED_MANUAL -> emit(
-                ChatStreamEvent.Cancelled(
-                    requestId = request.requestId,
-                    reason = "cancelled",
-                    terminalEventSeen = true,
-                    firstTokenMs = if (streamTokens.isNotEmpty()) 25 else null,
-                    completionMs = 75,
-                ),
-            )
-
-            StreamTerminal.FAILED -> emit(
-                ChatStreamEvent.Failed(
-                    requestId = request.requestId,
-                    errorCode = "jni_utf8_stream_error",
-                    message = "utf8 stream failure",
-                    terminalEventSeen = true,
-                    firstTokenMs = if (streamTokens.isNotEmpty()) 25 else null,
-                    completionMs = 75,
-                ),
+            StreamTerminal.FAILED -> ChatStreamEvent.Failed(
+                requestId = request.requestId,
+                errorCode = "jni_utf8_stream_error",
+                message = "utf8 stream failure",
+                terminalEventSeen = true,
+                firstTokenMs = firstTokenMs,
+                completionMs = 75,
             )
         }
     }
@@ -2040,6 +2382,7 @@ private class RecordingRuntimeFacade(
     }
 
     override fun runTool(toolName: String, jsonArgs: String): ToolExecutionResult {
+        onRunTool?.invoke()
         if (returnToolValidationError) {
             return ToolExecutionResult.Failure(
                 ToolFailure.Validation(
@@ -2379,6 +2722,12 @@ private enum class StreamTerminal {
     CANCELLED_MANUAL,
     FAILED,
 }
+
+private fun automaticToolCall(): ChatToolCall = ChatToolCall(
+    id = "tool-call-1",
+    name = "calculator",
+    argumentsJson = """{"expression":"2+2"}""",
+)
 
 private class TimeoutStartupProbeController : StartupProbeController() {
     override suspend fun runStartupChecks(

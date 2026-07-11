@@ -65,6 +65,8 @@ import com.pocketagent.runtime.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -80,6 +82,75 @@ import kotlin.math.abs
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+internal class SendOperationLease(
+    val operationId: String,
+    val sessionId: String,
+    initialRequestId: String,
+) {
+    private val requestId = AtomicReference(initialRequestId)
+    private val cancellationRequested = AtomicBoolean(false)
+    private val userCancellationRequested = AtomicBoolean(false)
+    private val userCancellationRequestId = AtomicReference<String?>(null)
+    private val operationJob = AtomicReference<Job?>(null)
+    private val messageId = AtomicReference<String?>(null)
+    private val toolCallIds = AtomicReference<Set<String>>(emptySet())
+
+    fun currentRequestId(): String = requestId.get()
+
+    fun transitionRequest(expectedRequestId: String, nextRequestId: String): Boolean {
+        return requestId.compareAndSet(expectedRequestId, nextRequestId)
+    }
+
+    fun requestCancellation(userInitiated: Boolean): String {
+        cancellationRequested.set(true)
+        val observedRequestId = currentRequestId()
+        if (userInitiated) {
+            userCancellationRequested.set(true)
+            userCancellationRequestId.compareAndSet(null, observedRequestId)
+            return userCancellationRequestId.get() ?: observedRequestId
+        }
+        return observedRequestId
+    }
+
+    fun isCancellationRequested(): Boolean = cancellationRequested.get()
+
+    fun isUserCancellationRequested(): Boolean = userCancellationRequested.get()
+
+    fun userCancellationRequestId(): String? = userCancellationRequestId.get()
+
+    fun attachJob(job: Job) {
+        check(operationJob.compareAndSet(null, job)) { "Send operation job already attached." }
+        if (isCancellationRequested()) {
+            job.cancel()
+        }
+    }
+
+    fun cancelJob() {
+        operationJob.get()?.cancel()
+    }
+
+    fun setCurrentMessageId(value: String?) {
+        messageId.set(value)
+    }
+
+    fun currentMessageId(): String? = messageId.get()
+
+    fun trackToolCallIds(ids: Collection<String>) {
+        if (ids.isEmpty()) {
+            return
+        }
+        while (true) {
+            val current = toolCallIds.get()
+            val next = current + ids
+            if (toolCallIds.compareAndSet(current, next)) {
+                return
+            }
+        }
+    }
+
+    fun ownedToolCallIds(): Set<String> = toolCallIds.get()
+}
 
 class ChatViewModel internal constructor(
     internal val runtimeFacade: ChatRuntimeService,
@@ -188,12 +259,11 @@ class ChatViewModel internal constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.streaming)
     internal var gpuProbeRefreshJob: Job? = null
-    @Volatile
-    internal var activeSendRequestId: String? = null
+    private val activeSendOperation = AtomicReference<SendOperationLease?>(null)
+    internal val activeSendRequestId: String?
+        get() = activeSendOperation.get()?.currentRequestId()
     @Volatile
     internal var lastKeepAliveTouchAtMs: Long = 0L
-    private val userCancellationRequestIds: MutableSet<String> = mutableSetOf()
-    private val userCancellationRequestIdsLock = Any()
     internal val persistenceQueue = ChatPersistenceQueue(
         scope = viewModelScope,
         ioDispatcher = ioDispatcher,
@@ -322,17 +392,22 @@ class ChatViewModel internal constructor(
     }
 
     fun cancelActiveSend() {
-        val requestId = activeSendRequestId ?: return
-        markUserCancellationRequested(requestId)
+        val lease = currentSendOperation() ?: return
+        val requestId = lease.requestCancellation(userInitiated = true)
         runtimeFacade.cancelGenerationByRequest(requestId)
         _uiState.update { state ->
-            state.copy(
-                composer = state.composer.copy(isCancelling = true),
-                runtime = state.runtime.copy(
-                    modelStatusDetail = "Cancelling generation...",
-                ).clearError(),
-            )
+            if (!isActiveSendOperation(lease)) {
+                state
+            } else {
+                state.copy(
+                    composer = state.composer.copy(isCancelling = true),
+                    runtime = state.runtime.copy(
+                        modelStatusDetail = "Cancelling generation...",
+                    ).clearError(),
+                )
+            }
         }
+        lease.cancelJob()
     }
 
     fun createSession() {
@@ -661,22 +736,18 @@ class ChatViewModel internal constructor(
         recordFirstSessionEventOnceInternal(eventName)
     }
 
-    internal fun markUserCancellationRequested(requestId: String) {
-        synchronized(userCancellationRequestIdsLock) {
-            userCancellationRequestIds += requestId
-        }
+    internal fun tryAcquireSendOperation(lease: SendOperationLease): Boolean {
+        return activeSendOperation.compareAndSet(null, lease)
     }
 
-    internal fun isUserCancellationRequested(requestId: String): Boolean {
-        return synchronized(userCancellationRequestIdsLock) {
-            requestId in userCancellationRequestIds
-        }
+    internal fun currentSendOperation(): SendOperationLease? = activeSendOperation.get()
+
+    internal fun isActiveSendOperation(lease: SendOperationLease): Boolean {
+        return activeSendOperation.get() === lease
     }
 
-    internal fun consumeUserCancellationRequest(requestId: String): Boolean {
-        return synchronized(userCancellationRequestIdsLock) {
-            userCancellationRequestIds.remove(requestId)
-        }
+    internal fun releaseSendOperation(lease: SendOperationLease): Boolean {
+        return activeSendOperation.compareAndSet(lease, null)
     }
 
     internal fun syncRuntimeModelLoadingState(nextState: ModelLoadingState) {

@@ -19,6 +19,7 @@ import com.pocketagent.android.ui.state.RecoveryAction
 import com.pocketagent.android.ui.state.StartupProbeState
 import com.pocketagent.android.ui.state.StreamStateReducer
 import com.pocketagent.android.ui.state.StreamTerminalState
+import com.pocketagent.android.ui.state.StreamingState
 import com.pocketagent.android.ui.state.UiError
 import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.core.ChatToolCall
@@ -36,6 +37,8 @@ import com.pocketagent.runtime.RuntimeImageAttachmentUnsupportedException
 import com.pocketagent.runtime.RuntimeModelLoadPlanningException
 import com.pocketagent.runtime.RuntimeTemplateUnavailableException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -58,6 +61,14 @@ internal fun ChatViewModel.sendMessageInternal() {
     }
 
     val requestId = newRequestId()
+    val sendOperation = SendOperationLease(
+        operationId = requestId,
+        sessionId = initialSession.id,
+        initialRequestId = requestId,
+    )
+    if (!tryAcquireSendOperation(sendOperation)) {
+        return
+    }
     var snapshot = initialSnapshot
     var activeSession = initialSession
     var admitted = false
@@ -65,13 +76,18 @@ internal fun ChatViewModel.sendMessageInternal() {
     while (!admitted && admissionAttemptsRemaining > 0) {
         admissionAttemptsRemaining -= 1
         val current = _uiState.value
-        val currentSession = current.activeSession() ?: return
+        val currentSession = current.activeSession()
+        if (currentSession == null) {
+            releaseSendOperation(sendOperation)
+            return
+        }
         if (
             current.composer.isSending ||
             current.composer.text.trim() != prompt ||
             currentSession.id != initialSession.id ||
             !sendFlow.isRuntimeReadyForSend(current.runtime)
         ) {
+            releaseSendOperation(sendOperation)
             return
         }
         val next = current.copy(
@@ -89,20 +105,44 @@ internal fun ChatViewModel.sendMessageInternal() {
         }
     }
     if (!admitted) {
+        releaseSendOperation(sendOperation)
         return
     }
-    activeSendRequestId = requestId
 
-    viewModelScope.launch(ioDispatcher) {
+    val sendJob = viewModelScope.launch(ioDispatcher) {
+        fun releaseCurrentRequest(expectedRequestId: String): Boolean {
+            return sendOperation.currentRequestId() == expectedRequestId &&
+                releaseSendOperation(sendOperation)
+        }
+
+        suspend fun ensureSendOperationActive(expectedRequestId: String) {
+            currentCoroutineContext().ensureActive()
+            if (
+                sendOperation.isCancellationRequested() ||
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != expectedRequestId
+            ) {
+                throw CancellationException("Send operation is no longer active.")
+            }
+        }
+
         fun releasePreparation(
             uiError: UiError? = null,
             userCancelled: Boolean = false,
         ) {
-            if (activeSendRequestId != requestId) {
+            if (
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != requestId
+            ) {
                 return
             }
-            activeSendRequestId = null
             _uiState.update { state ->
+                if (
+                    !isActiveSendOperation(sendOperation) ||
+                    sendOperation.currentRequestId() != requestId
+                ) {
+                    return@update state
+                }
                 val restoredRuntime = state.runtime.copy(
                     startupProbeState = snapshot.runtime.startupProbeState,
                     modelRuntimeStatus = snapshot.runtime.modelRuntimeStatus,
@@ -123,6 +163,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                     },
                 )
             }
+            releaseCurrentRequest(requestId)
         }
 
         val preparation = try {
@@ -162,8 +203,6 @@ internal fun ChatViewModel.sendMessageInternal() {
                 )
             }
         } catch (error: CancellationException) {
-            val userCancelled = consumeUserCancellationRequest(requestId)
-            releasePreparation(userCancelled = userCancelled)
             throw error
         } catch (error: Exception) {
             releasePreparation(uiError = error.toSendPreparationUiError())
@@ -174,11 +213,7 @@ internal fun ChatViewModel.sendMessageInternal() {
         val userMessage = preparation.userMessage
         val assistantMessageId = preparation.assistantMessageId
         val sendPreparation = preparation.preparedSendStream
-        if (consumeUserCancellationRequest(requestId)) {
-            releasePreparation(userCancelled = true)
-            persistState()
-            return@launch
-        }
+        ensureSendOperationActive(requestId)
 
         val currentDeviceState = sendPreparation.deviceState
         val preparedStream = sendPreparation.preparedStream
@@ -201,18 +236,22 @@ internal fun ChatViewModel.sendMessageInternal() {
                 metadata = mapOf("state" to "streaming"),
             ),
         )
+        sendOperation.setCurrentMessageId(assistantMessageId)
         var committed = false
         while (!committed) {
             val state = _uiState.value
             val targetSession = state.sessions.firstOrNull { session -> session.id == activeSession.id }
             if (
-                activeSendRequestId != requestId ||
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != requestId ||
                 targetSession == null ||
                 targetSession.messages != activeSession.messages ||
                 !state.composer.isSending ||
+                state.composer.isCancelling ||
                 state.composer.text.trim() != prompt ||
                 state.composer.attachedImages != snapshot.composer.attachedImages ||
-                isUserCancellationRequested(requestId)
+                sendOperation.isCancellationRequested() ||
+                sendOperation.isUserCancellationRequested()
             ) {
                 break
             }
@@ -236,16 +275,15 @@ internal fun ChatViewModel.sendMessageInternal() {
             committed = _uiState.compareAndSet(state, nextState)
         }
         if (!committed) {
-            val userCancelled = consumeUserCancellationRequest(requestId)
-            if (userCancelled) {
-                releasePreparation(userCancelled = true)
-            } else {
-                releasePreparation(
-                    uiError = UiErrorMapper.runtimeFailure(
-                        "Conversation changed while the request was being prepared.",
-                    ),
-                )
+            sendOperation.setCurrentMessageId(null)
+            if (sendOperation.isCancellationRequested()) {
+                throw CancellationException("Send operation was cancelled before commit.")
             }
+            releasePreparation(
+                uiError = UiErrorMapper.runtimeFailure(
+                    "Conversation changed while the request was being prepared.",
+                ),
+            )
             persistState()
             return@launch
         }
@@ -296,6 +334,12 @@ internal fun ChatViewModel.sendMessageInternal() {
             deviceState: DeviceState = currentDeviceState,
             fallbackModelId: String? = snapshot.runtime.activeModelId,
         ) {
+            if (
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != terminalRequestId
+            ) {
+                return
+            }
             val partialStreamingText = messageContent(
                 sessionId = activeSession.id,
                 messageId = messageId,
@@ -328,23 +372,18 @@ internal fun ChatViewModel.sendMessageInternal() {
                     terminalEventSeen = terminalEventSeen,
                 )
             }
-            runtimeTuning.recordFailure(
-                modelId = terminalModelId ?: fallbackModelId,
-                appliedConfig = appliedConfig,
-                targetConfig = targetConfig,
-                errorCode = errorCode ?: terminalReason.removePrefix("failed:"),
-                backendIdentityHint = runCatching {
-                    runtimeFacade.runtimeDiagnosticsSnapshot().activeBackend
-                }.getOrNull() ?: snapshot.runtime.activeBackend,
-                thermalThrottled = deviceState.thermalLevel >= 5,
-            )
             val requestCanRetry = terminalReason == "timeout" ||
                 uiError.recoveryAction == RecoveryAction.RETRY_LOAD
             _uiState.update { state ->
-                state.copy(
-                    composer = state.composer.copy(isSending = false, isCancelling = false),
-                    runtime = state.runtime
-                        .copy(
+                if (
+                    !isActiveSendOperation(sendOperation) ||
+                    sendOperation.currentRequestId() != terminalRequestId
+                ) {
+                    state
+                } else {
+                    state.copy(
+                        composer = state.composer.copy(isSending = false, isCancelling = false),
+                        runtime = state.runtime.copy(
                             startupProbeState = if (requestCanRetry) {
                                 StartupProbeState.READY
                             } else {
@@ -358,14 +397,29 @@ internal fun ChatViewModel.sendMessageInternal() {
                             modelStatusDetail = uiError.userMessage,
                             sendElapsedMs = null,
                             sendSlowState = null,
-                        )
-                        .withUiError(uiError),
-                )
+                        ).withUiError(uiError),
+                    )
+                }
             }
-            runCatching { runtimeFacade.gpuOffloadStatus() }
-                .getOrNull()
-                ?.let { probe -> updateRuntimeGpuProbeStateInternal(probe) }
-            refreshRuntimeDiagnostics()
+            val released = releaseCurrentRequest(terminalRequestId)
+            if (released) {
+                runCatching {
+                    runtimeTuning.recordFailure(
+                        modelId = terminalModelId ?: fallbackModelId,
+                        appliedConfig = appliedConfig,
+                        targetConfig = targetConfig,
+                        errorCode = errorCode ?: terminalReason.removePrefix("failed:"),
+                        backendIdentityHint = runCatching {
+                            runtimeFacade.runtimeDiagnosticsSnapshot().activeBackend
+                        }.getOrNull() ?: snapshot.runtime.activeBackend,
+                        thermalThrottled = deviceState.thermalLevel >= 5,
+                    )
+                }
+                runCatching { runtimeFacade.gpuOffloadStatus() }
+                    .getOrNull()
+                    ?.let { probe -> updateRuntimeGpuProbeStateInternal(probe) }
+                refreshRuntimeDiagnostics()
+            }
             persistState()
         }
 
@@ -374,6 +428,12 @@ internal fun ChatViewModel.sendMessageInternal() {
             messageId: String,
             userInitiated: Boolean,
         ) {
+            if (
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != terminal.requestId
+            ) {
+                return
+            }
             val partialStreamingText = messageContent(
                 sessionId = activeSession.id,
                 messageId = messageId,
@@ -397,23 +457,37 @@ internal fun ChatViewModel.sendMessageInternal() {
                 }
             }
             _uiState.update { state ->
-                state.copy(
-                    composer = state.composer.copy(isSending = false, isCancelling = false),
-                    runtime = state.runtime.copy(
-                        runtimeBackend = runtimeFacade.runtimeBackend(),
-                        startupProbeState = StartupProbeState.READY,
-                        modelRuntimeStatus = ModelRuntimeStatus.READY,
-                        modelStatusDetail = if (userInitiated) {
-                            "Generation cancelled."
-                        } else {
-                            "Generation stopped."
-                        },
-                        sendElapsedMs = null,
-                        sendSlowState = null,
-                    ).clearError(),
-                )
+                if (
+                    !isActiveSendOperation(sendOperation) ||
+                    sendOperation.currentRequestId() != terminal.requestId
+                ) {
+                    state
+                } else {
+                    val nextRuntime = if (userInitiated) {
+                        state.runtime.copy(
+                            runtimeBackend = runtimeFacade.runtimeBackend(),
+                            startupProbeState = StartupProbeState.READY,
+                            modelRuntimeStatus = ModelRuntimeStatus.READY,
+                            modelStatusDetail = "Generation cancelled.",
+                            sendElapsedMs = null,
+                            sendSlowState = null,
+                        ).clearError()
+                    } else {
+                        state.runtime.copy(
+                            sendElapsedMs = null,
+                            sendSlowState = null,
+                        )
+                    }
+                    state.copy(
+                        composer = state.composer.copy(isSending = false, isCancelling = false),
+                        runtime = nextRuntime,
+                    )
+                }
             }
-            refreshRuntimeDiagnostics()
+            val released = releaseCurrentRequest(terminal.requestId)
+            if (released) {
+                refreshRuntimeDiagnostics()
+            }
             persistState()
         }
 
@@ -433,12 +507,32 @@ internal fun ChatViewModel.sendMessageInternal() {
             deviceState: DeviceState,
             fallbackModelId: String?,
         ): List<ChatToolCall> {
-            val userInitiatedCancellation = consumeUserCancellationRequest(terminal.requestId)
-            val shouldFinalizeAsCancellation = isNonTimeoutCancellation(terminal) ||
+            if (
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != terminal.requestId
+            ) {
+                return emptyList()
+            }
+            val userInitiatedCancellation = sendOperation.isUserCancellationRequested()
+            val leaseCancellationRequested = sendOperation.isCancellationRequested()
+            val shouldFinalizeAsCancellation = leaseCancellationRequested ||
+                isNonTimeoutCancellation(terminal) ||
                 (userInitiatedCancellation && terminal.uiError != null)
             if (shouldFinalizeAsCancellation) {
+                val cancellationTerminal = if (
+                    leaseCancellationRequested && !isNonTimeoutCancellation(terminal)
+                ) {
+                    terminal.copy(
+                        finishReason = "cancelled",
+                        terminalEventSeen = false,
+                        uiError = null,
+                        toolCalls = emptyList(),
+                    )
+                } else {
+                    terminal
+                }
                 finalizeWithCancellation(
-                    terminal = terminal,
+                    terminal = cancellationTerminal,
                     messageId = messageId,
                     userInitiated = userInitiatedCancellation,
                 )
@@ -460,6 +554,19 @@ internal fun ChatViewModel.sendMessageInternal() {
                 )
                 return emptyList()
             }
+            val requestedToolCalls = if (
+                terminal.finishReason == "tool_calls" &&
+                terminal.toolCalls.isNotEmpty() &&
+                !sendOperation.isCancellationRequested() &&
+                isActiveSendOperation(sendOperation) &&
+                sendOperation.currentRequestId() == terminal.requestId
+            ) {
+                terminal.toolCalls
+            } else {
+                emptyList()
+            }
+            val continuesWithTools = requestedToolCalls.isNotEmpty()
+            sendOperation.trackToolCallIds(requestedToolCalls.map(ChatToolCall::id))
             val finalText = terminal.responseText?.trim().orEmpty()
             val effectiveFirstToken = terminal.firstTokenMs
             val effectiveCompletion = terminal.completionMs ?: (System.currentTimeMillis() - turnStartedAtMs)
@@ -506,32 +613,56 @@ internal fun ChatViewModel.sendMessageInternal() {
                 decodeMs = effectiveDecode,
                 tokensPerSec = tokensPerSecEstimate,
             )
+            val ownsOperationState = isActiveSendOperation(sendOperation) &&
+                sendOperation.currentRequestId() == terminal.requestId
+            if (!ownsOperationState) {
+                return emptyList()
+            }
             _uiState.update { state ->
-                state.copy(
-                    composer = state.composer.copy(isSending = false, isCancelling = false),
-                    runtime = state.runtime.copy(
-                        runtimeBackend = runtimeFacade.runtimeBackend(),
-                        startupProbeState = StartupProbeState.READY,
-                        modelRuntimeStatus = ModelRuntimeStatus.READY,
-                        modelStatusDetail = startupFlow.readyStatusDetail(runtimeFacade.runtimeBackend()),
-                        activeModelId = terminal.responseModelId,
-                        lastFirstTokenLatencyMs = effectiveFirstToken,
-                        lastTotalLatencyMs = effectiveCompletion,
-                        lastModelLoadMs = runtimeStats?.modelLoadMs,
-                        lastPrefillMs = effectivePrefill,
-                        lastDecodeMs = effectiveDecode,
-                        lastTokensPerSec = tokensPerSecEstimate,
-                        lastPeakRssMb = runtimeStats?.peakRssMb,
-                        lastResidentHit = runtimeStats?.residentHit,
-                        lastResidentHitCount = runtimeStats?.residentHitCount,
-                        lastReloadReason = runtimeStats?.reloadReason,
-                        lastPrefixCacheHit = runtimeStats?.prefixCacheLastHit,
-                        lastPrefixCacheReusedTokens = runtimeStats?.prefixCacheLastReusedTokens,
-                        lastPrefixCacheHitRate = runtimeStats?.prefixCacheHitRate,
-                        sendElapsedMs = null,
-                        sendSlowState = null,
-                    ).clearError(),
-                )
+                    if (
+                        !isActiveSendOperation(sendOperation) ||
+                        sendOperation.currentRequestId() != terminal.requestId
+                    ) {
+                        state
+                    } else {
+                        state.copy(
+                            composer = state.composer.copy(
+                                isSending = continuesWithTools,
+                                isCancelling = false,
+                            ),
+                            runtime = state.runtime.copy(
+                                runtimeBackend = runtimeFacade.runtimeBackend(),
+                                startupProbeState = StartupProbeState.READY,
+                                modelRuntimeStatus = ModelRuntimeStatus.READY,
+                                modelStatusDetail = if (continuesWithTools) {
+                                    "Running tools..."
+                                } else {
+                                    startupFlow.readyStatusDetail(runtimeFacade.runtimeBackend())
+                                },
+                                activeModelId = terminal.responseModelId,
+                                lastFirstTokenLatencyMs = effectiveFirstToken,
+                                lastTotalLatencyMs = effectiveCompletion,
+                                lastModelLoadMs = runtimeStats?.modelLoadMs,
+                                lastPrefillMs = effectivePrefill,
+                                lastDecodeMs = effectiveDecode,
+                                lastTokensPerSec = tokensPerSecEstimate,
+                                lastPeakRssMb = runtimeStats?.peakRssMb,
+                                lastResidentHit = runtimeStats?.residentHit,
+                                lastResidentHitCount = runtimeStats?.residentHitCount,
+                                lastReloadReason = runtimeStats?.reloadReason,
+                                lastPrefixCacheHit = runtimeStats?.prefixCacheLastHit,
+                                lastPrefixCacheReusedTokens = runtimeStats?.prefixCacheLastReusedTokens,
+                                lastPrefixCacheHitRate = runtimeStats?.prefixCacheHitRate,
+                                sendElapsedMs = null,
+                                sendSlowState = null,
+                            ).clearError(),
+                        )
+                    }
+            }
+            if (continuesWithTools) {
+                sendOperation.setCurrentMessageId(null)
+            } else if (!releaseCurrentRequest(terminal.requestId)) {
+                return emptyList()
             }
             val runtimeGpuCeiling = listOfNotNull(
                 resolvedRuntimeStats.estimatedMaxGpuLayers,
@@ -558,24 +689,129 @@ internal fun ChatViewModel.sendMessageInternal() {
             )
             refreshRuntimeDiagnostics()
             persistState()
-            val pendingToolCalls = if (
-                terminal.finishReason == "tool_calls" &&
-                terminal.toolCalls.isNotEmpty()
-            ) {
-                terminal.toolCalls
-            } else {
-                emptyList()
-            }
-            if (pendingToolCalls.isEmpty()) {
+            if (requestedToolCalls.isEmpty()) {
                 maybeAdvanceAfterAssistantResponse()
             }
-            return pendingToolCalls
+            return requestedToolCalls
+        }
+
+        fun finishToolChainWithError(
+            requestId: String,
+            uiError: UiError,
+            toolCallId: String? = null,
+        ) {
+            if (
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != requestId
+            ) {
+                return
+            }
+            val finishReason = "failed:${uiError.sourceCode ?: "tool_follow_up"}"
+            val systemMessage = createMessage(
+                role = MessageRole.SYSTEM,
+                content = formatUserFacingError(uiError),
+                kind = MessageKind.TEXT,
+                requestId = requestId,
+                finishReason = finishReason,
+                terminalEventSeen = true,
+            )
+            val requestCanRetry = uiError.recoveryAction == RecoveryAction.RETRY_LOAD
+            _uiState.update { state ->
+                if (
+                    !isActiveSendOperation(sendOperation) ||
+                    sendOperation.currentRequestId() != requestId
+                ) {
+                    state
+                } else {
+                    state.copy(
+                        sessions = state.sessions.map { session ->
+                            if (session.id == sendOperation.sessionId) {
+                                val updatedMessages = toolCallId?.let { id ->
+                                    session.messages.withToolCallStatus(
+                                        toolCallId = id,
+                                        status = PersistedToolCallStatus.FAILED,
+                                    )
+                                } ?: session.messages
+                                sessionService.normalize(
+                                    session.copy(
+                                        messages = updatedMessages + systemMessage,
+                                        updatedAtEpochMs = System.currentTimeMillis(),
+                                    ),
+                                )
+                            } else {
+                                session
+                            }
+                        },
+                        composer = state.composer.copy(isSending = false, isCancelling = false),
+                        runtime = state.runtime.copy(
+                            startupProbeState = if (requestCanRetry) {
+                                StartupProbeState.READY
+                            } else {
+                                state.runtime.startupProbeState
+                            },
+                            modelRuntimeStatus = if (requestCanRetry) {
+                                ModelRuntimeStatus.READY
+                            } else {
+                                ModelRuntimeStatus.ERROR
+                            },
+                            modelStatusDetail = uiError.userMessage,
+                            sendElapsedMs = null,
+                            sendSlowState = null,
+                        ).withUiError(uiError),
+                    )
+                }
+            }
+            releaseCurrentRequest(requestId)
+            persistState()
+        }
+
+        fun finishToolChainWithoutFollowUp(requestId: String, detail: String) {
+            if (
+                !isActiveSendOperation(sendOperation) ||
+                sendOperation.currentRequestId() != requestId
+            ) {
+                return
+            }
+            _uiState.update { state ->
+                if (
+                    !isActiveSendOperation(sendOperation) ||
+                    sendOperation.currentRequestId() != requestId
+                ) {
+                    state
+                } else {
+                    state.copy(
+                        sessions = state.sessions.map { session ->
+                            if (session.id == sendOperation.sessionId) {
+                                session.copy(
+                                    messages = session.messages.withOwnedActiveToolCallsFailed(
+                                        sendOperation.ownedToolCallIds(),
+                                    ),
+                                    updatedAtEpochMs = System.currentTimeMillis(),
+                                )
+                            } else {
+                                session
+                            }
+                        },
+                        composer = state.composer.copy(isSending = false, isCancelling = false),
+                        runtime = state.runtime.copy(
+                            startupProbeState = StartupProbeState.READY,
+                            modelRuntimeStatus = ModelRuntimeStatus.READY,
+                            modelStatusDetail = detail,
+                            sendElapsedMs = null,
+                            sendSlowState = null,
+                        ).clearError(),
+                    )
+                }
+            }
+            releaseCurrentRequest(requestId)
+            persistState()
         }
 
         suspend fun executeToolCalls(toolCalls: List<ChatToolCall>): Boolean {
             for (toolCall in toolCalls) {
+                ensureSendOperationActive(sendOperation.currentRequestId())
                 updateToolCallStatus(
-                    sessionId = activeSession.id,
+                    sessionId = sendOperation.sessionId,
                     toolCallId = toolCall.id,
                     status = PersistedToolCallStatus.RUNNING,
                 )
@@ -583,13 +819,9 @@ internal fun ChatViewModel.sendMessageInternal() {
                     toolName = toolCall.name,
                     jsonArgs = toolCall.argumentsJson,
                 )
+                ensureSendOperationActive(sendOperation.currentRequestId())
                 when (outcome) {
                     is ToolLoopOutcome.Success -> {
-                        updateToolCallStatus(
-                            sessionId = activeSession.id,
-                            toolCallId = toolCall.id,
-                            status = PersistedToolCallStatus.COMPLETED,
-                        )
                         val toolMessage = createMessage(
                             role = MessageRole.TOOL,
                             content = outcome.content,
@@ -597,34 +829,23 @@ internal fun ChatViewModel.sendMessageInternal() {
                             toolName = toolCall.name,
                             toolCallId = toolCall.id,
                         )
-                        updateActiveSession(activeSession.id) { session ->
+                        updateActiveSession(sendOperation.sessionId) { session ->
                             session.copy(
-                                messages = session.messages + toolMessage,
+                                messages = session.messages.withToolCallStatus(
+                                    toolCallId = toolCall.id,
+                                    status = PersistedToolCallStatus.COMPLETED,
+                                ) + toolMessage,
                                 updatedAtEpochMs = System.currentTimeMillis(),
                             )
                         }
                     }
 
                     is ToolLoopOutcome.Failure -> {
-                        updateToolCallStatus(
-                            sessionId = activeSession.id,
+                        finishToolChainWithError(
+                            requestId = sendOperation.currentRequestId(),
+                            uiError = outcome.uiError,
                             toolCallId = toolCall.id,
-                            status = PersistedToolCallStatus.FAILED,
                         )
-                        appendSystemMessage(
-                            sessionId = activeSession.id,
-                            content = formatUserFacingError(outcome.uiError),
-                        )
-                        _uiState.update { state ->
-                            state.copy(
-                                composer = state.composer.copy(isSending = false, isCancelling = false),
-                                runtime = state.runtime.copy(
-                                    modelRuntimeStatus = ModelRuntimeStatus.ERROR,
-                                    modelStatusDetail = outcome.uiError.userMessage,
-                                ).withUiError(outcome.uiError),
-                            )
-                        }
-                        persistState()
                         return false
                     }
                 }
@@ -644,25 +865,58 @@ internal fun ChatViewModel.sendMessageInternal() {
                     return
                 }
                 val loopSnapshot = _uiState.value
-                val loopSession = loopSnapshot.activeSession() ?: return
+                val loopSession = loopSnapshot.sessions
+                    .firstOrNull { session -> session.id == sendOperation.sessionId }
+                if (loopSession == null) {
+                    finishToolChainWithError(
+                        requestId = sendOperation.currentRequestId(),
+                        uiError = UiErrorMapper.runtimeFailure(
+                            "The conversation was removed while tools were running.",
+                        ),
+                    )
+                    return
+                }
                 val followUpAssistantMessageId = newMessageId(prefix = "assistant-stream")
                 val followUpRequestId = newRequestId()
-                val followUpTranscript = timelineProjector.toTranscript(loopSession)
-                val followUpSendPreparation = AppOperationTrace.suspendSection(
-                    name = "chat.prepare_stream.tool_follow_up",
-                    detail = { "messages=${followUpTranscript.size}|round=$round" },
-                ) {
-                    sendFlow.prepareChatStream(
-                        sessionId = SessionId(activeSession.id),
-                        requestId = followUpRequestId,
-                        messages = followUpTranscript,
-                        promptHint = promptHint,
-                        previousResponseId = timelineProjector.latestAssistantRequestId(loopSession),
-                        runtime = loopSnapshot.runtime,
-                        completionSettings = loopSession.completionSettings,
-                        prepare = runtimeFacade::prepareChatStream,
+                val previousRequestId = sendOperation.currentRequestId()
+                ensureSendOperationActive(previousRequestId)
+                if (!sendOperation.transitionRequest(previousRequestId, followUpRequestId)) {
+                    finishToolChainWithError(
+                        requestId = sendOperation.currentRequestId(),
+                        uiError = UiErrorMapper.runtimeFailure(
+                            "Tool follow-up request ownership changed unexpectedly.",
+                        ),
                     )
+                    return
                 }
+                ensureSendOperationActive(followUpRequestId)
+                val followUpTranscript = timelineProjector.toTranscript(loopSession)
+                val followUpSendPreparation = try {
+                    AppOperationTrace.suspendSection(
+                        name = "chat.prepare_stream.tool_follow_up",
+                        detail = { "messages=${followUpTranscript.size}|round=$round" },
+                    ) {
+                        sendFlow.prepareChatStream(
+                            sessionId = SessionId(sendOperation.sessionId),
+                            requestId = followUpRequestId,
+                            messages = followUpTranscript,
+                            promptHint = promptHint,
+                            previousResponseId = timelineProjector.latestAssistantRequestId(loopSession),
+                            runtime = loopSnapshot.runtime,
+                            completionSettings = loopSession.completionSettings,
+                            prepare = runtimeFacade::prepareChatStream,
+                        )
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    finishToolChainWithError(
+                        requestId = followUpRequestId,
+                        uiError = error.toSendPreparationUiError(),
+                    )
+                    return
+                }
+                ensureSendOperationActive(followUpRequestId)
                 val followUpDeviceState = followUpSendPreparation.deviceState
                 val followUpPreparedStream = followUpSendPreparation.preparedStream
                 val followUpPerformanceConfig = followUpPreparedStream.plan.effectiveConfig
@@ -673,16 +927,6 @@ internal fun ChatViewModel.sendMessageInternal() {
                 var followUpPendingStreamingText: (() -> String)? = null
                 var followUpLastStreamingUiUpdateAtMs = 0L
                 var followUpTerminal: StreamTerminalState? = null
-                activeSendRequestId = followUpRequestId
-                _uiState.update { state ->
-                    state.copy(
-                        composer = state.composer.copy(isSending = true, isCancelling = false),
-                        runtime = sendReducer.onSendStarted(
-                            runtime = state.runtime,
-                            toolDriven = true,
-                        ),
-                    )
-                }
                 val followUpPlaceholder = MessageUiModel(
                     id = followUpAssistantMessageId,
                     role = MessageRole.ASSISTANT,
@@ -699,11 +943,56 @@ internal fun ChatViewModel.sendMessageInternal() {
                         metadata = mapOf("state" to "streaming"),
                     ),
                 )
-                updateActiveSession(activeSession.id) { session ->
-                    session.copy(
-                        messages = session.messages + followUpPlaceholder,
-                        updatedAtEpochMs = System.currentTimeMillis(),
+                sendOperation.setCurrentMessageId(followUpAssistantMessageId)
+                var followUpCommitted = false
+                while (!followUpCommitted) {
+                    val state = _uiState.value
+                    val pinnedSession = state.sessions
+                        .firstOrNull { session -> session.id == sendOperation.sessionId }
+                    if (
+                        !isActiveSendOperation(sendOperation) ||
+                        sendOperation.currentRequestId() != followUpRequestId ||
+                        sendOperation.isCancellationRequested() ||
+                        pinnedSession == null ||
+                        pinnedSession.messages != loopSession.messages ||
+                        !state.composer.isSending ||
+                        state.composer.isCancelling
+                    ) {
+                        break
+                    }
+                    val nextState = state.copy(
+                        sessions = state.sessions.map { session ->
+                            if (session.id == sendOperation.sessionId) {
+                                sessionService.normalize(
+                                    session.copy(
+                                        messages = session.messages + followUpPlaceholder,
+                                        updatedAtEpochMs = System.currentTimeMillis(),
+                                    ),
+                                )
+                            } else {
+                                session
+                            }
+                        },
+                        composer = state.composer.copy(isSending = true, isCancelling = false),
+                        runtime = sendReducer.onSendStarted(
+                            runtime = state.runtime,
+                            toolDriven = true,
+                        ),
                     )
+                    followUpCommitted = _uiState.compareAndSet(state, nextState)
+                }
+                if (!followUpCommitted) {
+                    sendOperation.setCurrentMessageId(null)
+                    if (sendOperation.isCancellationRequested()) {
+                        throw CancellationException("Tool follow-up was cancelled before commit.")
+                    }
+                    finishToolChainWithError(
+                        requestId = followUpRequestId,
+                        uiError = UiErrorMapper.runtimeFailure(
+                            "Conversation changed while the tool follow-up was being prepared.",
+                        ),
+                    )
+                    return
                 }
                 persistState()
 
@@ -726,7 +1015,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                         return
                     }
                     updateStreamingMessage(
-                        sessionId = activeSession.id,
+                        sessionId = sendOperation.sessionId,
                         messageId = followUpAssistantMessageId,
                         text = text,
                         isThinking = isThinking,
@@ -734,6 +1023,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                     followUpLastStreamingUiUpdateAtMs = now
                 }
 
+                ensureSendOperationActive(followUpRequestId)
                 streamCoordinator.collectStream(
                     runtimeService = runtimeFacade,
                     preparedStream = followUpPreparedStream,
@@ -752,14 +1042,14 @@ internal fun ChatViewModel.sendMessageInternal() {
                             }
                         } else if (event is ChatStreamEvent.Thinking) {
                             updateStreamingMessage(
-                                sessionId = activeSession.id,
+                                sessionId = sendOperation.sessionId,
                                 messageId = followUpAssistantMessageId,
                                 text = followUpStreamReducer.snapshotText(),
                                 isThinking = nextState.isThinking,
                             )
                         }
                         val detail = sendReducer.statusDetailForEvent(event)
-                        if (!detail.isNullOrBlank() && !isUserCancellationRequested(event.requestId)) {
+                        if (!detail.isNullOrBlank() && !sendOperation.isCancellationRequested()) {
                             _uiState.update { state ->
                                 state.copy(
                                     runtime = state.runtime.copy(
@@ -786,11 +1076,24 @@ internal fun ChatViewModel.sendMessageInternal() {
                         )
                     },
                     onTerminal = { terminal ->
-                        followUpTerminal = terminal
+                        if (
+                            isActiveSendOperation(sendOperation) &&
+                            sendOperation.currentRequestId() == terminal.requestId
+                        ) {
+                            followUpTerminal = terminal
+                        }
                     },
                 )
-                activeSendRequestId = null
-                val terminal = followUpTerminal ?: break
+                val terminal = followUpTerminal
+                if (terminal == null) {
+                    finishToolChainWithError(
+                        requestId = followUpRequestId,
+                        uiError = UiErrorMapper.runtimeFailure(
+                            "Tool follow-up stream ended without a terminal result.",
+                        ),
+                    )
+                    return
+                }
                 pendingToolCalls = finalizeFromTerminal(
                     terminal = terminal,
                     messageId = followUpAssistantMessageId,
@@ -805,14 +1108,18 @@ internal fun ChatViewModel.sendMessageInternal() {
 
             if (pendingToolCalls.isNotEmpty()) {
                 appendSystemMessage(
-                    sessionId = activeSession.id,
+                    sessionId = sendOperation.sessionId,
                     content = "Tool loop stopped after $MAX_AUTOMATIC_TOOL_LOOP_ROUNDS rounds.",
                 )
-                persistState()
+                finishToolChainWithoutFollowUp(
+                    requestId = sendOperation.currentRequestId(),
+                    detail = "Tool loop stopped after $MAX_AUTOMATIC_TOOL_LOOP_ROUNDS rounds.",
+                )
             }
         }
 
         var pendingToolCallsFromTurn: List<ChatToolCall> = emptyList()
+        ensureSendOperationActive(requestId)
         streamCoordinator.collectStream(
             runtimeService = runtimeFacade,
             preparedStream = preparedStream,
@@ -838,7 +1145,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                     )
                 }
                 val detail = sendReducer.statusDetailForEvent(event)
-                if (!detail.isNullOrBlank() && !isUserCancellationRequested(event.requestId)) {
+                if (!detail.isNullOrBlank() && !sendOperation.isCancellationRequested()) {
                     _uiState.update { state ->
                         state.copy(
                             runtime = state.runtime.copy(
@@ -865,24 +1172,174 @@ internal fun ChatViewModel.sendMessageInternal() {
                 )
             },
             onTerminal = { terminal ->
-                pendingToolCallsFromTurn = finalizeFromTerminal(
-                    terminal = terminal,
-                    messageId = assistantMessageId,
-                    turnStartedAtMs = sendStartedAtMs,
-                    appliedConfig = performanceConfig,
-                    targetConfig = targetPerformanceConfig,
-                    deviceState = currentDeviceState,
-                    fallbackModelId = snapshot.runtime.activeModelId,
-                )
+                if (
+                    isActiveSendOperation(sendOperation) &&
+                    sendOperation.currentRequestId() == terminal.requestId
+                ) {
+                    pendingToolCallsFromTurn = finalizeFromTerminal(
+                        terminal = terminal,
+                        messageId = assistantMessageId,
+                        turnStartedAtMs = sendStartedAtMs,
+                        appliedConfig = performanceConfig,
+                        targetConfig = targetPerformanceConfig,
+                        deviceState = currentDeviceState,
+                        fallbackModelId = snapshot.runtime.activeModelId,
+                    )
+                }
             },
         )
-        activeSendRequestId = null
         if (pendingToolCallsFromTurn.isNotEmpty()) {
             runAutomaticToolLoop(
                 initialToolCalls = pendingToolCallsFromTurn,
                 initialPromptHint = prompt,
             )
         }
+    }
+    sendOperation.attachJob(sendJob)
+    sendJob.invokeOnCompletion { cause ->
+        when {
+            cause is CancellationException || sendOperation.isCancellationRequested() ->
+                finishCancelledSendOperation(sendOperation)
+            cause != null -> finishFailedSendOperation(sendOperation, cause)
+            isActiveSendOperation(sendOperation) -> finishFailedSendOperation(
+                sendOperation = sendOperation,
+                cause = IllegalStateException("Send operation completed without terminal cleanup."),
+            )
+        }
+    }
+}
+
+private fun ChatViewModel.finishCancelledSendOperation(sendOperation: SendOperationLease) {
+    if (!isActiveSendOperation(sendOperation)) {
+        return
+    }
+    val messageId = sendOperation.currentMessageId()
+    val partialText = messageId?.let { currentMessageId ->
+        messageContent(
+            sessionId = sendOperation.sessionId,
+            messageId = currentMessageId,
+        ).orEmpty().trim()
+    }.orEmpty()
+    val userInitiated = sendOperation.isUserCancellationRequested()
+    _uiState.update { state ->
+        if (!isActiveSendOperation(sendOperation)) {
+            state
+        } else {
+            val updatedSessions = state.sessions.map { session ->
+                if (session.id == sendOperation.sessionId) {
+                    sessionService.normalize(
+                        session.copy(
+                            messages = session.messages
+                                .withOwnedActiveToolCallsFailed(sendOperation.ownedToolCallIds())
+                                .withAbortedStreamingMessage(
+                                    messageId = messageId,
+                                    partialText = partialText,
+                                    requestId = sendOperation.currentRequestId(),
+                                    finishReason = "cancelled",
+                                ),
+                            updatedAtEpochMs = System.currentTimeMillis(),
+                        ),
+                    )
+                } else {
+                    session
+                }
+            }
+            val nextRuntime = if (userInitiated) {
+                state.runtime.copy(
+                    startupProbeState = StartupProbeState.READY,
+                    modelRuntimeStatus = ModelRuntimeStatus.READY,
+                    modelStatusDetail = "Generation cancelled.",
+                    sendElapsedMs = null,
+                    sendSlowState = null,
+                ).clearError()
+            } else {
+                state.runtime.copy(
+                    sendElapsedMs = null,
+                    sendSlowState = null,
+                )
+            }
+            state.copy(
+                sessions = updatedSessions,
+                streaming = state.streaming.clearedFor(sendOperation.sessionId, messageId),
+                composer = state.composer.copy(isSending = false, isCancelling = false),
+                runtime = nextRuntime,
+            )
+        }
+    }
+    if (releaseSendOperation(sendOperation)) {
+        persistState()
+    }
+}
+
+private fun ChatViewModel.finishFailedSendOperation(
+    sendOperation: SendOperationLease,
+    cause: Throwable,
+) {
+    if (!isActiveSendOperation(sendOperation)) {
+        return
+    }
+    val requestId = sendOperation.currentRequestId()
+    val messageId = sendOperation.currentMessageId()
+    val partialText = messageId?.let { currentMessageId ->
+        messageContent(
+            sessionId = sendOperation.sessionId,
+            messageId = currentMessageId,
+        ).orEmpty().trim()
+    }.orEmpty()
+    val uiError = UiErrorMapper.runtimeFailure(
+        errorCode = "send_operation_failed",
+        detail = cause.message ?: cause::class.simpleName,
+    )
+    val finishReason = "failed:send_operation_failed"
+    val systemMessage = createMessage(
+        role = MessageRole.SYSTEM,
+        content = formatUserFacingError(uiError),
+        kind = MessageKind.TEXT,
+        requestId = requestId,
+        finishReason = finishReason,
+        terminalEventSeen = false,
+    )
+    _uiState.update { state ->
+        if (
+            !isActiveSendOperation(sendOperation) ||
+            sendOperation.currentRequestId() != requestId
+        ) {
+            state
+        } else {
+            val updatedSessions = state.sessions.map { session ->
+                if (session.id == sendOperation.sessionId) {
+                    sessionService.normalize(
+                        session.copy(
+                            messages = session.messages
+                                .withOwnedActiveToolCallsFailed(sendOperation.ownedToolCallIds())
+                                .withAbortedStreamingMessage(
+                                    messageId = messageId,
+                                    partialText = partialText,
+                                    requestId = requestId,
+                                    finishReason = finishReason,
+                                ) + systemMessage,
+                            updatedAtEpochMs = System.currentTimeMillis(),
+                        ),
+                    )
+                } else {
+                    session
+                }
+            }
+            state.copy(
+                sessions = updatedSessions,
+                streaming = state.streaming.clearedFor(sendOperation.sessionId, messageId),
+                composer = state.composer.copy(isSending = false, isCancelling = false),
+                runtime = state.runtime.copy(
+                    modelRuntimeStatus = ModelRuntimeStatus.ERROR,
+                    modelStatusDetail = uiError.userMessage,
+                    sendElapsedMs = null,
+                    sendSlowState = null,
+                ).withUiError(uiError),
+            )
+        }
+    }
+    if (releaseSendOperation(sendOperation)) {
+        persistState()
     }
 }
 
@@ -894,6 +1351,101 @@ private fun List<ChatToolCall>.toPersistedToolCalls(): List<PersistedToolCall> {
             argumentsJson = call.argumentsJson,
             status = PersistedToolCallStatus.PENDING,
         )
+    }
+}
+
+private fun List<MessageUiModel>.withToolCallStatus(
+    toolCallId: String,
+    status: PersistedToolCallStatus,
+): List<MessageUiModel> {
+    return map { message ->
+        val interaction = message.interaction ?: return@map message
+        if (interaction.toolCalls.none { toolCall -> toolCall.id == toolCallId }) {
+            return@map message
+        }
+        message.copy(
+            interaction = interaction.copy(
+                toolCalls = interaction.toolCalls.map { toolCall ->
+                    if (toolCall.id == toolCallId) {
+                        toolCall.copy(status = status)
+                    } else {
+                        toolCall
+                    }
+                },
+            ),
+        )
+    }
+}
+
+private fun List<MessageUiModel>.withOwnedActiveToolCallsFailed(
+    ownedToolCallIds: Set<String>,
+): List<MessageUiModel> {
+    if (ownedToolCallIds.isEmpty()) {
+        return this
+    }
+    return map { message ->
+        val interaction = message.interaction ?: return@map message
+        val nextToolCalls = interaction.toolCalls.map { toolCall ->
+            if (
+                toolCall.id in ownedToolCallIds &&
+                (
+                    toolCall.status == PersistedToolCallStatus.PENDING ||
+                        toolCall.status == PersistedToolCallStatus.RUNNING
+                    )
+            ) {
+                toolCall.copy(status = PersistedToolCallStatus.FAILED)
+            } else {
+                toolCall
+            }
+        }
+        if (nextToolCalls == interaction.toolCalls) {
+            message
+        } else {
+            message.copy(interaction = interaction.copy(toolCalls = nextToolCalls))
+        }
+    }
+}
+
+private fun List<MessageUiModel>.withAbortedStreamingMessage(
+    messageId: String?,
+    partialText: String,
+    requestId: String,
+    finishReason: String,
+): List<MessageUiModel> {
+    if (messageId == null) {
+        return this
+    }
+    return mapNotNull { message ->
+        if (message.id != messageId || !message.isStreaming) {
+            return@mapNotNull message
+        }
+        if (partialText.isBlank()) {
+            return@mapNotNull null
+        }
+        val interaction = message.interaction ?: PersistedInteractionMessage(
+            role = MessageRole.ASSISTANT.name,
+            parts = emptyList(),
+        )
+        message.copy(
+            content = partialText,
+            isStreaming = false,
+            isThinking = false,
+            requestId = requestId,
+            finishReason = finishReason,
+            terminalEventSeen = false,
+            interaction = interaction.copy(
+                parts = listOf(PersistedInteractionPart(type = "text", text = partialText)),
+                metadata = interaction.metadata + ("state" to "final"),
+            ),
+        )
+    }
+}
+
+private fun StreamingState.clearedFor(sessionId: String, messageId: String?): StreamingState {
+    return if (this.sessionId == sessionId && this.messageId == messageId) {
+        StreamingState()
+    } else {
+        this
     }
 }
 

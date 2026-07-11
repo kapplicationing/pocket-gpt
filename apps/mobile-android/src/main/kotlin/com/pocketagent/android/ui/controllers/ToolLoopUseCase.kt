@@ -3,6 +3,7 @@ package com.pocketagent.android.ui.controllers
 import com.pocketagent.android.ui.state.UiError
 import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.runtime.ToolExecutionResult
+import kotlinx.coroutines.CancellationException
 
 sealed interface ToolLoopOutcome {
     data class Success(val content: String) : ToolLoopOutcome
@@ -28,6 +29,9 @@ class ToolLoopUseCase(
                 }
             },
             onFailure = { error ->
+                if (error is CancellationException) {
+                    throw error
+                }
                 ToolLoopOutcome.Failure(
                     UiErrorMapper.runtimeFailure(error.message ?: "Tool request failed."),
                 )

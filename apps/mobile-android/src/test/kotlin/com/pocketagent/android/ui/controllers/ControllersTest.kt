@@ -12,13 +12,20 @@ import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.StartupProbeState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import java.util.concurrent.CountDownLatch
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ControllersTest {
@@ -44,6 +51,39 @@ class ControllersTest {
         assertTrue(result is ImageAnalysisResult.Success)
         assertEquals("/tmp/a.jpg", runtime.lastImagePath)
         assertEquals("describe", runtime.lastImagePrompt)
+    }
+
+    @Test
+    fun `tool loop propagates parent cancellation instead of mapping it to a failure`() = runBlocking {
+        val enteredTool = CompletableDeferred<Unit>()
+        val releaseTool = CountDownLatch(1)
+        val escapedOutcome = CompletableDeferred<ToolLoopOutcome>()
+        val runtime = RecordingRuntimeGateway(
+            toolBehavior = { _, _ ->
+                enteredTool.complete(Unit)
+                releaseTool.await()
+                ToolExecutionResult.Success("late tool result")
+            },
+        )
+        val toolLoop = ToolLoopUseCase(
+            sendController = ChatSendController(runtimeGateway = runtime, ioDispatcher = Dispatchers.IO),
+        )
+        val parent = launch {
+            escapedOutcome.complete(
+                toolLoop.execute("calculator", """{"expression":"2+2"}"""),
+            )
+        }
+
+        try {
+            enteredTool.await()
+            parent.cancel(CancellationException("parent send cancelled"))
+            withTimeout(5_000L) { parent.join() }
+
+            assertFalse(escapedOutcome.isCompleted)
+        } finally {
+            releaseTool.countDown()
+            parent.cancelAndJoin()
+        }
     }
 
     @Test
@@ -123,6 +163,9 @@ class ControllersTest {
 
 private class RecordingRuntimeGateway(
     private val startupBehavior: () -> List<String> = { emptyList() },
+    private val toolBehavior: (String, String) -> ToolExecutionResult = { toolName, _ ->
+        ToolExecutionResult.Success("tool:$toolName")
+    },
 ) : ChatRuntimeService {
     var lastToolName: String? = null
     var lastToolJsonArgs: String? = null
@@ -139,7 +182,7 @@ private class RecordingRuntimeGateway(
     override fun runTool(toolName: String, jsonArgs: String): ToolExecutionResult {
         lastToolName = toolName
         lastToolJsonArgs = jsonArgs
-        return ToolExecutionResult.Success("tool:$toolName")
+        return toolBehavior(toolName, jsonArgs)
     }
 
     override fun analyzeImage(imagePath: String, prompt: String): ImageAnalysisResult {

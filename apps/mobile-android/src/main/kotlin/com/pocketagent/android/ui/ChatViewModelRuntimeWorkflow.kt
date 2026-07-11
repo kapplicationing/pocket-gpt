@@ -12,7 +12,6 @@ import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
 import com.pocketagent.android.ui.state.StartupProbeState
 import com.pocketagent.core.RoutingMode
-import com.pocketagent.core.SessionId
 import com.pocketagent.runtime.RuntimePerformanceProfile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
@@ -72,7 +71,11 @@ internal fun ChatViewModel.setGpuAccelerationEnabledInternal(enabled: Boolean) {
                 GpuProbeStatus.PENDING ->
                     "Validating GPU support... keeping CPU until probe is qualified."
                 GpuProbeStatus.FAILED ->
-                    "GPU acceleration unavailable (${snapshot.gpuProbeFailureReason ?: "probe_failed"}). ${snapshot.gpuProbeDetail.orEmpty()}".trim()
+                    (
+                        "GPU acceleration unavailable " +
+                            "(${snapshot.gpuProbeFailureReason ?: "probe_failed"}). " +
+                            snapshot.gpuProbeDetail.orEmpty()
+                        ).trim()
                 else ->
                     "GPU acceleration is unavailable on this build/device. Using CPU."
             }
@@ -142,12 +145,12 @@ internal fun ChatViewModel.skipOnboardingInternal() {
 }
 
 internal fun ChatViewModel.refreshRuntimeReadinessInternal(statusDetailOverride: String? = null) {
-    val activeRequestId = activeSendRequestId
+    val activeSendOperation = currentSendOperation()
+    activeSendOperation?.requestCancellation(userInitiated = false)
     viewModelScope.launch(ioDispatcher) {
-        activeRequestId?.let(runtimeFacade::cancelGenerationByRequest)
-        val activeSessionId = _uiState.value.activeSessionId
-        activeSessionId?.let { sessionId ->
-            runtimeFacade.cancelGeneration(SessionId(sessionId))
+        activeSendOperation?.let { operation ->
+            runtimeFacade.cancelGenerationByRequest(operation.currentRequestId())
+            operation.cancelJob()
         }
     }
     launchStartupProbeInternal(statusDetailOverride)
@@ -254,7 +257,8 @@ internal fun ChatViewModel.updateRuntimeGpuProbeStateInternal(probe: GpuProbeRes
         val runtime = state.runtime
         val nextRuntime = runtime.copy(
             gpuAccelerationSupported = gpuSupported,
-            gpuAccelerationEnabled = runtime.gpuAccelerationEnabled && (gpuSupported || runtime.gpuManualOverrideAllowed),
+            gpuAccelerationEnabled = runtime.gpuAccelerationEnabled &&
+                (gpuSupported || runtime.gpuManualOverrideAllowed),
             gpuProbeStatus = probe.status,
             gpuProbeFailureReason = probe.failureReason?.name,
             gpuProbeDetail = probe.detail,

@@ -15,7 +15,7 @@ from typing import Any, Sequence
 
 EXPECTED_SAMPLE_COUNT = 3
 MINIMUM_FRAME_COUNT = 20
-DEFAULT_PACKAGE = "com.pocketagent.android"
+DEFAULT_PACKAGE = "com.pocketagent.android.benchmark"
 DECLARED_CONDITION_SOURCE = "operator-declared-not-observed"
 SUPPORTED_SCENARIOS = {"settings-nav", "model-sheet", "drawer-search"}
 METRIC_THRESHOLDS = {
@@ -36,9 +36,12 @@ ALLOWED_DECLARED_DOWNLOAD_CONDITIONS = {"idle", "active"}
 ALLOWED_DECLARED_VOICE_CONDITIONS = {"inactive", "active"}
 DEVICE_IDENTITY_FIELDS = ("manufacturer", "model", "android_release", "api_level")
 DEVICE_CONDITION_FIELDS = (
-    "refresh_rate_hz",
-    "refresh_rate_source",
-    "refresh_rate_evidence_available",
+    "refresh_rate_hz_before",
+    "refresh_rate_source_before",
+    "refresh_rate_evidence_available_before",
+    "refresh_rate_hz_after",
+    "refresh_rate_source_after",
+    "refresh_rate_evidence_available_after",
     "compilation_filter",
     "compilation_reason",
     "compilation_evidence_available",
@@ -127,21 +130,35 @@ def _validate_device_state(state: dict[str, Any], path: Path) -> dict[str, Any]:
         "api_level": _required_positive_integer(state, "api_level", path),
     }
 
-    refresh_available = _required_boolean(state, "refresh_rate_evidence_available", path)
-    if not refresh_available:
-        raise ValidationError(f"{path}: refresh-rate evidence is required for acceptance")
-    refresh_rate = state.get("refresh_rate_hz")
-    if refresh_available:
-        refresh_rate = _required_number(state, "refresh_rate_hz", path)
+    for phase in ("before", "after"):
+        available_field = f"refresh_rate_evidence_available_{phase}"
+        rate_field = f"refresh_rate_hz_{phase}"
+        source_field = f"refresh_rate_source_{phase}"
+        refresh_available = _required_boolean(state, available_field, path)
+        if not refresh_available:
+            raise ValidationError(
+                f"{path}: {phase} refresh-rate evidence is required for acceptance"
+            )
+        refresh_rate = _required_number(state, rate_field, path)
         if not 1.0 <= refresh_rate <= 500.0:
-            raise ValidationError(f"{path}: refresh_rate_hz is outside a plausible range")
-    elif refresh_rate is not None:
+            raise ValidationError(f"{path}: {rate_field} is outside a plausible range")
+        validated[rate_field] = refresh_rate
+        validated[source_field] = _required_text(state, source_field, path)
+        if validated[source_field] != "dumpsys-display-active-mode":
+            raise ValidationError(
+                f"{path}: {source_field} must prove the active display mode, "
+                f"observed {validated[source_field]!r}"
+            )
+        validated[available_field] = refresh_available
+    if not math.isclose(
+        validated["refresh_rate_hz_before"],
+        validated["refresh_rate_hz_after"],
+        abs_tol=0.1,
+    ):
         raise ValidationError(
-            f"{path}: refresh_rate_hz must be null when refresh evidence is unavailable"
+            f"{path}: refresh-rate drift is not valid acceptance evidence "
+            f"({validated['refresh_rate_hz_before']} -> {validated['refresh_rate_hz_after']} Hz)"
         )
-    validated["refresh_rate_hz"] = refresh_rate
-    validated["refresh_rate_source"] = _required_text(state, "refresh_rate_source", path)
-    validated["refresh_rate_evidence_available"] = refresh_available
 
     for field in ("thermal_status_before", "thermal_status_after"):
         value = _required_number(state, field, path)
@@ -161,8 +178,16 @@ def _validate_device_state(state: dict[str, Any], path: Path) -> dict[str, Any]:
         raise ValidationError(f"{path}: package compilation evidence is required for acceptance")
     compilation_filter = _required_text(state, "compilation_filter", path)
     compilation_reason = _required_text(state, "compilation_reason", path)
-    if compilation_available and compilation_filter == "unavailable":
-        raise ValidationError(f"{path}: compilation filter cannot be unavailable when evidence exists")
+    if compilation_filter != "speed-profile":
+        raise ValidationError(
+            f"{path}: compilation filter must be exactly 'speed-profile', "
+            f"observed {compilation_filter!r}"
+        )
+    if compilation_reason != "cmdline":
+        raise ValidationError(
+            f"{path}: compilation reason must be exactly 'cmdline', "
+            f"observed {compilation_reason!r}"
+        )
     validated["compilation_filter"] = compilation_filter
     validated["compilation_reason"] = compilation_reason
     validated["compilation_evidence_available"] = compilation_available
@@ -244,14 +269,23 @@ def evaluate_samples(
             raise ValidationError(f"{path}: unsupported build_source {build_source!r}")
         build_variant = _required_text(sample, "build_variant", path)
         native_packaged = sample.get("native_runtime_packaged")
+        baseline_packaged = sample.get("baseline_profile_packaged")
         if build_source == "assembled-native-benchmark":
             benchmark_anchors += 1
-            if build_variant != "benchmark" or native_packaged is not True:
+            if (
+                build_variant != "benchmark"
+                or native_packaged is not True
+                or baseline_packaged is not True
+            ):
                 raise ValidationError(
                     f"{path}: assembled benchmark must declare build_variant='benchmark' "
-                    "and native_runtime_packaged=true"
+                    "and native_runtime_packaged=true and baseline_profile_packaged=true"
                 )
-        elif build_variant != "unverified-nondebuggable" or native_packaged is not None:
+        elif (
+            build_variant != "unverified-nondebuggable"
+            or native_packaged is not None
+            or baseline_packaged is not None
+        ):
             raise ValidationError(
                 f"{path}: preinstalled sample must keep variant/native provenance unverified"
             )
@@ -326,6 +360,7 @@ def evaluate_samples(
         "package": package,
         "build_variant": "benchmark",
         "native_runtime_packaged": True,
+        "baseline_profile_packaged": True,
         "build_identity": build_identity,
         "thresholds": METRIC_THRESHOLDS,
         "medians": medians,

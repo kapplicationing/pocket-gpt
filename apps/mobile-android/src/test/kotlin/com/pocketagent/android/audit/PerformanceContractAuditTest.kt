@@ -305,6 +305,8 @@ class PerformanceContractAuditTest {
     @Test
     fun `perf baseline script refuses to measure debug builds`() {
         val script = perfBaselineScript().readText()
+        val profileHelper = resolveRepoSource("scripts/dev/android-benchmark-profile.sh").readText()
+        val buildScript = resolveAppSource("build.gradle.kts").readText()
         assertTrue(
             "DEBUGGABLE" in script && "ALLOW_DEBUGGABLE" in script,
             "scripts/dev/perf-baseline.sh must explicitly check for DEBUGGABLE builds and require an opt-in flag. " +
@@ -314,6 +316,17 @@ class PerformanceContractAuditTest {
         assertTrue(
             "assembleBenchmark" in script,
             "scripts/dev/perf-baseline.sh must build the `benchmark` variant (assembleBenchmark), not assembleDebug.",
+        )
+        assertTrue(
+            "applicationIdSuffix = \".benchmark\"" in buildScript &&
+                "POCKETGPT_BENCHMARK_PACKAGE=\"com.pocketagent.android.benchmark\"" in profileHelper &&
+                "pocketgpt_require_isolated_benchmark_package" in script &&
+                "perf_lock_acquire" in script &&
+                "pocketgpt_uninstall_isolated_benchmark" in script &&
+                "\$PACKAGE/.MainActivity" !in script &&
+                script.indexOf("pocketgpt_require_isolated_benchmark_package") <
+                script.indexOf("if [[ \"\$DO_BUILD\""),
+            "Benchmark measurement must use the isolated package, full activity class, one device lease, and owned cleanup.",
         )
     }
 
@@ -370,6 +383,7 @@ class PerformanceContractAuditTest {
         val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
         val gate = resolveRepoSource("scripts/dev/perf-interaction-gate.sh").readText()
         val harness = resolveRepoSource("scripts/dev/android_perf_harness.py").readText()
+        val profileHelper = resolveRepoSource("scripts/dev/android-benchmark-profile.sh").readText()
         val evaluator = resolveRepoSource(
             "scripts/benchmarks/evaluate_android_frame_thresholds.py",
         ).readText()
@@ -394,9 +408,11 @@ class PerformanceContractAuditTest {
         )
         val requiredEvaluationFields = listOf(
             "total_frames",
-            "refresh_rate_hz",
+            "refresh_rate_hz_before",
+            "refresh_rate_hz_after",
             "thermal_status_before",
             "compilation_filter",
+            "baseline_profile_packaged",
             "workload_condition_source",
             "declared_runtime_condition",
             "declared_download_condition",
@@ -424,6 +440,37 @@ class PerformanceContractAuditTest {
                 "trap cleanup EXIT" in gate &&
                 "trap cleanup EXIT" in script,
             "The three-sample gate must own one device/package lease and each child must validate its token.",
+        )
+        assertTrue(
+            "-n \"\$receiver_component\"" in profileHelper &&
+                "--expected 10" in profileHelper &&
+                "--expected 1" in profileHelper &&
+                "-f -m speed-profile" in profileHelper &&
+                "pocketgpt_uninstall_isolated_benchmark" in gate &&
+                "pocketgpt_require_isolated_benchmark_package \"\$PACKAGE\"" in script &&
+                script.indexOf("pocketgpt_require_isolated_benchmark_package") <
+                script.indexOf("if [[ -z \"\$OUT_DIR\" ]]") &&
+                "\$PACKAGE/.MainActivity" !in script,
+            "Acceptance evidence must explicitly activate the packaged profile and clean up only the isolated benchmark app.",
+        )
+    }
+
+    @Test
+    fun `native benchmark CI proves application id native library and baseline profile`() {
+        val workflow = resolveRepoSource(".github/workflows/ci.yml").readText()
+        val job = workflow.substringAfter("native-build-package-check:")
+            .substringBefore("android-instrumented-smoke:")
+
+        assertTrue(
+            "assembleBenchmark" in job &&
+                job.split("assembleBenchmark").size == 2 &&
+                "lib/arm64-v8a/libpocket_llama.so" in job &&
+                "assert-application-id" in job &&
+                "com.pocketagent.android.benchmark" in job &&
+                "verify_android_baseline_profile.py" in job &&
+                "compileBenchmarkArtProfile/baseline-prof.txt" in job &&
+                "baseline-profile.sh verify" !in job,
+            "The existing native benchmark build must be verified in place for isolation, native packaging, and merged Baseline Profile rules.",
         )
     }
 

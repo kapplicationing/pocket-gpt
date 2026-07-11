@@ -166,7 +166,8 @@ adb devices
 Preflight before accepting a performance sample:
 
 1. Use the exact serial from `adb devices`.
-2. Install or keep the `benchmark` variant; reject debuggable builds.
+2. Let the wrapper clean-install the isolated `com.pocketagent.android.benchmark`
+   package; never replace the base app for performance evidence.
 3. Confirm the app, not SystemUI or Android Settings, is foreground.
 4. Collapse notification shade and dismiss keyguard before the run.
 5. Do not leave the keyboard open unless the scenario is explicitly measuring typing.
@@ -176,9 +177,14 @@ Composer typing:
 
 ```bash
 ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
 ```
+
+Each `perf-baseline.sh --build` invocation is one clean-install diagnostic: it
+holds the same device/package lease, activates the profile, measures, and removes
+the isolated package. Run it three times only to compare composer medians manually;
+the interaction gate below is the automated acceptance gate.
 
 Non-generation UI journeys:
 
@@ -189,14 +195,17 @@ ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario dra
 ```
 
 Run only the scenario that matches the changed risk. The gate builds and installs
-one native-enabled `benchmark` APK, captures three samples without rebuilding,
+one native-enabled `benchmark` APK under an isolated application ID, activates
+its packaged Baseline Profile, captures three samples without rebuilding,
 validates that scenario, device, package, installed-build identity, refresh rate,
 compilation mode, and declared runtime/download/voice conditions stayed constant,
 rejects debuggable, empty-frame, or incomplete samples, and fails when a metric
 median exceeds its target. Thermal and battery state remain per-sample evidence in
 `evaluation.json` instead of being silently averaged away. Acceptance also requires
-at least 20 rendered frames per sample, available refresh/compilation provenance,
-and thermal status 0 before and after every journey.
+at least 20 rendered frames per sample, unchanged refresh rate before/after,
+exact `speed-profile`/`cmdline` compilation, and thermal status 0 before and
+after every journey. The first visible Activity launch dismisses onboarding in
+an untimed setup pass; frame windows measure configured steady-state navigation.
 
 Use `perf-interaction.sh` directly only for one diagnostic sample that will not be
 used as acceptance evidence:
@@ -226,8 +235,9 @@ device checks prove package, foreground, journey, refresh, thermal, and
 compilation state.
 
 The gate owns an atomic lock for the selected device and package across build,
-install, and all three samples. A contention error prints the lock path and its
-owner PID, start time, and command. If `SIGKILL` leaves a stale lock under
+clean install, profile activation, all three samples, and cleanup uninstall. A
+contention error prints the lock path and its owner PID, start time, and command.
+If `SIGKILL` leaves a stale lock under
 `${TMPDIR}/pocketgpt-android-perf-locks` (or
 `POCKETGPT_ANDROID_PERF_LOCK_ROOT`), verify that exact owner process is dead
 before removing only the reported hashed lock directory. Never bypass a live
@@ -236,9 +246,13 @@ owner.
 ## Baseline Profile Generation
 
 Regenerate the app profile only when startup or critical normal-navigation code
-changes. Pin one rooted device or API 33+ device; the generator cold-starts the
-app and opens the session drawer, settings, and model library without loading a
-model or running inference:
+changes. Use a disposable/profile-generation API 33+ device with no PocketGPT
+data to preserve. The producer targets the base `com.pocketagent.android`
+`nonMinifiedRelease` package, and AndroidX can uninstall/reinstall or clear that
+package while resetting profile state. The isolated `.benchmark` package protects
+performance measurement only; it does not protect generation. The generator
+cold-starts the app and opens the session drawer, general settings, completion
+settings, and model library without loading a model or running inference:
 
 ```bash
 ANDROID_SERIAL=<serial> bash scripts/dev/baseline-profile.sh generate
@@ -255,6 +269,10 @@ packaging without a device using:
 bash scripts/dev/baseline-profile.sh verify
 ```
 
+No CI lane currently assembles `release`; this local verifier remains the release
+packaging proof. CI's native benchmark packaging job runs the same verifier against
+its already-built benchmark APK and merged ART input without rebuilding.
+
 Raw generation and verification output stays under `tmp/baseline-profile/`.
 
 ## Perfetto Capture For Worst Jank
@@ -270,7 +288,7 @@ adb -s <serial> shell perfetto \
   -o /data/misc/perfetto-traces/settings-nav.perfetto-trace \
   -t 30s \
   -b 64mb \
-  --app com.pocketagent.android \
+  --app com.pocketagent.android.benchmark \
   sched/sched_switch sched/sched_wakeup sched/sched_waking \
   power/suspend_resume power/cpu_frequency power/cpu_idle \
   am wm gfx view binder_driver hal dalvik

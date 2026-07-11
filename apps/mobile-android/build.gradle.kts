@@ -165,6 +165,7 @@ android {
         // `docs/architecture/android-performance-contract.md`.
         create("benchmark") {
             initWith(getByName("release"))
+            applicationIdSuffix = ".benchmark"
             isMinifyEnabled = false
             isDebuggable = false
             isProfileable = true
@@ -172,6 +173,7 @@ android {
             // The benchmark APK is installable test/perf evidence, never a published artifact.
             // Use Android Gradle Plugin's debug signing config so CI can generate the keystore.
             signingConfig = signingConfigs.getByName("debug")
+            resValue("string", "app_name", "PocketGPT Benchmark")
         }
     }
 

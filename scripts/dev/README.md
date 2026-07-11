@@ -95,9 +95,13 @@ Composer typing:
 
 ```bash
 ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build
 ```
+
+Each command is an independent, leased diagnostic that clean-installs, profiles,
+measures, and removes the isolated benchmark package. Compare three only as a
+manual composer median; use `perf-interaction-gate.sh` for acceptance evidence.
 
 Non-generation UI journeys:
 
@@ -108,7 +112,9 @@ ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario dra
 ```
 
 Run only the scenario that matches the changed risk. The gate builds one
-native-enabled benchmark APK, captures three samples on that same installed
+native-enabled benchmark APK, clean-installs it as the isolated
+`com.pocketagent.android.benchmark` app, activates its Baseline Profile, and
+captures three samples on that same installed
 build, validates their provenance, and enforces the median targets in
 `docs/testing/test-strategy.md`. Runtime, download, and voice conditions are
 operator declarations and must remain constant across the three samples; verify
@@ -118,19 +124,26 @@ evidence is retained alongside
 the frame metrics. Use `perf-interaction.sh` directly only for a single diagnostic
 sample; it does not provide three-sample acceptance evidence.
 
+The first visible Activity launch is untimed and dismisses onboarding before the
+measured samples. Acceptance requires exact `speed-profile`/`cmdline` compilation
+and no refresh-rate drift. The outer gate removes the benchmark package while it
+still holds the device lease; the production app and its data are untouched.
+
 The gate holds one atomic device/package lock for build, install, and all three
 samples. On contention, inspect the reported owner PID/start/command. Remove a
 reported stale lock only after proving its owner is dead.
 
-Regenerate the app Baseline Profile on one pinned API 33+ device after critical
-startup or normal-navigation changes:
+Regenerate the app Baseline Profile on a disposable/profile-generation API 33+
+device after critical startup or normal-navigation changes. Generation targets
+the base package, not the isolated benchmark ID, and AndroidX may reinstall or
+clear it:
 
 ```bash
 ANDROID_SERIAL=<serial> bash scripts/dev/baseline-profile.sh generate
 ```
 
-The journey cold-starts PocketGPT and visits the session drawer, settings, and
-model library without model inference. It then verifies app-specific profile
+The journey cold-starts PocketGPT and visits the session drawer, general settings,
+completion settings, and model library without model inference. It then verifies app-specific profile
 rules in both benchmark and release APKs. To recheck packaging without a device:
 
 ```bash

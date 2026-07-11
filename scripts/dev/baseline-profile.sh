@@ -16,6 +16,10 @@ usage() {
 Usage: ANDROID_SERIAL=<api-33+-device> scripts/dev/baseline-profile.sh generate
        scripts/dev/baseline-profile.sh verify
 
+WARNING: generate targets com.pocketagent.android through nonMinifiedRelease.
+AndroidX may uninstall/reinstall or clear that package while collecting profiles.
+Use only a disposable/profile-generation device with no PocketGPT data to preserve.
+
 Environment:
   POCKETGPT_BASELINE_PROFILE_NATIVE_BUILD=true|false
   POCKETGPT_BASELINE_PROFILE_ARTIFACT_ROOT=<artifact-directory>
@@ -85,6 +89,7 @@ generate_profile() {
     echo "adb is required for Baseline Profile generation." >&2
     exit 1
   fi
+  echo "Baseline Profile generation requires a disposable device; the base app may be reinstalled." >&2
   mkdir -p "${ARTIFACT_ROOT}"
   capture_device_state before
 

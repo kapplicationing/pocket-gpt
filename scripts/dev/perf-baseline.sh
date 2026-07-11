@@ -14,9 +14,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HARNESS_HELPER="$SCRIPT_DIR/android_perf_harness.py"
+source "$SCRIPT_DIR/android-benchmark-profile.sh"
+source "$SCRIPT_DIR/android-perf-lock.sh"
+
+ORIGINAL_COMMAND="$0"
+for original_arg in "$@"; do
+  ORIGINAL_COMMAND+=" $(printf '%q' "$original_arg")"
+done
 
 SERIAL="${ANDROID_SERIAL:-}"
-PACKAGE="com.pocketagent.android"
+PACKAGE="$POCKETGPT_BENCHMARK_PACKAGE"
 # Thresholds calibrated against the benchmark variant on a Pixel/Galaxy class
 # device after the 2026-05-02 jank investigation. Update only after a full
 # perfetto-traced run shows sustained improvement on >=2 distinct runs.
@@ -29,14 +37,39 @@ ALLOW_DEBUGGABLE=0
 WAIT_TIMEOUT_SECONDS=45
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-window.xml"
 LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-window.XXXXXX.xml)"
-trap 'rm -f "$LOCAL_UI_XML"' EXIT
+OUT_DIR=""
+BENCHMARK_INSTALLED_BY_THIS_RUN=0
+PERF_LOCK_ACQUIRED=0
+
+cleanup() {
+  local exit_code=$?
+  rm -f "$LOCAL_UI_XML"
+  if [[ "$BENCHMARK_INSTALLED_BY_THIS_RUN" -eq 1 ]]; then
+    if ! pocketgpt_uninstall_isolated_benchmark \
+      "$SERIAL" "$PACKAGE" "$OUT_DIR/cleanup-uninstall.txt"; then
+      if [[ "$exit_code" -eq 0 ]]; then
+        exit_code=74
+      fi
+    fi
+  fi
+  if [[ "$PERF_LOCK_ACQUIRED" -eq 1 ]] && ! perf_lock_release; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      exit_code=73
+    fi
+  fi
+  trap - EXIT
+  exit "$exit_code"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 usage() {
   cat <<EOF
 Usage: $0 [--serial SERIAL] [--package PACKAGE] [--build] [--allow-debuggable]
 Measures PocketGPT typing-frame jank on the benchmark variant.
 
-  --build              Rebuild and install the benchmark APK before measuring
+  --build              Clean-install/profile/measure the isolated benchmark APK
   --allow-debuggable   Permit measuring a debuggable build (NOT recommended)
 EOF
 }
@@ -80,6 +113,41 @@ for node in re.findall(r"<node\b[^>]*>", source):
     sys.exit(0)
 sys.exit(1)
 PY
+}
+
+tag_center_from_dump() {
+  local tag="$1"
+  python3 "$HARNESS_HELPER" center --xml "$LOCAL_UI_XML" --resource-id "$tag"
+}
+
+prepare_fresh_install_state() {
+  local deadline=$((SECONDS + WAIT_TIMEOUT_SECONDS))
+  local coords=""
+  local onboarding_dismissed=false
+
+  wake_and_dismiss_keyguard
+  adb_shell am force-stop "$PACKAGE" >/dev/null
+  adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
+  while (( SECONDS < deadline )); do
+    if dump_ui; then
+      coords="$(tag_center_from_dump "session_drawer_button" 2>/dev/null || true)"
+      if [[ -n "$coords" ]]; then
+        printf '{"first_visible_activity_prepared":true,"onboarding_dismissed":%s}\n' \
+          "$onboarding_dismissed" >"$OUT_DIR/first-visible-activity-setup.json"
+        adb_shell am force-stop "$PACKAGE" >/dev/null
+        return 0
+      fi
+      coords="$(tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
+      if [[ -n "$coords" ]]; then
+        read -r x y <<<"$coords"
+        adb_shell input tap "$x" "$y" >/dev/null
+        onboarding_dismissed=true
+      fi
+    fi
+    sleep 1
+  done
+  echo "[perf-baseline] fresh benchmark install did not reach the app shell" >&2
+  return 1
 }
 
 wait_for_composer() {
@@ -160,18 +228,35 @@ done
   echo "ANDROID_SERIAL or --serial required" >&2
   exit 64
 }
+OUT_DIR="$REPO_ROOT/tmp/perf-baseline/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+mkdir -p "$OUT_DIR"
+pocketgpt_require_isolated_benchmark_package "$PACKAGE"
+perf_lock_acquire "$SERIAL" "$PACKAGE" "$$" "$ORIGINAL_COMMAND"
+PERF_LOCK_ACQUIRED=1
+echo "[perf-baseline] device lease=$PERF_LOCK_DIR"
 
 if [[ "$DO_BUILD" -eq 1 ]]; then
   echo "[perf-baseline] building :apps:mobile-android:assembleBenchmark"
-  (cd "$REPO_ROOT" && ./gradlew :apps:mobile-android:assembleBenchmark -q)
+  (cd "$REPO_ROOT" && ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleBenchmark -q)
   APK="$REPO_ROOT/apps/mobile-android/build/outputs/apk/benchmark/mobile-android-benchmark.apk"
   [[ -f "$APK" ]] || {
     echo "[perf-baseline] benchmark APK not found at $APK" >&2
     exit 66
   }
-  echo "[perf-baseline] installing $APK on $SERIAL"
-  adb -s "$SERIAL" install -r "$APK" >/dev/null
+  pocketgpt_verify_benchmark_apk "$REPO_ROOT" "$APK" "$OUT_DIR"
+  BENCHMARK_INSTALLED_BY_THIS_RUN=1
+  pocketgpt_activate_benchmark_profile \
+    "$SERIAL" "$PACKAGE" "$APK" "$OUT_DIR" "$HARNESS_HELPER"
+  prepare_fresh_install_state
 fi
+
+adb -s "$SERIAL" shell dumpsys package "$PACKAGE" >"$OUT_DIR/package-dump.txt" 2>&1 || true
+python3 "$HARNESS_HELPER" assert-profile-compiled \
+  --package-dump "$OUT_DIR/package-dump.txt" \
+  --package "$PACKAGE" \
+  --expected-status speed-profile \
+  --expected-reason cmdline \
+  >"$OUT_DIR/profile-compilation-sample-proof.json"
 
 # Refuse to run on a debuggable build unless explicitly opted in. Debug builds
 # inflate Compose recompose by ~40% and double-recompose per frame, producing
@@ -194,7 +279,7 @@ fi
 
 wake_and_dismiss_keyguard
 adb_shell am force-stop "$PACKAGE" >/dev/null
-adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
+adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
 read -r COMPOSER_X COMPOSER_Y < <(wait_for_composer)
 adb_shell input tap "$COMPOSER_X" "$COMPOSER_Y" >/dev/null
 sleep 1
@@ -245,7 +330,7 @@ if awk -v p="$P50" 'BEGIN { exit !(p + 0 >= 1000) }'; then
   exit 70
 fi
 
-echo "janky=${JANKY_PCT}% p50=${P50}ms p90=${P90}ms p99=${P99}ms"
+echo "janky=${JANKY_PCT}% p50=${P50}ms p90=${P90}ms p99=${P99}ms artifacts=${OUT_DIR}"
 
 FAIL=0
 fail_if_over() {

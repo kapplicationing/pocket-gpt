@@ -313,6 +313,17 @@ jobs:
             exit 1
           fi
 
+      - name: Verify benchmark APK packages the generated Baseline Profile
+        run: |
+          python3 scripts/dev/android_perf_harness.py assert-application-id \
+            --metadata apps/mobile-android/build/intermediates/packaged_manifests/benchmark/processBenchmarkManifestForPackage/output-metadata.json \
+            --expected com.pocketagent.android.benchmark
+          python3 scripts/benchmarks/verify_android_baseline_profile.py \
+            --apk apps/mobile-android/build/outputs/apk/benchmark/mobile-android-benchmark.apk \
+            --generated-profile apps/mobile-android/src/main/generated/baselineProfiles/baseline-prof.txt \
+            --merged-profile apps/mobile-android/build/intermediates/combined_art_profile/benchmark/compileBenchmarkArtProfile/baseline-prof.txt \
+            --json-output benchmark-baseline-profile-verification.json
+
   android-instrumented-smoke:
     needs: changes
     if: needs.changes.outputs.android_instrumented == 'true'

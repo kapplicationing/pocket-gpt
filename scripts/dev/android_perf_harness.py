@@ -40,6 +40,15 @@ class PackageIdentity:
     debuggable: bool
 
 
+@dataclass(frozen=True)
+class DexoptState:
+    package: str
+    apk_path: str
+    abi: str
+    status: str
+    reason: str
+
+
 def _parse_ui(source: str) -> ElementTree.Element:
     try:
         return ElementTree.fromstring(source)
@@ -247,6 +256,137 @@ def assert_package_identity_unchanged(
     return after
 
 
+def assert_broadcast_result(source: str, *, expected: int) -> int:
+    results = [int(value) for value in re.findall(r"Broadcast completed:\s*result=(-?\d+)", source)]
+    if len(results) != 1:
+        raise HarnessValidationError(
+            f"expected exactly one completed broadcast result, found {len(results)}"
+        )
+    if results[0] != expected:
+        raise HarnessValidationError(
+            f"expected broadcast result {expected}, observed {results[0]}"
+        )
+    return results[0]
+
+
+def assert_compile_result(source: str) -> str:
+    normalized = source.strip()
+    if normalized == "Success":
+        return "Success"
+    if "PERFORMED" in normalized:
+        return "PERFORMED"
+    raise HarnessValidationError(
+        f"package compile output did not report Success or PERFORMED: {normalized!r}"
+    )
+
+
+def assert_application_id_metadata(source: str, expected: str) -> str:
+    try:
+        payload = json.loads(source)
+    except json.JSONDecodeError as error:
+        raise HarnessValidationError(f"invalid packaged-manifest metadata: {error}") from error
+    if not isinstance(payload, dict):
+        raise HarnessValidationError("packaged-manifest metadata must be a JSON object")
+    observed = payload.get("applicationId")
+    if observed != expected:
+        raise HarnessValidationError(
+            f"expected benchmark applicationId {expected!r}, observed {observed!r}"
+        )
+    return observed
+
+
+def _base_dexopt_states(source: str, package: str) -> list[DexoptState]:
+    if "Dexopt state:" not in source:
+        return []
+    current_package: str | None = None
+    current_path: str | None = None
+    states: list[DexoptState] = []
+    package_header = re.compile(r"^\s{2}\[([^]]+)]\s*$")
+    path_line = re.compile(r"^\s+path:\s+(.+\.apk)\s*$")
+    state_line = re.compile(
+        r"^\s+([^\s:]+):\s+\[status=([^]]+)]\s+\[reason=([^]]+)](.*)$"
+    )
+    for line in source[source.index("Dexopt state:") :].splitlines()[1:]:
+        header_match = package_header.match(line)
+        if header_match:
+            current_package = header_match.group(1).strip()
+            current_path = None
+            continue
+        path_match = path_line.match(line)
+        if path_match:
+            current_path = path_match.group(1).strip()
+            continue
+        state_match = state_line.match(line)
+        if (
+            state_match
+            and current_package == package
+            and current_path is not None
+            and current_path.endswith("/base.apk")
+        ):
+            states.append(
+                DexoptState(
+                    package=package,
+                    apk_path=current_path,
+                    abi=state_match.group(1).strip(),
+                    status=state_match.group(2).strip(),
+                    reason=state_match.group(3).strip(),
+                )
+            )
+    return states
+
+
+def _normalized_primary_abi(source: str) -> str | None:
+    matches = re.findall(r"^\s*primaryCpuAbi=([^\s]+)\s*$", source, re.MULTILINE)
+    values = {value for value in matches if value != "null"}
+    if not values:
+        return None
+    if len(values) != 1:
+        raise HarnessValidationError(f"primaryCpuAbi is ambiguous: {sorted(values)}")
+    value = next(iter(values))
+    return {
+        "arm64-v8a": "arm64",
+        "armeabi-v7a": "arm",
+    }.get(value, value)
+
+
+def assert_profile_compiled(
+    source: str,
+    package: str,
+    *,
+    expected_status: str = "speed-profile",
+    expected_reason: str = "cmdline",
+) -> DexoptState:
+    state = parse_primary_dexopt_state(source, package)
+    if state.status != expected_status:
+        raise HarnessValidationError(
+            f"expected status {expected_status!r}, observed {state.status!r}"
+        )
+    if state.reason != expected_reason:
+        raise HarnessValidationError(
+            f"expected reason {expected_reason!r}, observed {state.reason!r}"
+        )
+    return state
+
+
+def parse_primary_dexopt_state(source: str, package: str) -> DexoptState:
+    package_marker = re.compile(rf"^\s{{2}}\[{re.escape(package)}]\s*$", re.MULTILINE)
+    if not package_marker.search(source):
+        raise HarnessValidationError(
+            f"Dexopt state for package {package!r} was not found"
+        )
+    states = _base_dexopt_states(source, package)
+    if len(states) > 1:
+        primary_abi = _normalized_primary_abi(source)
+        if primary_abi is not None:
+            states = [state for state in states if state.abi == primary_abi]
+    if len(states) != 1:
+        raise HarnessValidationError(
+            f"expected exactly one base.apk primary ABI Dexopt state for {package!r}, "
+            f"found {len(states)}"
+        )
+    return states[0]
+
+
 def run_id(pid: int | None = None) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     return f"{timestamp}-pid{os.getpid() if pid is None else pid}"
@@ -302,6 +442,23 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     package.add_argument("--after-dump", required=True, type=Path)
     package.add_argument("--after-paths", required=True, type=Path)
 
+    broadcast = subparsers.add_parser("assert-broadcast-result")
+    broadcast.add_argument("--output", required=True, type=Path)
+    broadcast.add_argument("--expected", required=True, type=int)
+
+    compile_result = subparsers.add_parser("assert-compile-result")
+    compile_result.add_argument("--output", required=True, type=Path)
+
+    application_id = subparsers.add_parser("assert-application-id")
+    application_id.add_argument("--metadata", required=True, type=Path)
+    application_id.add_argument("--expected", required=True)
+
+    compiled = subparsers.add_parser("assert-profile-compiled")
+    compiled.add_argument("--package-dump", required=True, type=Path)
+    compiled.add_argument("--package", required=True)
+    compiled.add_argument("--expected-status", default="speed-profile")
+    compiled.add_argument("--expected-reason", default="cmdline")
+
     identifier = subparsers.add_parser("run-id")
     identifier.add_argument("--pid", type=int, default=os.getpid())
     return parser.parse_args(argv)
@@ -347,6 +504,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _read(args.after_paths),
             )
             print(json.dumps(asdict(identity), sort_keys=True))
+        elif args.command == "assert-broadcast-result":
+            result = assert_broadcast_result(_read(args.output), expected=args.expected)
+            print(json.dumps({"result": result}, sort_keys=True))
+        elif args.command == "assert-compile-result":
+            result = assert_compile_result(_read(args.output))
+            print(json.dumps({"result": result}, sort_keys=True))
+        elif args.command == "assert-application-id":
+            application_id = assert_application_id_metadata(
+                _read(args.metadata),
+                args.expected,
+            )
+            print(json.dumps({"application_id": application_id}, sort_keys=True))
+        elif args.command == "assert-profile-compiled":
+            state = assert_profile_compiled(
+                _read(args.package_dump),
+                args.package,
+                expected_status=args.expected_status,
+                expected_reason=args.expected_reason,
+            )
+            print(json.dumps(asdict(state), sort_keys=True))
         elif args.command == "run-id":
             print(run_id(args.pid))
     except HarnessValidationError as error:

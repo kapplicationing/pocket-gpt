@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HARNESS_HELPER="$SCRIPT_DIR/android_perf_harness.py"
 source "$SCRIPT_DIR/android-perf-lock.sh"
+source "$SCRIPT_DIR/android-benchmark-profile.sh"
 
 ORIGINAL_COMMAND="$0"
 for original_arg in "$@"; do
@@ -14,15 +15,24 @@ for original_arg in "$@"; do
 done
 
 SERIAL="${ANDROID_SERIAL:-}"
-PACKAGE="com.pocketagent.android"
+PACKAGE="$POCKETGPT_BENCHMARK_PACKAGE"
 SCENARIO=""
 OUT_DIR=""
 DECLARED_RUNTIME_CONDITION=""
 DECLARED_DOWNLOAD_CONDITION=""
 DECLARED_VOICE_CONDITION=""
+CLEANUP_BENCHMARK=0
 
 cleanup() {
   local exit_code=$?
+  if [[ "$CLEANUP_BENCHMARK" -eq 1 ]]; then
+    if ! pocketgpt_uninstall_isolated_benchmark \
+      "$SERIAL" "$PACKAGE" "$OUT_DIR/cleanup-uninstall.txt"; then
+      if [[ "$exit_code" -eq 0 ]]; then
+        exit_code=74
+      fi
+    fi
+  fi
   if ! perf_lock_release; then
     if [[ "$exit_code" -eq 0 ]]; then
       exit_code=73
@@ -41,6 +51,7 @@ Usage: $0 --scenario settings-nav|model-sheet|drawer-search --runtime-state unlo
 
 Builds and installs the native-enabled benchmark APK for sample 1, captures
 three samples on the same installed package, then enforces median thresholds.
+The isolated benchmark package is removed before the device lease is released.
 The runtime, download, and voice flags are operator declarations checked for
 consistency; they are not observed application state.
 EOF
@@ -112,6 +123,7 @@ case "$DECLARED_VOICE_CONDITION" in
   inactive|active) ;;
   *) echo "--voice-state must be inactive or active" >&2; exit 64 ;;
 esac
+pocketgpt_require_isolated_benchmark_package "$PACKAGE"
 
 if [[ -z "$OUT_DIR" ]]; then
   RUN_ID="$(python3 "$HARNESS_HELPER" run-id --pid "$$")"
@@ -121,6 +133,7 @@ mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
 perf_lock_acquire "$SERIAL" "$PACKAGE" "$$" "$ORIGINAL_COMMAND"
+CLEANUP_BENCHMARK=1
 echo "[perf-interaction-gate] device lease=$PERF_LOCK_DIR"
 
 summary_paths=()

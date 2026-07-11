@@ -14,8 +14,12 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from android_perf_harness import (  # noqa: E402
     HarnessValidationError,
     assert_appended_probe,
+    assert_application_id_metadata,
+    assert_broadcast_result,
+    assert_compile_result,
     assert_foreground,
     assert_package_identity_unchanged,
+    assert_profile_compiled,
     assert_restored_text,
     assert_scenario_final_state,
     find_node_center,
@@ -205,6 +209,68 @@ class AndroidPerfHarnessTest(unittest.TestCase):
                 "/data/app/pocket/base.apk\n",
             )
 
+    def test_profile_activation_proof_requires_exact_receiver_and_compile_results(self):
+        self.assertEqual(
+            assert_broadcast_result("Broadcast completed: result=10\n", expected=10),
+            10,
+        )
+        self.assertEqual(assert_compile_result("Success\n"), "Success")
+        self.assertEqual(
+            assert_compile_result("Compilation PERFORMED successfully\n"),
+            "PERFORMED",
+        )
+
+        with self.assertRaisesRegex(HarnessValidationError, "expected broadcast result 1"):
+            assert_broadcast_result("Broadcast completed: result=0\n", expected=1)
+        with self.assertRaisesRegex(HarnessValidationError, "compile output"):
+            assert_compile_result("Failure: package could not be compiled\n")
+
+    def test_benchmark_application_id_must_be_isolated_before_install(self):
+        metadata = json.dumps({"applicationId": "com.pocketagent.android.benchmark"})
+        self.assertEqual(
+            assert_application_id_metadata(metadata, "com.pocketagent.android.benchmark"),
+            "com.pocketagent.android.benchmark",
+        )
+        with self.assertRaisesRegex(HarnessValidationError, "expected benchmark applicationId"):
+            assert_application_id_metadata(
+                json.dumps({"applicationId": "com.pocketagent.android"}),
+                "com.pocketagent.android.benchmark",
+            )
+
+    def test_profile_compilation_parser_targets_base_primary_abi_for_exact_package(self):
+        source = self.dexopt_dump(
+            status="speed-profile",
+            reason="cmdline",
+            secondary_status="verify",
+        )
+
+        state = assert_profile_compiled(source, "com.pocketagent.android.benchmark")
+
+        self.assertEqual(state.apk_path, "/data/app/pocket/base.apk")
+        self.assertEqual(state.abi, "arm64")
+        self.assertEqual(state.status, "speed-profile")
+        self.assertEqual(state.reason, "cmdline")
+
+    def test_profile_compilation_parser_rejects_unoptimized_wrong_or_ambiguous_primary_state(self):
+        with self.assertRaisesRegex(HarnessValidationError, "expected status 'speed-profile'"):
+            assert_profile_compiled(
+                self.dexopt_dump(status="verify", reason="install"),
+                "com.pocketagent.android.benchmark",
+            )
+        with self.assertRaisesRegex(HarnessValidationError, "package.*was not found"):
+            assert_profile_compiled(
+                self.dexopt_dump(status="speed-profile", reason="cmdline"),
+                "com.pocketagent.android",
+            )
+        ambiguous = self.dexopt_dump(status="speed-profile", reason="cmdline").replace(
+            "  primaryCpuAbi=arm64-v8a\n",
+            "",
+        ) + (
+            "      x86_64: [status=speed-profile] [reason=cmdline]\n"
+        )
+        with self.assertRaisesRegex(HarnessValidationError, "exactly one base.apk primary ABI"):
+            assert_profile_compiled(ambiguous, "com.pocketagent.android.benchmark")
+
     def test_run_id_has_microseconds_and_pid(self):
         identifier = run_id(4321)
 
@@ -225,6 +291,26 @@ class AndroidPerfHarnessTest(unittest.TestCase):
         return (
             '<hierarchy><node resource-id="completion_system_prompt_input" '
             f'text="{encoded}" bounds="[0,0][100,100]" /></hierarchy>'
+        )
+
+    @staticmethod
+    def dexopt_dump(
+        *,
+        status: str,
+        reason: str,
+        secondary_status: str = "speed-profile",
+    ) -> str:
+        return (
+            "  primaryCpuAbi=arm64-v8a\n"
+            "Dexopt state:\n"
+            "  [com.example.other]\n"
+            "    path: /data/app/other/base.apk\n"
+            "      arm64: [status=speed] [reason=cmdline]\n"
+            "  [com.pocketagent.android.benchmark]\n"
+            "    path: /data/app/pocket/split_config.arm64_v8a.apk\n"
+            f"      arm64: [status={secondary_status}] [reason=cmdline]\n"
+            "    path: /data/app/pocket/base.apk\n"
+            f"      arm64: [status={status}] [reason={reason}]\n"
         )
 
 

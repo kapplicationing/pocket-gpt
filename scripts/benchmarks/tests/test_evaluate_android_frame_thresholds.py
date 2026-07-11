@@ -25,10 +25,11 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
         payload = {
             "scenario": "settings-nav",
             "serial": "device-123",
-            "package": "com.pocketagent.android",
+            "package": "com.pocketagent.android.benchmark",
             "build_source": "assembled-native-benchmark" if index == 1 else "preinstalled-nondebuggable",
             "build_variant": "benchmark" if index == 1 else "unverified-nondebuggable",
             "native_runtime_packaged": True if index == 1 else None,
+            "baseline_profile_packaged": True if index == 1 else None,
             "debuggable": False,
             "version_code": "1",
             "version_name": "0.1.0",
@@ -58,15 +59,18 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
             "model": "Pixel 8",
             "android_release": "16",
             "api_level": 36,
-            "refresh_rate_hz": 120.0,
-            "refresh_rate_source": "dumpsys-display-active-mode",
-            "refresh_rate_evidence_available": True,
+            "refresh_rate_hz_before": 120.0,
+            "refresh_rate_source_before": "dumpsys-display-active-mode",
+            "refresh_rate_evidence_available_before": True,
+            "refresh_rate_hz_after": 120.0,
+            "refresh_rate_source_after": "dumpsys-display-active-mode",
+            "refresh_rate_evidence_available_after": True,
             "thermal_status_before": 0,
             "thermal_status_after": 0,
             "battery_temperature_c_before": 31.2,
             "battery_temperature_c_after": 31.4,
             "compilation_filter": "speed-profile",
-            "compilation_reason": "bg-dexopt",
+            "compilation_reason": "cmdline",
             "compilation_evidence_available": True,
             "workload_condition_source": "operator-declared-not-observed",
             "declared_runtime_condition": "unloaded",
@@ -82,6 +86,7 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
         self.assertEqual(report["medians"]["janky_pct"], 12.0)
         self.assertEqual(report["build_variant"], "benchmark")
         self.assertTrue(report["native_runtime_packaged"])
+        self.assertTrue(report["baseline_profile_packaged"])
 
     def test_fails_when_a_metric_median_exceeds_threshold(self):
         paths = [
@@ -130,6 +135,7 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
             build_source="preinstalled-nondebuggable",
             build_variant="unverified-nondebuggable",
             native_runtime_packaged=None,
+            baseline_profile_packaged=None,
         )
         paths = [first, self.write_sample(2), self.write_sample(3)]
 
@@ -165,6 +171,45 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValidationError, "compilation evidence"):
             evaluate_samples(self.three_samples(device_state=incomplete))
+
+    def test_rejects_refresh_rate_drift_within_a_sample(self):
+        drifted = {
+            **self.sample_device_state(),
+            "refresh_rate_hz_after": 60.0,
+        }
+        with self.assertRaisesRegex(ValidationError, "refresh-rate drift"):
+            evaluate_samples(self.three_samples(device_state=drifted))
+
+    def test_rejects_refresh_setting_fallback_as_acceptance_evidence(self):
+        fallback = {
+            **self.sample_device_state(),
+            "refresh_rate_source_after": "system-peak-refresh-setting",
+        }
+        with self.assertRaisesRegex(ValidationError, "active display mode"):
+            evaluate_samples(self.three_samples(device_state=fallback))
+
+    def test_rejects_unoptimized_or_non_cmdline_compilation(self):
+        unoptimized = {
+            **self.sample_device_state(),
+            "compilation_filter": "verify",
+            "compilation_reason": "install",
+        }
+        with self.assertRaisesRegex(ValidationError, "speed-profile"):
+            evaluate_samples(self.three_samples(device_state=unoptimized))
+
+    def test_rejects_missing_or_mixed_baseline_profile_anchor(self):
+        with self.assertRaisesRegex(ValidationError, "baseline_profile_packaged=true"):
+            evaluate_samples(
+                [
+                    self.write_sample(1, baseline_profile_packaged=False),
+                    self.write_sample(2),
+                    self.write_sample(3),
+                ]
+            )
+
+    def test_rejects_baseline_profile_claim_on_preinstalled_sample(self):
+        with self.assertRaisesRegex(ValidationError, "preinstalled sample"):
+            evaluate_samples(self.three_samples(baseline_profile_packaged=True))
 
     def test_rejects_missing_device_state_metadata(self):
         with self.assertRaisesRegex(ValidationError, "device_state"):

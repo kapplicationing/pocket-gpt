@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from android_perf_harness import HarnessValidationError, parse_primary_dexopt_state
+
 
 class MetadataError(ValueError):
     """Raised when required device metadata cannot be recovered."""
@@ -58,7 +60,6 @@ def _refresh_rate(display_source: str, settings_source: str) -> tuple[float | No
         r"(?i)mActiveSfDisplayMode[^\n]*?(?:refreshRate|fps)=([0-9]+(?:\.[0-9]+)?)",
         r"(?i)activeMode[^\n]*?(?:refreshRate|fps)[= ]+([0-9]+(?:\.[0-9]+)?)",
         r"(?i)mRefreshRate=([0-9]+(?:\.[0-9]+)?)",
-        r"(?i)refreshRate[= ]+([0-9]+(?:\.[0-9]+)?)",
     )
     for pattern in display_patterns:
         match = re.search(pattern, display_source)
@@ -70,40 +71,46 @@ def _refresh_rate(display_source: str, settings_source: str) -> tuple[float | No
     return None, "unavailable"
 
 
-def _compilation_state(package_source: str) -> tuple[str, str, bool]:
-    match = re.search(
-        r"\[status=([^]]+)](?:\s*\[reason=([^]]+)])?",
-        package_source,
-    )
-    if not match:
+def _compilation_state(package_source: str, package: str) -> tuple[str, str, bool]:
+    try:
+        state = parse_primary_dexopt_state(package_source, package)
+    except HarnessValidationError:
         return "unavailable", "unavailable", False
-    return match.group(1).strip(), (match.group(2) or "unspecified").strip(), True
+    return state.status, state.reason, True
 
 
 def collect_device_state(
     artifact_dir: Path,
     *,
+    package: str,
     declared_runtime_condition: str,
     declared_download_condition: str,
     declared_voice_condition: str,
 ) -> dict[str, Any]:
     artifact_dir = Path(artifact_dir)
     properties = _read(artifact_dir, "device-properties.txt")
-    refresh_rate, refresh_source = _refresh_rate(
+    refresh_rate_before, refresh_source_before = _refresh_rate(
         _read(artifact_dir, "display-before.txt"),
         _read(artifact_dir, "refresh-settings-before.txt"),
     )
+    refresh_rate_after, refresh_source_after = _refresh_rate(
+        _read(artifact_dir, "display-after.txt"),
+        _read(artifact_dir, "refresh-settings-after.txt"),
+    )
     compilation_filter, compilation_reason, compilation_available = _compilation_state(
-        _read(artifact_dir, "package-dump.txt")
+        _read(artifact_dir, "package-dump.txt"), package
     )
     return {
         "manufacturer": _property(properties, "ro.product.manufacturer"),
         "model": _property(properties, "ro.product.model"),
         "android_release": _property(properties, "ro.build.version.release"),
         "api_level": int(_property(properties, "ro.build.version.sdk")),
-        "refresh_rate_hz": refresh_rate,
-        "refresh_rate_source": refresh_source,
-        "refresh_rate_evidence_available": refresh_rate is not None,
+        "refresh_rate_hz_before": refresh_rate_before,
+        "refresh_rate_source_before": refresh_source_before,
+        "refresh_rate_evidence_available_before": refresh_rate_before is not None,
+        "refresh_rate_hz_after": refresh_rate_after,
+        "refresh_rate_source_after": refresh_source_after,
+        "refresh_rate_evidence_available_after": refresh_rate_after is not None,
         "thermal_status_before": _thermal_status(
             _read(artifact_dir, "thermal-before.txt"), "before"
         ),
@@ -162,6 +169,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         required=True,
     )
     parser.add_argument("--native-runtime-packaged", choices=("true", "null"), required=True)
+    parser.add_argument("--baseline-profile-packaged", choices=("true", "null"), required=True)
     parser.add_argument("--debuggable", choices=("true", "false"), required=True)
     parser.add_argument("--total-frames", required=True, type=int)
     parser.add_argument("--janky-pct", required=True, type=float)
@@ -176,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         device_state = collect_device_state(
             args.artifact_dir,
+            package=args.package,
             declared_runtime_condition=args.declared_runtime_condition,
             declared_download_condition=args.declared_download_condition,
             declared_voice_condition=args.declared_voice_condition,
@@ -190,6 +199,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "build_source": args.build_source,
         "build_variant": args.build_variant,
         "native_runtime_packaged": True if args.native_runtime_packaged == "true" else None,
+        "baseline_profile_packaged": True if args.baseline_profile_packaged == "true" else None,
         "debuggable": args.debuggable == "true",
         "version_code": args.version_code,
         "version_name": args.version_name,

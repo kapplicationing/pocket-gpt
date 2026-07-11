@@ -47,8 +47,9 @@ onboarding, voice, and tooling gates, see
     `TextFieldValue`; a declaration elsewhere in the file cannot mask a String overload.
   - Every `data class` in `ui/state/` is `@Immutable` or listed in `compose-stability.conf`.
   - `scripts/dev/perf-baseline.sh` checks `DEBUGGABLE` flag and builds `assembleBenchmark`.
-- `scripts/dev/perf-baseline.sh` is the device evidence gate for UI/runtime refactors.
-  It refuses to measure debuggable builds without `--allow-debuggable`.
+- `scripts/dev/perf-baseline.sh` is a single-sample composer diagnostic. It uses
+  the device/package lease and refuses to measure debuggable builds without
+  `--allow-debuggable`; use the three-sample interaction gate for acceptance.
 - `scripts/dev/compose-report-hotpath.sh --build` forcibly regenerates benchmark-scoped
   Compose compiler reports, fails on empty/stale/incomplete metrics or missing expected
   hot composables, and highlights instability/non-skippable churn. Use `--strict` only
@@ -57,8 +58,8 @@ onboarding, voice, and tooling gates, see
   declarations and retains device, refresh-rate, thermal, battery, package-compilation,
   and frame-window evidence for each sample. Operators must verify those three
   app states before the group; the gate checks declaration consistency, not app
-  telemetry. Acceptance rejects missing
-  refresh/compilation provenance, fewer than 20 frames, or any nonzero thermal status.
+  telemetry. Acceptance rejects missing or drifting refresh evidence, compilation
+  other than exact `speed-profile`/`cmdline`, fewer than 20 frames, or any nonzero thermal status.
   One atomic device/package lease covers build, install, and all three samples;
   each child validates the owning token, and end-state checks still fail closed
   against tools that do not honor the lease.
@@ -67,20 +68,28 @@ onboarding, voice, and tooling gates, see
   when no physical device is attached.
 - The app ships a physical-device-generated, app-only Baseline Profile. The
   `apps/mobile-android-baselineprofile` generator covers cold launch, the session
-  drawer, settings, and model library without model inference. `ProfileInstaller`
+  drawer, general settings, completion settings, and model library without model
+  inference. `ProfileInstaller`
   enables profile installation for sideloaded builds, and
   `scripts/dev/baseline-profile.sh verify` proves both benchmark and release APK
   packaging instead of accepting transitive library profiles as app coverage.
+  The performance wrappers clean-install `com.pocketagent.android.benchmark`,
+  synchronously install the embedded profile through `ProfileInstallReceiver`,
+  compile it with `speed-profile`, perform an untimed first-visible-Activity setup,
+  and remove the isolated package before releasing the device. Baseline Profile
+  generation remains base-package work and therefore requires a disposable device.
 
 ## Build Variant Policy
 
 | Variant | Purpose | Debuggable | AOT | Use |
 |---|---|---|---|---|
 | `debug` | Daily development, hot reload, breakpoints | yes | no | Local iteration only. **Never measure perf on this variant.** |
-| `benchmark` | Performance measurement, baseline gates | no | yes | `scripts/dev/perf-baseline.sh --build`, perfetto traces, jank investigations |
+| `benchmark` | Performance measurement, baseline gates | no | yes | Isolated `com.pocketagent.android.benchmark`; `scripts/dev/perf-baseline.sh --build`, perfetto traces, jank investigations |
 | `release` | Production distribution | no | yes | App Store builds, manual smoke after final QA |
 
-The `benchmark` variant is signed with the well-known Android debug keystore so it
+The `benchmark` variant uses an application-ID suffix and a distinct launcher label,
+so clean profile-state setup cannot erase the base app's conversations or models.
+It is signed with the well-known Android debug keystore so it
 installs on developer/CI devices without provisioning a custom signing key. It is
 never published.
 

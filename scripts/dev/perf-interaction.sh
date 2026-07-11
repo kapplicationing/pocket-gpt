@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HARNESS_HELPER="$SCRIPT_DIR/android_perf_harness.py"
 source "$SCRIPT_DIR/android-perf-lock.sh"
+source "$SCRIPT_DIR/android-benchmark-profile.sh"
 
 ORIGINAL_COMMAND="$0"
 for original_arg in "$@"; do
@@ -16,7 +17,7 @@ for original_arg in "$@"; do
 done
 
 SERIAL="${ANDROID_SERIAL:-}"
-PACKAGE="com.pocketagent.android"
+PACKAGE="$POCKETGPT_BENCHMARK_PACKAGE"
 SCENARIO=""
 DO_BUILD=0
 ALLOW_DEBUGGABLE=0
@@ -31,7 +32,9 @@ REMOTE_UI_DIRTY=0
 BUILD_SOURCE="preinstalled-nondebuggable"
 BUILD_VARIANT="unverified-nondebuggable"
 NATIVE_RUNTIME_PACKAGED_JSON="null"
+BASELINE_PROFILE_PACKAGED_JSON="null"
 DEBUGGABLE=0
+BENCHMARK_INSTALLED_BY_THIS_RUN=0
 STARTED_AT_UTC=""
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-interaction.xml"
 LOCAL_UI_XML=""
@@ -56,6 +59,14 @@ cleanup() {
     "$SETTINGS_PROMPT_RESTORED_XML"; do
     [[ -z "$temp_path" ]] || rm -f "$temp_path"
   done
+  if [[ "$BENCHMARK_INSTALLED_BY_THIS_RUN" -eq 1 && -z "$PARENT_LOCK_TOKEN" ]]; then
+    if ! pocketgpt_uninstall_isolated_benchmark \
+      "$SERIAL" "$PACKAGE" "$OUT_DIR/cleanup-uninstall.txt"; then
+      if [[ "$exit_code" -eq 0 ]]; then
+        exit_code=74
+      fi
+    fi
+  fi
   if ! perf_lock_release; then
     if [[ "$exit_code" -eq 0 ]]; then
       exit_code=73
@@ -79,7 +90,8 @@ Measures PocketGPT non-generation UI frame stats on the benchmark variant.
 For acceptance evidence, use perf-interaction-gate.sh to capture and evaluate
 three samples. This command captures one diagnostic sample. The runtime,
 download, and voice flags are operator declarations checked for consistency;
-they are not observed application state.
+they are not observed application state. --build always clean-installs the
+isolated com.pocketagent.android.benchmark package and never the base app.
 EOF
 }
 
@@ -170,6 +182,7 @@ case "$DECLARED_VOICE_CONDITION" in
     exit 64
     ;;
 esac
+pocketgpt_require_isolated_benchmark_package "$PACKAGE"
 
 if [[ -z "$OUT_DIR" ]]; then
   RUN_ID="$(python3 "$HARNESS_HELPER" run-id --pid "$$")"
@@ -378,10 +391,42 @@ prepare_scenario_input() {
 
   # Relaunch after preconditioning so each search journey starts empty.
   adb_shell am force-stop "$PACKAGE" >/dev/null
-  adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
+  adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
   wait_for_app_foreground
   wait_tag "composer_input"
   sleep 1
+}
+
+prepare_fresh_install_state() {
+  local deadline=$((SECONDS + 30))
+  local coords=""
+  local onboarding_dismissed=false
+
+  wake_and_dismiss_keyguard
+  adb_shell am force-stop "$PACKAGE" >/dev/null
+  adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
+  wait_for_app_foreground
+  while (( SECONDS < deadline )); do
+    if dump_ui; then
+      coords="$(tag_center_from_dump "session_drawer_button" 2>/dev/null || true)"
+      if [[ -n "$coords" ]]; then
+        printf '{"first_visible_activity_prepared":true,"onboarding_dismissed":%s}\n' \
+          "$onboarding_dismissed" >"$OUT_DIR/first-visible-activity-setup.json"
+        adb_shell am force-stop "$PACKAGE" >/dev/null
+        return 0
+      fi
+      coords="$(tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
+      if [[ -n "$coords" ]]; then
+        read -r x y <<<"$coords"
+        adb_shell input tap "$x" "$y" >/dev/null
+        onboarding_dismissed=true
+      fi
+    fi
+    sleep 1
+  done
+  echo "[perf-interaction] fresh benchmark install did not reach the app shell" >&2
+  write_redacted_ui "$OUT_DIR/first-visible-activity-failure.json" 2>/dev/null || true
+  return 1
 }
 
 restore_settings_prompt() {
@@ -443,19 +488,25 @@ if [[ "$DO_BUILD" -eq 1 ]]; then
     echo "[perf-interaction] benchmark APK not found at $APK" >&2
     exit 66
   }
-  unzip -Z1 "$APK" >"$OUT_DIR/apk-entries.txt"
-  grep -Fxq 'lib/arm64-v8a/libpocket_llama.so' "$OUT_DIR/apk-entries.txt" || {
-    echo "[perf-interaction] benchmark APK is missing lib/arm64-v8a/libpocket_llama.so" >&2
-    exit 66
-  }
-  adb -s "$SERIAL" install -r "$APK" >/dev/null
+  pocketgpt_verify_benchmark_apk "$REPO_ROOT" "$APK" "$OUT_DIR"
+  BENCHMARK_INSTALLED_BY_THIS_RUN=1
+  pocketgpt_activate_benchmark_profile \
+    "$SERIAL" "$PACKAGE" "$APK" "$OUT_DIR" "$HARNESS_HELPER"
+  prepare_fresh_install_state
   BUILD_SOURCE="assembled-native-benchmark"
   BUILD_VARIANT="benchmark"
   NATIVE_RUNTIME_PACKAGED_JSON="true"
+  BASELINE_PROFILE_PACKAGED_JSON="true"
 fi
 
 PACKAGE_DUMP="$(adb -s "$SERIAL" shell dumpsys package "$PACKAGE" 2>/dev/null || true)"
 printf '%s\n' "$PACKAGE_DUMP" >"$OUT_DIR/package-dump.txt"
+python3 "$HARNESS_HELPER" assert-profile-compiled \
+  --package-dump "$OUT_DIR/package-dump.txt" \
+  --package "$PACKAGE" \
+  --expected-status speed-profile \
+  --expected-reason cmdline \
+  >"$OUT_DIR/profile-compilation-sample-proof.json"
 adb -s "$SERIAL" shell pm path "$PACKAGE" >"$OUT_DIR/package-paths.txt" 2>&1 || true
 INSTALLED_FLAGS="$(awk '/pkgFlags=/ {print; exit}' <<<"$PACKAGE_DUMP")"
 if [[ -z "$INSTALLED_FLAGS" ]]; then
@@ -496,7 +547,7 @@ IFS=$'\t' read -r FINAL_INPUT_TAG FINAL_INPUT_TEXT < <(
 )
 wake_and_dismiss_keyguard
 adb_shell am force-stop "$PACKAGE" >/dev/null
-adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
+adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
 wait_for_app_foreground
 wait_tag "composer_input"
 sleep 1
@@ -633,6 +684,7 @@ python3 "$SCRIPT_DIR/build_android_perf_summary.py" \
   --build-source "$BUILD_SOURCE" \
   --build-variant "$BUILD_VARIANT" \
   --native-runtime-packaged "$NATIVE_RUNTIME_PACKAGED_JSON" \
+  --baseline-profile-packaged "$BASELINE_PROFILE_PACKAGED_JSON" \
   --debuggable "$DEBUGGABLE_JSON" \
   --version-code "$VERSION_CODE" \
   --version-name "$VERSION_NAME" \

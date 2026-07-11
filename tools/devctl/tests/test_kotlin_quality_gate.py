@@ -124,6 +124,120 @@ class KotlinQualityGateTest(unittest.TestCase):
                 findings[1],
             )
 
+    def test_normal_run_replaces_analyzed_reports_and_ignores_unanalyzed_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale_detekt = root / "apps/mobile-android/build/reports/detekt/stale.xml"
+            stale_detekt.parent.mkdir(parents=True, exist_ok=True)
+            stale_detekt.write_text(
+                """
+                <smell-baseline>
+                  <file name="apps/mobile-android/src/main/kotlin/com/example/Stale.kt">
+                    <error line="7" source="stale:detekt" message="Stale detekt finding." />
+                  </file>
+                </smell-baseline>
+                """.strip(),
+                encoding="utf-8",
+            )
+            stale_ktlint = root / "packages/core-domain/build/reports/ktlint/stale.xml"
+            stale_ktlint.parent.mkdir(parents=True, exist_ok=True)
+            stale_ktlint.write_text(
+                """
+                <checkstyle>
+                  <file name="packages/core-domain/src/commonMain/kotlin/com/example/Stale.kt">
+                    <error line="8" source="stale:ktlint" message="Stale ktlint finding." />
+                  </file>
+                </checkstyle>
+                """.strip(),
+                encoding="utf-8",
+            )
+            unrelated_report = root / "packages/not-analyzed/build/reports/detekt/detekt.xml"
+            unrelated_report.parent.mkdir(parents=True, exist_ok=True)
+            unrelated_report.write_text(
+                """
+                <smell-baseline>
+                  <file name="packages/not-analyzed/src/main/kotlin/com/example/Unrelated.kt">
+                    <error line="9" source="unrelated:detekt" message="Unrelated stale finding." />
+                  </file>
+                </smell-baseline>
+                """.strip(),
+                encoding="utf-8",
+            )
+
+            def fake_gradle(command: list[str], **_: object) -> CompletedProcess[str]:
+                self.assertFalse(stale_detekt.exists())
+                self.assertFalse(stale_ktlint.exists())
+                self.assertTrue(unrelated_report.exists())
+
+                current_detekt = root / "apps/mobile-android/build/reports/detekt/detekt.xml"
+                current_detekt.parent.mkdir(parents=True, exist_ok=True)
+                current_detekt.write_text(
+                    """
+                    <smell-baseline>
+                      <file name="apps/mobile-android/src/main/kotlin/com/example/Current.kt">
+                        <error line="10" source="current:detekt" message="Current detekt finding." />
+                      </file>
+                    </smell-baseline>
+                    """.strip(),
+                    encoding="utf-8",
+                )
+                current_ktlint = root / "packages/core-domain/build/reports/ktlint/current.xml"
+                current_ktlint.parent.mkdir(parents=True, exist_ok=True)
+                current_ktlint.write_text(
+                    """
+                    <checkstyle>
+                      <file name="packages/core-domain/src/commonMain/kotlin/com/example/Current.kt">
+                        <error line="11" source="current:ktlint" message="Current ktlint finding." />
+                      </file>
+                    </checkstyle>
+                    """.strip(),
+                    encoding="utf-8",
+                )
+                return CompletedProcess(command, 0, stdout="", stderr="")
+
+            with mock.patch(
+                "tools.devctl.kotlin_quality_gate._gradle_subprocess_env",
+                return_value={},
+            ), mock.patch(
+                "tools.devctl.kotlin_quality_gate.subprocess.run",
+                side_effect=fake_gradle,
+            ), mock.patch(
+                "tools.devctl.kotlin_quality_gate._git_changed_files",
+                return_value=[],
+            ):
+                findings, _, _ = run_gate(root, strict_changed_only=False)
+
+            self.assertEqual({"current:detekt", "current:ktlint"}, {finding.rule_id for finding in findings})
+            self.assertTrue(unrelated_report.exists())
+
+    def test_skip_gradle_preserves_and_parses_existing_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale_report = root / "packages/not-analyzed/build/reports/detekt/stale.xml"
+            stale_report.parent.mkdir(parents=True, exist_ok=True)
+            stale_report.write_text(
+                """
+                <smell-baseline>
+                  <file name="packages/not-analyzed/src/main/kotlin/com/example/Stale.kt">
+                    <error line="7" source="fixture:detekt" message="Fixture finding." />
+                  </file>
+                </smell-baseline>
+                """.strip(),
+                encoding="utf-8",
+            )
+
+            with mock.patch(
+                "tools.devctl.kotlin_quality_gate._run_gradle_analysis",
+            ) as gradle, mock.patch(
+                "tools.devctl.kotlin_quality_gate._git_changed_files",
+                return_value=[],
+            ):
+                findings, _, _ = run_gate(root, strict_changed_only=False, skip_gradle=True)
+
+            gradle.assert_not_called()
+            self.assertTrue(stale_report.exists())
+            self.assertEqual(["fixture:detekt"], [finding.rule_id for finding in findings])
+
     def test_run_gate_filters_findings_to_changed_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -4,13 +4,29 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 _SUPPORTED_GRADLE_JAVA_MAJORS = (21,)
+_ANALYZED_MODULES = (
+    (":apps:mobile-android", Path("apps/mobile-android")),
+    (":apps:mobile-android-host", Path("apps/mobile-android-host")),
+    (":packages:core-domain", Path("packages/core-domain")),
+    (":packages:inference-adapters", Path("packages/inference-adapters")),
+    (":packages:tool-runtime", Path("packages/tool-runtime")),
+    (":packages:memory", Path("packages/memory")),
+    (":packages:native-bridge", Path("packages/native-bridge")),
+    (":packages:app-runtime", Path("packages/app-runtime")),
+)
+_ANALYSIS_REPORT_DIRECTORIES = (
+    Path("build/reports/detekt"),
+    Path("build/reports/ktlint"),
+)
 
 
 @dataclass(frozen=True)
@@ -23,18 +39,9 @@ class Finding:
 
 
 def _run_gradle_analysis(repo_root: Path) -> None:
-    module_paths = [
-        ":apps:mobile-android",
-        ":apps:mobile-android-host",
-        ":packages:core-domain",
-        ":packages:inference-adapters",
-        ":packages:tool-runtime",
-        ":packages:memory",
-        ":packages:native-bridge",
-        ":packages:app-runtime",
-    ]
+    _remove_generated_analysis_reports(repo_root)
     gradle_tasks: list[str] = []
-    for module_path in module_paths:
+    for module_path, _ in _ANALYZED_MODULES:
         gradle_tasks.append(f"{module_path}:detekt")
         gradle_tasks.append(f"{module_path}:ktlintCheck")
     command = ["./gradlew", "--no-daemon", *gradle_tasks]
@@ -51,6 +58,16 @@ def _run_gradle_analysis(repo_root: Path) -> None:
         stderr = (result.stderr or "").strip()
         details = "\n".join(part for part in (stdout, stderr) if part)
         raise RuntimeError(f"Gradle static analysis failed.\n{details}")
+
+
+def _remove_generated_analysis_reports(repo_root: Path) -> None:
+    for _, module_directory in _ANALYZED_MODULES:
+        for report_directory in _ANALYSIS_REPORT_DIRECTORIES:
+            path = repo_root / module_directory / report_directory
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
 
 
 def _gradle_subprocess_env() -> dict[str, str]:
@@ -230,12 +247,29 @@ def _parse_ktlint_report(report_path: Path, repo_root: Path) -> list[Finding]:
     return findings
 
 
-def collect_findings(repo_root: Path) -> list[Finding]:
+def _analysis_reports(repo_root: Path, module_directories: Iterable[Path] | None) -> Iterable[tuple[str, Path]]:
+    if module_directories is None:
+        for report in repo_root.glob("**/build/reports/detekt/*.xml"):
+            yield "detekt", report
+        for report in repo_root.glob("**/build/reports/ktlint/**/*.xml"):
+            yield "ktlint", report
+        return
+
+    for module_directory in module_directories:
+        report_root = repo_root / module_directory / "build/reports"
+        for report in (report_root / "detekt").glob("*.xml"):
+            yield "detekt", report
+        for report in (report_root / "ktlint").glob("**/*.xml"):
+            yield "ktlint", report
+
+
+def collect_findings(repo_root: Path, module_directories: Iterable[Path] | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for report in repo_root.glob("**/build/reports/detekt/*.xml"):
-        findings.extend(_parse_detekt_report(report, repo_root))
-    for report in repo_root.glob("**/build/reports/ktlint/**/*.xml"):
-        findings.extend(_parse_ktlint_report(report, repo_root))
+    for tool, report in _analysis_reports(repo_root, module_directories):
+        if tool == "detekt":
+            findings.extend(_parse_detekt_report(report, repo_root))
+        else:
+            findings.extend(_parse_ktlint_report(report, repo_root))
     findings.sort(key=lambda item: (item.path.as_posix(), item.line_number, item.tool, item.rule_id))
     return findings
 
@@ -303,7 +337,8 @@ def run_gate(
 ) -> tuple[list[Finding], list[Finding], list[Path]]:
     if not skip_gradle:
         _run_gradle_analysis(repo_root)
-    findings = collect_findings(repo_root)
+    module_directories = None if skip_gradle else (module_directory for _, module_directory in _ANALYZED_MODULES)
+    findings = collect_findings(repo_root, module_directories=module_directories)
     changed_files = _git_changed_files(repo_root, base_ref=base_ref)
     changed_set = {path.as_posix() for path in changed_files}
     changed_findings = [finding for finding in findings if finding.path.as_posix() in changed_set]

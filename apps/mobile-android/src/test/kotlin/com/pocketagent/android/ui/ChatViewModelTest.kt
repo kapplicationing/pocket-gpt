@@ -2306,17 +2306,6 @@ private class LifecycleOnlyProvisioningGateway(
 
     override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState = aggregateState.value
 
-    private fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
-        models = emptyList(),
-        storageSummary = StorageSummary(
-            totalBytes = 0L,
-            freeBytes = 0L,
-            usedByModelsBytes = 0L,
-            tempDownloadBytes = 0L,
-        ),
-        requiredModelIds = emptySet(),
-    )
-
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
         error("not used in ChatViewModelTest")
     }
@@ -2630,17 +2619,6 @@ private class LoadingProvisioningGateway : ProvisioningGateway {
     override fun observeProvisioningAggregateState(): StateFlow<ProvisioningAggregateState> = aggregateState
 
     override suspend fun seedProvisioningAggregateState(): ProvisioningAggregateState = aggregateState.value
-
-    private fun currentSnapshot(): RuntimeProvisioningSnapshot = RuntimeProvisioningSnapshot(
-        models = emptyList(),
-        storageSummary = StorageSummary(
-            totalBytes = 0L,
-            freeBytes = 0L,
-            usedByModelsBytes = 0L,
-            tempDownloadBytes = 0L,
-        ),
-        requiredModelIds = emptySet(),
-    )
 
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
         error("not used in ChatViewModelTest")

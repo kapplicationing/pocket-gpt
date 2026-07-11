@@ -1,6 +1,5 @@
 package com.pocketagent.android.ui
 
-import com.pocketagent.android.ui.state.activeSession
 import androidx.lifecycle.viewModelScope
 import com.pocketagent.android.runtime.RuntimeSessionCreationResult
 import com.pocketagent.android.ui.controllers.ChatStateUpdate
@@ -11,6 +10,7 @@ import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.PersistedToolCallStatus
 import com.pocketagent.android.ui.state.UiError
 import com.pocketagent.android.ui.state.UiErrorMapper
+import com.pocketagent.android.ui.state.activeSession
 import com.pocketagent.core.SessionId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.update

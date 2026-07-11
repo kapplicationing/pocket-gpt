@@ -578,7 +578,7 @@ class ChatViewModel internal constructor(
                             role = role.name,
                             parts = listOf(PersistedInteractionPart(type = "text", text = finalText)),
                             toolCalls = toolCalls ?: message.interaction?.toolCalls.orEmpty(),
-                            metadata = (message.interaction?.metadata ?: emptyMap()) + ("state" to "final"),
+                            metadata = message.interaction?.metadata.orEmpty() + ("state" to "final"),
                         ),
                         reasoningContent = reasoningContent,
                         firstTokenMs = firstTokenMs,

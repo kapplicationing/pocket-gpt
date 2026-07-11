@@ -17,23 +17,29 @@ import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.StartupProbeState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ControllersTest {
     @Test
     fun `startup bootstrap surfaces typed transition after bounded session retries`() = runTest {
+        val ioDispatcher = UnconfinedTestDispatcher(testScheduler)
         var createCalls = 0
         var retryDelays = 0
         val runtime = RecordingRuntimeGateway(
@@ -46,7 +52,7 @@ class ControllersTest {
             runtimeGateway = runtime,
             startupProbeController = StartupProbeController(),
             startupReadinessCoordinator = StartupReadinessCoordinator(),
-            ioDispatcher = Dispatchers.IO,
+            ioDispatcher = ioDispatcher,
             runtimeStartupProbeTimeoutMs = 1_000L,
             nativeRuntimeLibraryPackaged = true,
             sessionCreationRetrier = RuntimeSessionCreationRetrier(
@@ -77,7 +83,10 @@ class ControllersTest {
     @Test
     fun `chat send controller delegates tool execution to runtime gateway`() = runTest {
         val runtime = RecordingRuntimeGateway()
-        val controller = ChatSendController(runtimeGateway = runtime, ioDispatcher = Dispatchers.IO)
+        val controller = ChatSendController(
+            runtimeGateway = runtime,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
 
         val result = controller.runTool("calculator", """{"expression":"2+2"}""")
 
@@ -89,7 +98,10 @@ class ControllersTest {
     @Test
     fun `chat send controller delegates image analysis to runtime gateway`() = runTest {
         val runtime = RecordingRuntimeGateway()
-        val controller = ChatSendController(runtimeGateway = runtime, ioDispatcher = Dispatchers.IO)
+        val controller = ChatSendController(
+            runtimeGateway = runtime,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
 
         val result = controller.analyzeImage("/tmp/a.jpg", "describe")
 
@@ -100,34 +112,36 @@ class ControllersTest {
 
     @Test
     fun `tool loop propagates parent cancellation instead of mapping it to a failure`() = runBlocking {
-        val enteredTool = CompletableDeferred<Unit>()
-        val releaseTool = CountDownLatch(1)
-        val escapedOutcome = CompletableDeferred<ToolLoopOutcome>()
-        val runtime = RecordingRuntimeGateway(
-            toolBehavior = { _, _ ->
-                enteredTool.complete(Unit)
-                releaseTool.await()
-                ToolExecutionResult.Success("late tool result")
-            },
-        )
-        val toolLoop = ToolLoopUseCase(
-            sendController = ChatSendController(runtimeGateway = runtime, ioDispatcher = Dispatchers.IO),
-        )
-        val parent = launch {
-            escapedOutcome.complete(
-                toolLoop.execute("calculator", """{"expression":"2+2"}"""),
+        withRealTestDispatcher { ioDispatcher ->
+            val enteredTool = CompletableDeferred<Unit>()
+            val releaseTool = CountDownLatch(1)
+            val escapedOutcome = CompletableDeferred<ToolLoopOutcome>()
+            val runtime = RecordingRuntimeGateway(
+                toolBehavior = { _, _ ->
+                    enteredTool.complete(Unit)
+                    releaseTool.await()
+                    ToolExecutionResult.Success("late tool result")
+                },
             )
-        }
+            val toolLoop = ToolLoopUseCase(
+                sendController = ChatSendController(runtimeGateway = runtime, ioDispatcher = ioDispatcher),
+            )
+            val parent = launch {
+                escapedOutcome.complete(
+                    toolLoop.execute("calculator", """{"expression":"2+2"}"""),
+                )
+            }
 
-        try {
-            enteredTool.await()
-            parent.cancel(CancellationException("parent send cancelled"))
-            withTimeout(5_000L) { parent.join() }
+            try {
+                enteredTool.await()
+                parent.cancel(CancellationException("parent send cancelled"))
+                withTimeout(5_000L) { parent.join() }
 
-            assertFalse(escapedOutcome.isCompleted)
-        } finally {
-            releaseTool.countDown()
-            parent.cancelAndJoin()
+                assertFalse(escapedOutcome.isCompleted)
+            } finally {
+                releaseTool.countDown()
+                parent.cancelAndJoin()
+            }
         }
     }
 
@@ -144,11 +158,13 @@ class ControllersTest {
         )
         val controller = StartupProbeController()
 
-        val checks = controller.runStartupChecks(
-            runtimeGateway = runtime,
-            ioDispatcher = Dispatchers.IO,
-            timeoutMs = 5L,
-        )
+        val checks = withRealTestDispatcher { ioDispatcher ->
+            controller.runStartupChecks(
+                runtimeGateway = runtime,
+                ioDispatcher = ioDispatcher,
+                timeoutMs = 5L,
+            )
+        }
 
         assertTrue(checks.single().contains("timed out"))
     }
@@ -162,11 +178,13 @@ class ControllersTest {
         )
         val controller = StartupProbeController()
 
-        val checks = controller.runStartupChecks(
-            runtimeGateway = runtime,
-            ioDispatcher = Dispatchers.IO,
-            timeoutMs = 5_000L,
-        )
+        val checks = withRealTestDispatcher { ioDispatcher ->
+            controller.runStartupChecks(
+                runtimeGateway = runtime,
+                ioDispatcher = ioDispatcher,
+                timeoutMs = 5_000L,
+            )
+        }
 
         assertEquals(1, checks.size)
         assertTrue(checks.single().contains("Startup checks"))
@@ -174,12 +192,12 @@ class ControllersTest {
     }
 
     @Test
-    fun `startup flow preserves ready model while probe refresh runs`() {
+    fun `startup flow preserves ready model while probe refresh runs`() = runTest {
         val flow = ChatStartupFlow(
             runtimeGateway = RecordingRuntimeGateway(),
             startupProbeController = StartupProbeController(),
             startupReadinessCoordinator = StartupReadinessCoordinator(),
-            ioDispatcher = Dispatchers.IO,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
             runtimeStartupProbeTimeoutMs = 1_000L,
             nativeRuntimeLibraryPackaged = true,
         )
@@ -203,6 +221,17 @@ class ControllersTest {
         assertEquals("Runtime model ready", nextState.runtime.modelStatusDetail)
         assertEquals(null, nextState.runtime.lastErrorCode)
         assertEquals(null, nextState.runtime.lastErrorUserMessage)
+    }
+}
+
+private suspend fun <T> withRealTestDispatcher(
+    block: suspend (CoroutineDispatcher) -> T,
+): T {
+    val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    return try {
+        block(dispatcher)
+    } finally {
+        dispatcher.close()
     }
 }
 

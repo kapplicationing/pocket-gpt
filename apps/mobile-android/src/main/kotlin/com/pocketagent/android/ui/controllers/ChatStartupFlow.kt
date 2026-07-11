@@ -118,14 +118,7 @@ class ChatStartupFlow(
             ).withRuntimeUiError(loadError)
         }
 
-        val restoredSessions = persisted.sessions.map { storedSession ->
-            val session = storedSession.toStartupUiSession()
-            if (storedSession.messagesLoaded) {
-                val turns = timelineProjector.toTurns(session)
-                runtimeGateway.restoreSession(sessionId = SessionId(session.id), turns = turns)
-            }
-            session
-        }
+        val restoredSessions = restorePersistedSessions(persisted.sessions)
         val sessionBootstrap = sessionService.bootstrap(
             sessions = restoredSessions,
             persistedActiveSessionId = persisted.activeSessionId,
@@ -167,6 +160,19 @@ class ChatStartupFlow(
                 sessionBootstrap.shouldPersist ||
                 sessionResolution.creationResult is RuntimeSessionCreationResult.Created,
         )
+    }
+
+    private fun restorePersistedSessions(
+        storedSessions: List<StoredChatSession>,
+    ): List<ChatSessionUiModel> {
+        return storedSessions.map { storedSession ->
+            val session = storedSession.toStartupUiSession()
+            if (storedSession.messagesLoaded) {
+                val turns = timelineProjector.toTurns(session)
+                runtimeGateway.restoreSession(sessionId = SessionId(session.id), turns = turns)
+            }
+            session
+        }
     }
 
     private suspend fun resolveStartupSessions(

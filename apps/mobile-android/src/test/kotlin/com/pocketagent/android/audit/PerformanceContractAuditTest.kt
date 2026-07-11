@@ -511,6 +511,38 @@ class PerformanceContractAuditTest {
     }
 
     @Test
+    fun requiredUiDumpProofsRetryBoundedlyAndStayRedacted() {
+        val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
+        val retry = script.substringAfter("require_ui_dump() {")
+            .substringBefore("\n}\n")
+        val requiredContract = listOf(
+            "precondition-clear-before|precondition-clear-after",
+            "scenario-clear-before|scenario-clear-after",
+            "settings-original|scenario-final|settings-restoration",
+            "invalid required UI dump phase",
+            "for attempt in 1 2 3",
+            "if (( attempt < 3 ))",
+            "ui-dump-\$phase-attempts.jsonl",
+            ": >\"\$evidence_file\" || return 1",
+            "\"attempt\":%d,\"status\":\"success\"",
+            "\"attempt\":%d,\"status\":\"failed\"",
+            "require_ui_dump \"\$phase_prefix-before\"",
+            "require_ui_dump \"\$phase_prefix-after\"",
+            "require_ui_dump \"settings-original\"",
+            "require_ui_dump \"scenario-final\"",
+            "require_ui_dump \"settings-restoration\"",
+        )
+
+        assertTrue(
+            requiredContract.all { evidence -> evidence in script } &&
+                retry.indexOf("for attempt in 1 2 3") < retry.lastIndexOf("return 1") &&
+                "cp \"\$LOCAL_UI_XML\"" !in retry &&
+                "cat \"\$LOCAL_UI_XML\"" !in retry,
+            "Mandatory UI proof dumps must retry exactly three times, record only phase/attempt/status metadata, validate phases, and fail closed without retaining raw UI.",
+        )
+    }
+
+    @Test
     fun `native benchmark CI proves application id native library and baseline profile`() {
         val workflow = resolveRepoSource(".github/workflows/ci.yml").readText()
         val filters = workflow.substringAfter("filters: |")

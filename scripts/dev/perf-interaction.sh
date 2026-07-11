@@ -241,6 +241,33 @@ dump_ui() {
   adb -s "$SERIAL" exec-out cat "$REMOTE_UI_XML" >"$LOCAL_UI_XML" 2>/dev/null || return 1
 }
 
+require_ui_dump() {
+  local phase="$1"
+  case "$phase" in
+    precondition-clear-before|precondition-clear-after|scenario-clear-before|scenario-clear-after|settings-original|scenario-final|settings-restoration) ;;
+    *)
+      echo "[perf-interaction] invalid required UI dump phase: $phase" >&2
+      return 64
+      ;;
+  esac
+  local attempt=""
+  local evidence_file="$OUT_DIR/ui-dump-$phase-attempts.jsonl"
+  : >"$evidence_file" || return 1
+  for attempt in 1 2 3; do
+    if dump_ui; then
+      printf '{"phase":"%s","attempt":%d,"status":"success"}\n' \
+        "$phase" "$attempt" >>"$evidence_file" || return 1
+      return 0
+    fi
+    printf '{"phase":"%s","attempt":%d,"status":"failed"}\n' \
+      "$phase" "$attempt" >>"$evidence_file" || return 1
+    if (( attempt < 3 )); then
+      sleep 1
+    fi
+  done
+  return 1
+}
+
 write_redacted_ui() {
   local output_path="$1"
   python3 "$HARNESS_HELPER" redact-ui \
@@ -337,12 +364,13 @@ type_text_slowly() {
 
 clear_text_field() {
   local tag="$1"
+  local phase_prefix="$2"
   local text_length=""
   local cleared_length=""
   local i=0
   local keycodes=()
 
-  dump_ui || {
+  require_ui_dump "$phase_prefix-before" || {
     echo "[perf-interaction] failed to inspect text field before clearing: $tag" >&2
     exit 70
   }
@@ -366,7 +394,7 @@ clear_text_field() {
     fi
   done
   sleep 1
-  dump_ui || {
+  require_ui_dump "$phase_prefix-after" || {
     echo "[perf-interaction] failed to inspect text field after clearing: $tag" >&2
     exit 70
   }
@@ -392,7 +420,7 @@ prepare_scenario_input() {
       ;;
   esac
   tap_tag "$FINAL_INPUT_TAG"
-  clear_text_field "$FINAL_INPUT_TAG"
+  clear_text_field "$FINAL_INPUT_TAG" "precondition-clear"
   adb_shell input keyevent KEYCODE_BACK >/dev/null
   sleep 1
   adb_shell input keyevent KEYCODE_BACK >/dev/null
@@ -454,7 +482,7 @@ restore_settings_prompt() {
   done
   adb_shell input keyevent "${keycodes[@]}" >/dev/null
   sleep 1
-  dump_ui || {
+  require_ui_dump "settings-restoration" || {
     echo "[perf-interaction] failed to capture restored settings prompt" >&2
     exit 70
   }
@@ -579,7 +607,7 @@ case "$SCENARIO" in
     wait_tag "completion_settings_button"
     tap_tag "completion_settings_button"
     tap_tag "$FINAL_INPUT_TAG"
-    dump_ui || {
+    require_ui_dump "settings-original" || {
       echo "[perf-interaction] failed to capture original settings prompt" >&2
       exit 70
     }
@@ -591,14 +619,14 @@ case "$SCENARIO" in
   model-sheet)
     tap_tag "open_model_library"
     tap_tag "$FINAL_INPUT_TAG"
-    clear_text_field "$FINAL_INPUT_TAG"
+    clear_text_field "$FINAL_INPUT_TAG" "scenario-clear"
     type_text_slowly "$FINAL_INPUT_TEXT"
     adb_shell input swipe 500 1700 500 650 500 >/dev/null
     ;;
   drawer-search)
     tap_tag "session_drawer_button"
     tap_tag "$FINAL_INPUT_TAG"
-    clear_text_field "$FINAL_INPUT_TAG"
+    clear_text_field "$FINAL_INPUT_TAG" "scenario-clear"
     type_text_slowly "$FINAL_INPUT_TEXT"
     adb_shell input swipe 500 1700 500 650 500 >/dev/null
     ;;
@@ -606,7 +634,7 @@ esac
 
 sleep 2
 capture_device_state_snapshot after
-dump_ui || {
+require_ui_dump "scenario-final" || {
   echo "[perf-interaction] failed to capture final UI hierarchy" >&2
   exit 70
 }

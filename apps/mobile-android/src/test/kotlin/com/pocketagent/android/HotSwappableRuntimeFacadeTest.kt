@@ -24,6 +24,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -160,6 +161,139 @@ class HotSwappableRuntimeFacadeTest {
             replacementDispatcher.close()
             replacementExecutor.shutdownNow()
             callExecutor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `blocked stale call times out replacement without blocking UI or losing old runtime`() {
+        val oldRuntime = BlockingFacade(
+            sessionId = "session-old",
+            callStarted = CountDownLatch(1),
+            releaseCall = CountDownLatch(1),
+        )
+        val unusedRuntime = StubFacade(
+            sessionId = "session-unused",
+            closeResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED", "cleanup_failed"),
+        )
+        val replacementExecutor = Executors.newSingleThreadExecutor()
+        val callExecutor = Executors.newSingleThreadExecutor()
+        val uiExecutor = Executors.newSingleThreadExecutor()
+        val replacementDispatcher = replacementExecutor.asCoroutineDispatcher()
+        val uiDispatcher = uiExecutor.asCoroutineDispatcher()
+        val uiScope = CoroutineScope(SupervisorJob() + uiDispatcher)
+        val hotSwap = HotSwappableRuntimeFacade(
+            initial = oldRuntime,
+            replacementDispatcher = replacementDispatcher,
+            replacementDrainTimeoutMs = 500L,
+        )
+        try {
+            val staleCall = callExecutor.submit<SessionId> { hotSwap.createSession() }
+            assertTrue(oldRuntime.callStarted.await(2, TimeUnit.SECONDS))
+            val replacement = uiScope.async { hotSwap.replace(unusedRuntime) }
+            awaitAvailability(hotSwap, RuntimeFacadeAvailability.REPLACING)
+
+            assertFalse(hotSwap.deleteSession(SessionId("delete-during-replacement")))
+            hotSwap.setRoutingMode(RoutingMode.QWEN_0_8B)
+            val uiMarker = uiExecutor.submit<String> { "ui-responsive" }
+            assertEquals("ui-responsive", uiMarker.get(2, TimeUnit.SECONDS))
+
+            val result = runBlocking { withTimeout(2_000L) { replacement.await() } }
+            assertFalse(result.success)
+            assertEquals("RUNTIME_DELEGATE_DRAIN_TIMEOUT", result.code)
+            assertTrue(result.detail.orEmpty().contains("UNUSED_CLOSE_REJECTED"))
+            assertEquals(RuntimeFacadeAvailability.READY, hotSwap.availability())
+            assertEquals(1L, oldRuntime.closeStarted.count, "old close must not start before drain")
+            assertEquals(1, unusedRuntime.closeCalls)
+            assertEquals(listOf(5_000L), unusedRuntime.closeTimeouts)
+            assertEquals(0, oldRuntime.deleteCalls)
+            assertEquals(0, unusedRuntime.deleteCalls)
+            assertEquals(RoutingMode.QWEN_0_8B, hotSwap.getRoutingMode())
+
+            oldRuntime.releaseCall.countDown()
+            assertEquals("session-old", staleCall.get(2, TimeUnit.SECONDS).value)
+            assertEquals("session-old", hotSwap.createSession().value)
+        } finally {
+            oldRuntime.releaseCall.countDown()
+            uiScope.cancel()
+            replacementDispatcher.close()
+            uiDispatcher.close()
+            replacementExecutor.shutdownNow()
+            callExecutor.shutdownNow()
+            uiExecutor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `close uses caller timeout while draining stale call`() {
+        val oldRuntime = BlockingFacade(
+            sessionId = "session-old",
+            callStarted = CountDownLatch(1),
+            releaseCall = CountDownLatch(1),
+        )
+        val callExecutor = Executors.newSingleThreadExecutor()
+        val closeExecutor = Executors.newSingleThreadExecutor()
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        try {
+            val staleCall = callExecutor.submit<SessionId> { hotSwap.createSession() }
+            assertTrue(oldRuntime.callStarted.await(2, TimeUnit.SECONDS))
+            val close = closeExecutor.submit<RuntimeCloseResult> { hotSwap.closeRuntime(timeoutMs = 75L) }
+
+            val result = close.get(2, TimeUnit.SECONDS)
+            assertFalse(result.success)
+            assertEquals("RUNTIME_DELEGATE_DRAIN_TIMEOUT", result.code)
+            assertEquals(RuntimeFacadeAvailability.READY, hotSwap.availability())
+            assertEquals(1L, oldRuntime.closeStarted.count, "delegate close must not run after drain timeout")
+
+            oldRuntime.releaseCall.countDown()
+            assertEquals("session-old", staleCall.get(2, TimeUnit.SECONDS).value)
+        } finally {
+            oldRuntime.releaseCall.countDown()
+            callExecutor.shutdownNow()
+            closeExecutor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `closed facade rejects lifecycle mutations as unavailable not busy`() {
+        val hotSwap = HotSwappableRuntimeFacade(StubFacade(sessionId = "session-old"))
+
+        assertTrue(hotSwap.closeRuntime(timeoutMs = 500L).success)
+
+        assertEquals(ModelLifecycleErrorCode.UNKNOWN, hotSwap.loadModel("model", "v1").errorCode)
+        assertEquals(ModelLifecycleErrorCode.UNKNOWN, hotSwap.offloadModel("closed-test").errorCode)
+        assertFalse(hotSwap.deleteSession(SessionId("closed-session")))
+    }
+
+    @Test
+    fun `cold stream admission hands off before replacement closes selected runtime`() {
+        val oldRuntime = ColdAdmissionFacade()
+        val newRuntime = StubFacade(sessionId = "session-new")
+        val executor = Executors.newFixedThreadPool(2)
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        try {
+            val collection = executor.submit<List<ChatStreamEvent>> {
+                runBlocking { hotSwap.streamChat(testStreamRequest()).toList() }
+            }
+            assertTrue(oldRuntime.streamSelected.await(2, TimeUnit.SECONDS))
+            val replacement = executor.submit<RuntimeReplacementResult> { hotSwap.replaceInTest(newRuntime) }
+            awaitAvailability(hotSwap, RuntimeFacadeAvailability.REPLACING)
+            assertEquals(1L, oldRuntime.closeStarted.count)
+
+            oldRuntime.allowFlowReturn.countDown()
+            assertTrue(oldRuntime.collectionStarted.await(2, TimeUnit.SECONDS))
+            assertEquals(1L, oldRuntime.closeStarted.count, "close must wait for first stream event")
+            oldRuntime.allowFirstEvent.countDown()
+
+            assertTrue(oldRuntime.closeStarted.await(2, TimeUnit.SECONDS))
+            assertTrue(replacement.get(2, TimeUnit.SECONDS).success)
+            assertIs<ChatStreamEvent.Started>(collection.get(2, TimeUnit.SECONDS).single())
+            assertFalse(oldRuntime.enteredClosedRuntime.get())
+            assertEquals("session-new", hotSwap.createSession().value)
+        } finally {
+            oldRuntime.allowFlowReturn.countDown()
+            oldRuntime.allowFirstEvent.countDown()
+            oldRuntime.releaseCollection.countDown()
+            executor.shutdownNow()
         }
     }
 
@@ -334,6 +468,8 @@ private open class StubFacade(
 ) : MvpRuntimeFacade, RuntimeLifetimePort {
     private var routingMode: RoutingMode = RoutingMode.AUTO
     var closeCalls: Int = 0
+    val closeTimeouts = mutableListOf<Long>()
+    var deleteCalls: Int = 0
 
     override fun createSession(): SessionId = SessionId(sessionId)
 
@@ -359,10 +495,14 @@ private open class StubFacade(
 
     override fun restoreSession(sessionId: SessionId, turns: List<Turn>) = Unit
 
-    override fun deleteSession(sessionId: SessionId): Boolean = true
+    override fun deleteSession(sessionId: SessionId): Boolean {
+        deleteCalls += 1
+        return true
+    }
 
     open override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
         closeCalls += 1
+        closeTimeouts += timeoutMs
         return closeResult
     }
 }
@@ -376,6 +516,7 @@ private class BlockingFlowFacade(
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = flow {
         synchronized(order) { order += "flow_started" }
         flowStarted.countDown()
+        emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
         releaseFlow.await(2, TimeUnit.SECONDS)
         synchronized(order) { order += "flow_finished" }
     }
@@ -393,7 +534,40 @@ private class SlowTerminalFlowFacade : StubFacade() {
 
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = flow {
         flowStarted.countDown()
+        emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
         releaseFlow.await(2, TimeUnit.SECONDS)
+    }
+}
+
+private class ColdAdmissionFacade : StubFacade(sessionId = "session-old") {
+    val streamSelected = CountDownLatch(1)
+    val allowFlowReturn = CountDownLatch(1)
+    val collectionStarted = CountDownLatch(1)
+    val allowFirstEvent = CountDownLatch(1)
+    val closeStarted = CountDownLatch(1)
+    val releaseCollection = CountDownLatch(1)
+    val enteredClosedRuntime = AtomicBoolean(false)
+    @Volatile private var closed: Boolean = false
+
+    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
+        streamSelected.countDown()
+        allowFlowReturn.await(2, TimeUnit.SECONDS)
+        return flow {
+            collectionStarted.countDown()
+            allowFirstEvent.await(2, TimeUnit.SECONDS)
+            if (closed) {
+                enteredClosedRuntime.set(true)
+            }
+            emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+            releaseCollection.await(2, TimeUnit.SECONDS)
+        }
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        closeStarted.countDown()
+        closed = true
+        releaseCollection.countDown()
+        return RuntimeCloseResult.closed()
     }
 }
 
@@ -450,7 +624,7 @@ private class BlockingFacade(
 
     override fun createSession(): SessionId {
         callStarted.countDown()
-        releaseCall.await(2, TimeUnit.SECONDS)
+        releaseCall.await()
         return super.createSession()
     }
 
@@ -496,4 +670,17 @@ private fun testStreamRequest(): StreamChatRequestV2 {
 
 private fun HotSwappableRuntimeFacade.replaceInTest(newDelegate: MvpRuntimeFacade): RuntimeReplacementResult {
     return runBlocking { replace(newDelegate) }
+}
+
+private fun awaitAvailability(
+    facade: HotSwappableRuntimeFacade,
+    expected: RuntimeFacadeAvailability,
+) {
+    runBlocking {
+        withTimeout(2_000L) {
+            while (facade.availability() != expected) {
+                yield()
+            }
+        }
+    }
 }

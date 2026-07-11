@@ -24,17 +24,18 @@ import com.pocketagent.nativebridge.RuntimeLifetimePort
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.ArrayDeque
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 internal class HotSwappableRuntimeFacade(
     initial: MvpRuntimeFacade,
     private val replacementDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val replacementDrainTimeoutMs: Long = REPLACEMENT_CLOSE_TIMEOUT_MS,
 ) : MvpRuntimeFacade, RuntimeWarmupSupport, RuntimeResourceControl, RuntimeLifetimePort {
     private val stateLock = ReentrantLock()
     private val callsDrained = stateLock.newCondition()
@@ -79,19 +80,25 @@ internal class HotSwappableRuntimeFacade(
     private fun replaceOwned(newDelegate: MvpRuntimeFacade): RuntimeReplacementResult {
         val newLifetime = newDelegate as? RuntimeLifetimePort
             ?: return RuntimeReplacementResult.rejected("NEW_RUNTIME_LIFETIME_UNSUPPORTED")
-        val transition = beginTransition(RuntimeFacadeAvailability.REPLACING)
+        val transitionAttempt = prepareReplacementTransition(newLifetime)
+        transitionAttempt.rejection?.let { rejection -> return rejection }
+        val transition = requireNotNull(transitionAttempt.transition)
         val oldDelegate = transition.delegate
         val oldLifetime = oldDelegate as? RuntimeLifetimePort
         if (oldLifetime == null) {
-            runCatching { newLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS) }
+            runCatching { newLifetime.closeRuntime(transition.remainingTimeoutMs()) }
             finishTransition(DelegateState.Ready(oldDelegate))
             return RuntimeReplacementResult.rejected("OLD_RUNTIME_LIFETIME_UNSUPPORTED")
         }
         val previousRoutingMode = desiredRoutingMode
             ?: runCatching { oldDelegate.getRoutingMode() }.getOrDefault(RoutingMode.AUTO)
-        val oldClose = closeOldRuntime(transition = transition, oldLifetime = oldLifetime)
+        val oldClose = closeOldRuntime(
+            transition = transition,
+            oldLifetime = oldLifetime,
+            timeoutMs = transition.remainingTimeoutMs(),
+        )
         if (!oldClose.success && oldClose.runtimeReusable) {
-            runCatching { newLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS) }
+            runCatching { newLifetime.closeRuntime(transition.remainingTimeoutMs()) }
             finishTransition(DelegateState.Ready(oldDelegate))
             return RuntimeReplacementResult.rejected(
                 code = oldClose.code ?: "OLD_RUNTIME_CLOSE_FAILED",
@@ -126,14 +133,57 @@ internal class HotSwappableRuntimeFacade(
         )
     }
 
+    private fun prepareReplacementTransition(newLifetime: RuntimeLifetimePort): ReplacementTransition {
+        return when (
+            val attempt = beginTransition(
+                availability = RuntimeFacadeAvailability.REPLACING,
+                timeoutMs = replacementDrainTimeoutMs,
+            )
+        ) {
+            is TransitionAttempt.Started -> ReplacementTransition(transition = attempt.transition)
+            is TransitionAttempt.Rejected -> ReplacementTransition(
+                rejection = rejectReplacementAfterDrainFailure(
+                    rejection = attempt,
+                    unusedNewLifetime = newLifetime,
+                ),
+            )
+        }
+    }
+
+    private fun rejectReplacementAfterDrainFailure(
+        rejection: TransitionAttempt.Rejected,
+        unusedNewLifetime: RuntimeLifetimePort,
+    ): RuntimeReplacementResult {
+        finishTransition(DelegateState.Ready(rejection.transition.delegate))
+        val cleanup = runCatching {
+            unusedNewLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS)
+        }.getOrElse { error ->
+            RuntimeCloseResult.terminated(
+                code = "UNUSED_RUNTIME_CLOSE_EXCEPTION",
+                detail = error.message ?: error::class.simpleName,
+            )
+        }
+        val cleanupFailure = cleanup.takeUnless { it.success }?.let { failed ->
+            "unusedRuntimeCleanup=${failed.code ?: "UNKNOWN"}:${failed.detail.orEmpty()}"
+        }
+        if (cleanupFailure != null) {
+            safeLogWarning("RUNTIME_SWAP|phase=unused_cleanup_failed|$cleanupFailure")
+        }
+        return RuntimeReplacementResult.rejected(
+            code = rejection.code,
+            detail = listOfNotNull(rejection.detail, cleanupFailure).joinToString(separator = "|"),
+        )
+    }
+
     private fun closeOldRuntime(
         transition: TransitionStart,
         oldLifetime: RuntimeLifetimePort,
+        timeoutMs: Long,
     ): RuntimeCloseResult {
         if (transition.wasClosed) {
             return RuntimeCloseResult.closed()
         }
-        return runCatching { oldLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS) }
+        return runCatching { oldLifetime.closeRuntime(timeoutMs) }
             .getOrElse { error ->
                 RuntimeCloseResult.terminated(
                     code = "OLD_RUNTIME_CLOSE_EXCEPTION",
@@ -142,21 +192,52 @@ internal class HotSwappableRuntimeFacade(
             }
     }
 
-    private fun beginTransition(availability: RuntimeFacadeAvailability): TransitionStart {
+    private fun beginTransition(
+        availability: RuntimeFacadeAvailability,
+        timeoutMs: Long,
+    ): TransitionAttempt {
+        val timeoutNanos = TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceAtLeast(0L))
+        val deadlineNanos = System.nanoTime() + timeoutNanos
         return stateLock.withLock {
             val selected = when (val current = delegateState) {
-                is DelegateState.Ready -> TransitionStart(current.delegate, wasClosed = false)
-                is DelegateState.Closed -> TransitionStart(current.delegate, wasClosed = true)
+                is DelegateState.Ready -> TransitionStart(
+                    delegate = current.delegate,
+                    wasClosed = false,
+                    deadlineNanos = deadlineNanos,
+                )
+                is DelegateState.Closed -> TransitionStart(
+                    delegate = current.delegate,
+                    wasClosed = true,
+                    deadlineNanos = deadlineNanos,
+                )
                 is DelegateState.Transition -> error("runtime lifetime mutation already owns the facade")
             }
             delegateState = DelegateState.Transition(
                 delegate = selected.delegate,
                 availability = availability,
             )
-            while (activeDelegateCalls > 0) {
-                callsDrained.awaitUninterruptibly()
+            var remainingNanos = timeoutNanos
+            while (activeDelegateCalls > 0 && remainingNanos > 0L) {
+                remainingNanos = try {
+                    callsDrained.awaitNanos(remainingNanos)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@withLock TransitionAttempt.Rejected(
+                        transition = selected,
+                        code = "RUNTIME_DELEGATE_DRAIN_INTERRUPTED",
+                        detail = "activeDelegateCalls=$activeDelegateCalls",
+                    )
+                }
             }
-            selected
+            if (activeDelegateCalls > 0) {
+                TransitionAttempt.Rejected(
+                    transition = selected,
+                    code = "RUNTIME_DELEGATE_DRAIN_TIMEOUT",
+                    detail = "activeDelegateCalls=$activeDelegateCalls",
+                )
+            } else {
+                TransitionAttempt.Started(selected)
+            }
         }
     }
 
@@ -197,6 +278,10 @@ internal class HotSwappableRuntimeFacade(
         }
     }
 
+    /**
+     * Queues only Unit mutations and best-effort lifecycle policy. A true result during transition
+     * means accepted for replay, not completed; result-bearing domain operations must fail closed.
+     */
     private fun runOrQueue(action: (MvpRuntimeFacade) -> Unit): Boolean {
         val selected = stateLock.withLock {
             when (val current = delegateState) {
@@ -223,28 +308,32 @@ internal class HotSwappableRuntimeFacade(
 
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
         return flow {
-            var unavailable: RuntimeFacadeAvailability? = null
-            val selected = withDelegate(
-                onUnavailable = { state ->
-                    unavailable = state
-                    null
-                },
-                block = { delegate -> delegate.streamChat(request) },
-            )
-            if (selected == null) {
-                val state = requireNotNull(unavailable)
-                emit(
+            when (val selection = acquireDelegate()) {
+                is DelegateSelection.Unavailable -> emit(
                     ChatStreamEvent.Failed(
                         requestId = request.requestId,
-                        errorCode = state.errorCode(),
-                        message = state.userMessage(),
+                        errorCode = selection.availability.errorCode(),
+                        message = selection.availability.userMessage(),
                     ),
                 )
-                return@flow
+                is DelegateSelection.Acquired -> {
+                    var admissionHandedOff = false
+                    try {
+                        selection.delegate.streamChat(request).collect { event ->
+                            if (!admissionHandedOff) {
+                                admissionHandedOff = true
+                                releaseDelegate()
+                            }
+                            // After the first event, RuntimeLifetimePort owns active-stream drain.
+                            emit(event)
+                        }
+                    } finally {
+                        if (!admissionHandedOff) {
+                            releaseDelegate()
+                        }
+                    }
+                }
             }
-            // The lease covers cold-flow creation. RuntimeLifetimePort owns cancellation/drain
-            // after collection begins; retaining the lease would prevent close from cancelling it.
-            emitAll(selected)
         }
     }
 
@@ -311,8 +400,9 @@ internal class HotSwappableRuntimeFacade(
     }
 
     override fun deleteSession(sessionId: SessionId): Boolean {
-        var deleted = true
-        return runOrQueue { delegate -> deleted = delegate.deleteSession(sessionId) } && deleted
+        return withDelegate(onUnavailable = { false }) { delegate ->
+            delegate.deleteSession(sessionId)
+        }
     }
 
     override fun runtimeBackend(): String? = withDelegate(onUnavailable = { null }) { it.runtimeBackend() }
@@ -459,13 +549,26 @@ internal class HotSwappableRuntimeFacade(
             if (availability() == RuntimeFacadeAvailability.CLOSED) {
                 return RuntimeCloseResult.closed()
             }
-            val transition = beginTransition(RuntimeFacadeAvailability.CLOSING)
+            val transition = when (
+                val attempt = beginTransition(
+                    availability = RuntimeFacadeAvailability.CLOSING,
+                    timeoutMs = timeoutMs,
+                )
+            ) {
+                is TransitionAttempt.Started -> attempt.transition
+                is TransitionAttempt.Rejected -> {
+                    finishTransition(DelegateState.Ready(attempt.transition.delegate))
+                    return RuntimeCloseResult.rejected(code = attempt.code, detail = attempt.detail)
+                }
+            }
             val lifetime = transition.delegate as? RuntimeLifetimePort
             if (lifetime == null) {
                 finishTransition(DelegateState.Ready(transition.delegate))
                 return RuntimeCloseResult.rejected("RUNTIME_LIFETIME_UNSUPPORTED")
             }
-            val result = runCatching { lifetime.closeRuntime(timeoutMs) }.getOrElse { error ->
+            val result = runCatching {
+                lifetime.closeRuntime(transition.remainingTimeoutMs())
+            }.getOrElse { error ->
                 RuntimeCloseResult.terminated(
                     code = "RUNTIME_CLOSE_EXCEPTION",
                     detail = error.message ?: error::class.simpleName,
@@ -554,6 +657,29 @@ internal class HotSwappableRuntimeFacade(
     private data class TransitionStart(
         val delegate: MvpRuntimeFacade,
         val wasClosed: Boolean,
+        val deadlineNanos: Long,
+    ) {
+        fun remainingTimeoutMs(): Long {
+            val remainingNanos = (deadlineNanos - System.nanoTime()).coerceAtLeast(0L)
+            if (remainingNanos == 0L) {
+                return 0L
+            }
+            return TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
+        }
+    }
+
+    private sealed interface TransitionAttempt {
+        data class Started(val transition: TransitionStart) : TransitionAttempt
+        data class Rejected(
+            val transition: TransitionStart,
+            val code: String,
+            val detail: String,
+        ) : TransitionAttempt
+    }
+
+    private data class ReplacementTransition(
+        val transition: TransitionStart? = null,
+        val rejection: RuntimeReplacementResult? = null,
     )
 
     private companion object {
@@ -599,7 +725,14 @@ private fun RuntimeFacadeAvailability.userMessage(): String {
 
 private fun RuntimeFacadeAvailability.lifecycleRejection(): RuntimeModelLifecycleCommandResult {
     return RuntimeModelLifecycleCommandResult.rejected(
-        code = ModelLifecycleErrorCode.BUSY_GENERATION,
+        code = when (this) {
+            RuntimeFacadeAvailability.REPLACING,
+            RuntimeFacadeAvailability.CLOSING,
+            -> ModelLifecycleErrorCode.BUSY_GENERATION
+            RuntimeFacadeAvailability.READY,
+            RuntimeFacadeAvailability.CLOSED,
+            -> ModelLifecycleErrorCode.UNKNOWN
+        },
         detail = errorCode(),
     )
 }

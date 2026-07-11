@@ -145,18 +145,20 @@ prepare_fresh_install_state() {
   wait_for_app_foreground "fresh-install"
   while (( SECONDS < deadline )); do
     if dump_ui; then
+      coords="$(translated_tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
+      if [[ -n "$coords" ]]; then
+        read -r x y <<<"$coords"
+        adb_shell input tap "$x" "$y" >/dev/null
+        onboarding_dismissed=true
+        sleep 1
+        continue
+      fi
       coords="$(tag_center_from_dump "session_drawer_button" 2>/dev/null || true)"
       if [[ -n "$coords" ]]; then
         printf '{"first_visible_activity_prepared":true,"onboarding_dismissed":%s}\n' \
           "$onboarding_dismissed" >"$OUT_DIR/first-visible-activity-setup.json"
         adb_shell am force-stop "$PACKAGE" >/dev/null
         return 0
-      fi
-      coords="$(translated_tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
-      if [[ -n "$coords" ]]; then
-        read -r x y <<<"$coords"
-        adb_shell input tap "$x" "$y" >/dev/null
-        onboarding_dismissed=true
       fi
     fi
     sleep 1

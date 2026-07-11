@@ -480,6 +480,36 @@ class PerformanceContractAuditTest {
     }
 
     @Test
+    fun freshInstallSetupDismissesOnboardingBeforeAcceptingShell() {
+        val setupFunctions = listOf(
+            resolveRepoSource("scripts/dev/perf-interaction.sh").readText(),
+            resolveRepoSource("scripts/dev/perf-baseline.sh").readText(),
+        ).map { source ->
+            source.substringAfter("prepare_fresh_install_state() {")
+                .substringBefore("\n}\n")
+        }
+        val orderedSteps = listOf(
+            "translated_tag_center_from_dump \"onboarding_skip\"",
+            "adb_shell input tap",
+            "onboarding_dismissed=true",
+            "sleep 1",
+            "continue",
+            "tag_center_from_dump \"session_drawer_button\"",
+            "first-visible-activity-setup.json",
+            "return 0",
+        )
+
+        assertTrue(
+            setupFunctions.all { setup ->
+                val offsets = orderedSteps.map(setup::indexOf)
+                offsets.all { offset -> offset >= 0 } &&
+                    offsets.zipWithNext().all { (current, next) -> current < next }
+            },
+            "Fresh-install setup must dismiss and leave onboarding before a later dump can prove the underlying shell and record readiness.",
+        )
+    }
+
+    @Test
     fun `native benchmark CI proves application id native library and baseline profile`() {
         val workflow = resolveRepoSource(".github/workflows/ci.yml").readText()
         val filters = workflow.substringAfter("filters: |")

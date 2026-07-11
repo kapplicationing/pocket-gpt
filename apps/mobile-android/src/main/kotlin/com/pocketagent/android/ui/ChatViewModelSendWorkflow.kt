@@ -141,6 +141,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                 title = deriveSessionTitle(projectedMessages),
             )
             val transcriptMessages = timelineProjector.toTranscript(projectedSession)
+            val previousResponseId = timelineProjector.latestAssistantRequestId(projectedSession)
             AppOperationTrace.suspendSection(
                 name = "chat.prepare_stream",
                 detail = { "messages=${transcriptMessages.size}" },
@@ -153,7 +154,7 @@ internal fun ChatViewModel.sendMessageInternal() {
                         requestId = requestId,
                         messages = transcriptMessages,
                         promptHint = prompt,
-                        previousResponseId = timelineProjector.latestAssistantRequestId(projectedSession),
+                        previousResponseId = previousResponseId,
                         runtime = snapshot.runtime,
                         completionSettings = activeSession.completionSettings,
                         prepare = runtimeFacade::prepareChatStream,

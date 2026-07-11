@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 object AppRuntimeDependencies {
     private val runtimeInstallFingerprintLock = Any()
+    private val runtimeInstallSingleFlight = RuntimeInstallSingleFlight()
     @Volatile
     private var lastRuntimeInstallFingerprint: String? = null
     private val graphManager = AppRuntimeGraphManager()
@@ -61,12 +62,14 @@ object AppRuntimeDependencies {
     var runtimeFacadeFactory: () -> MvpRuntimeFacade = productionRuntimeFacadeFactory
 
     fun resetRuntimeFacadeFactoryForTests() {
-        runtimeFacadeFactory = productionRuntimeFacadeFactory
-        warmupOrchestrator.cancelActiveWarmup()
-        lifecycleCoordinator.resetForTests()
-        graphManager.resetForTests()
-        synchronized(runtimeInstallFingerprintLock) {
-            lastRuntimeInstallFingerprint = null
+        runtimeInstallSingleFlight.runExclusive {
+            runtimeFacadeFactory = productionRuntimeFacadeFactory
+            warmupOrchestrator.cancelActiveWarmup()
+            lifecycleCoordinator.resetForTests()
+            graphManager.resetForTests()
+            synchronized(runtimeInstallFingerprintLock) {
+                lastRuntimeInstallFingerprint = null
+            }
         }
     }
 
@@ -76,36 +79,64 @@ object AppRuntimeDependencies {
 
     fun installProductionRuntime(context: Context) {
         MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.installProductionRuntime")
-        if (runtimeFacadeFactory !== productionRuntimeFacadeFactory) {
-            return
-        }
-        val graph = graphManager.getOrCreateRuntimeGraph(context)
-        val fingerprint = runtimeGraphInstallFingerprint(graph)
-        synchronized(runtimeInstallFingerprintLock) {
-            if (fingerprint == lastRuntimeInstallFingerprint) {
-                lifecycleCoordinator.reconcileLifecycleState(graph)
-                return
-            }
-        }
-        val newFacade = AppRuntimeFacadeFactory.buildProductionRuntimeFacade(context, graph)
-        val replacement = graph.runtimeFacade.replaceFromBackground(newFacade)
-        if (!replacement.success) {
-            Log.e(
+        val outcome = runtimeInstallSingleFlight.install(
+            shouldInstall = { runtimeFacadeFactory === productionRuntimeFacadeFactory },
+            readCandidate = {
+                val graph = graphManager.getOrCreateRuntimeGraph(context)
+                RuntimeInstallCandidate(
+                    fingerprint = runtimeGraphInstallFingerprint(graph),
+                    payload = graph,
+                )
+            },
+            readInstalledFingerprint = {
+                synchronized(runtimeInstallFingerprintLock) { lastRuntimeInstallFingerprint }
+            },
+            build = { graph -> AppRuntimeFacadeFactory.buildProductionRuntimeFacade(context, graph) },
+            replace = { graph, newFacade ->
+                // A real fingerprint change owns warmup cancellation. Same-fingerprint waiters
+                // coalesce before this callback and therefore do not restart active warmup work.
+                warmupOrchestrator.cancelActiveWarmup()
+                graph.runtimeFacade.replaceFromBackground(newFacade)
+            },
+            finalizePublished = ::finalizePublishedRuntime,
+            commitFingerprint = { fingerprint ->
+                synchronized(runtimeInstallFingerprintLock) {
+                    lastRuntimeInstallFingerprint = fingerprint
+                }
+            },
+            onCoalesced = { graph -> lifecycleCoordinator.reconcileLifecycleState(graph) },
+        )
+        when (outcome) {
+            is RuntimeInstallOutcome.Rejected -> Log.e(
                 "AppRuntimeDeps",
-                "RUNTIME_SWAP|phase=rejected|code=${replacement.code}|detail=${replacement.detail.orEmpty()}",
+                "RUNTIME_SWAP|phase=rejected|code=${outcome.replacement.code}|" +
+                    "detail=${outcome.replacement.detail.orEmpty()}",
             )
-            return
+            RuntimeInstallOutcome.PublishedDelegateStale -> Log.w(
+                "AppRuntimeDeps",
+                "RUNTIME_SWAP|phase=finalize_skipped|reason=delegate_not_published",
+            )
+            RuntimeInstallOutcome.Coalesced,
+            RuntimeInstallOutcome.Installed,
+            RuntimeInstallOutcome.Skipped,
+            -> Unit
         }
-        graph.runtimeGateway.invalidatePerformanceCaches()
-        synchronized(runtimeInstallFingerprintLock) {
-            lastRuntimeInstallFingerprint = fingerprint
-        }
-        lifecycleCoordinator.attachLifecycleObserver(graph)
-        lifecycleCoordinator.reconcileLifecycleState(graph)
-        if (startupWarmupEnabled()) {
-            scheduleWarmupIfSupported(newFacade)
-        } else {
-            Log.i("AppRuntimeDeps", "WARMUP|startup=disabled")
+    }
+
+    private fun finalizePublishedRuntime(
+        graph: AppRuntimeGraph,
+        newFacade: MvpRuntimeFacade,
+    ): Boolean {
+        return graph.runtimeFacade.runIfPublished(newFacade) {
+            graph.runtimeGateway.invalidatePerformanceCaches()
+            lifecycleCoordinator.attachLifecycleObserver(graph)
+            lifecycleCoordinator.reconcileLifecycleState(graph)
+            if (startupWarmupEnabled()) {
+                // The async job must acquire the currently published delegate when it executes.
+                scheduleWarmupIfSupported(graph.runtimeFacade)
+            } else {
+                Log.i("AppRuntimeDeps", "WARMUP|startup=disabled")
+            }
         }
     }
 
@@ -117,8 +148,8 @@ object AppRuntimeDependencies {
         return raw == "1" || raw == "true" || raw == "yes"
     }
 
-    private fun scheduleWarmupIfSupported(facade: MvpRuntimeFacade) {
-        warmupOrchestrator.scheduleWarmupIfSupported(facade as? RuntimeWarmupSupport)
+    private fun scheduleWarmupIfSupported(warmupSupport: RuntimeWarmupSupport?) {
+        warmupOrchestrator.scheduleWarmupIfSupported(warmupSupport)
     }
 
     fun currentProvisioningSnapshot(context: Context): RuntimeProvisioningSnapshot {

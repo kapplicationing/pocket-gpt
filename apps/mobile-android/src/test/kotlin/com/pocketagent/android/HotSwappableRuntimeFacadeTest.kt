@@ -25,8 +25,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -171,9 +173,9 @@ class HotSwappableRuntimeFacadeTest {
             callStarted = CountDownLatch(1),
             releaseCall = CountDownLatch(1),
         )
-        val unusedRuntime = StubFacade(
+        val unusedRuntime = RetryableCleanupFacade(
             sessionId = "session-unused",
-            closeResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED", "cleanup_failed"),
+            firstCloseResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED", "cleanup_failed"),
         )
         val replacementExecutor = Executors.newSingleThreadExecutor()
         val callExecutor = Executors.newSingleThreadExecutor()
@@ -203,11 +205,17 @@ class HotSwappableRuntimeFacadeTest {
             assertTrue(result.detail.orEmpty().contains("UNUSED_CLOSE_REJECTED"))
             assertEquals(RuntimeFacadeAvailability.READY, hotSwap.availability())
             assertEquals(1L, oldRuntime.closeStarted.count, "old close must not start before drain")
-            assertEquals(1, unusedRuntime.closeCalls)
-            assertEquals(listOf(5_000L), unusedRuntime.closeTimeouts)
+            assertEquals(1, unusedRuntime.cleanupCloseCalls)
+            assertEquals(listOf(5_000L), unusedRuntime.cleanupTimeouts)
+            assertEquals(1, hotSwap.retainedUnusedDelegateCount())
             assertEquals(0, oldRuntime.deleteCalls)
             assertEquals(0, unusedRuntime.deleteCalls)
             assertEquals(RoutingMode.QWEN_0_8B, hotSwap.getRoutingMode())
+
+            val retry = hotSwap.retryRetainedUnusedDelegateCleanup()
+            assertTrue(retry.single().contains("unusedRuntimeCleanup=closed"))
+            assertEquals(2, unusedRuntime.cleanupCloseCalls)
+            assertEquals(0, hotSwap.retainedUnusedDelegateCount())
 
             oldRuntime.releaseCall.countDown()
             assertEquals("session-old", staleCall.get(2, TimeUnit.SECONDS).value)
@@ -298,12 +306,15 @@ class HotSwappableRuntimeFacadeTest {
     }
 
     @Test
-    fun `failed old close retains old delegate and closes unused new delegate`() {
+    fun `failed old close retains old delegate and owns unused new until retry`() {
         val first = StubFacade(
             sessionId = "session-old",
             closeResult = RuntimeCloseResult.rejected("CLOSE_REJECTED"),
         )
-        val second = StubFacade(sessionId = "session-new")
+        val second = RetryableCleanupFacade(
+            sessionId = "session-new",
+            firstCloseResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED"),
+        )
         val hotSwap = HotSwappableRuntimeFacade(first)
 
         val replacement = hotSwap.replaceInTest(second)
@@ -311,7 +322,118 @@ class HotSwappableRuntimeFacadeTest {
         assertFalse(replacement.success)
         assertEquals("session-old", hotSwap.createSession().value)
         assertEquals(1, first.closeCalls)
-        assertEquals(1, second.closeCalls)
+        assertTrue(replacement.detail.orEmpty().contains("unusedRuntimeCleanup=retained"))
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+        hotSwap.retryRetainedUnusedDelegateCleanup()
+        assertEquals(2, second.cleanupCloseCalls)
+        assertEquals(0, hotSwap.retainedUnusedDelegateCount())
+    }
+
+    @Test
+    fun `close owner retries retained unused runtime within the caller budget`() {
+        val oldRuntime = RetryableCleanupFacade(
+            sessionId = "session-old",
+            firstCloseResult = RuntimeCloseResult.rejected("OLD_CLOSE_REJECTED"),
+        )
+        val unusedRuntime = RetryableCleanupFacade(
+            sessionId = "session-unused",
+            firstCloseResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED"),
+        )
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        assertFalse(hotSwap.replaceInTest(unusedRuntime).success)
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        val close = hotSwap.closeRuntime(timeoutMs = 1_000L)
+
+        assertTrue(close.success)
+        assertEquals(RuntimeFacadeAvailability.CLOSED, hotSwap.availability())
+        assertEquals(2, oldRuntime.cleanupCloseCalls)
+        assertEquals(2, unusedRuntime.cleanupCloseCalls)
+        assertTrue(oldRuntime.cleanupTimeouts.last() in 0L..1_000L)
+        assertTrue(unusedRuntime.cleanupTimeouts.last() in 0L..1_000L)
+        assertEquals(0, hotSwap.retainedUnusedDelegateCount())
+    }
+
+    @Test
+    fun `close owner reports and retains repeated unused close rejection`() {
+        val oldRuntime = RetryableCleanupFacade(
+            sessionId = "session-old",
+            firstCloseResult = RuntimeCloseResult.rejected("OLD_CLOSE_REJECTED"),
+        )
+        val unusedRuntime = StubFacade(
+            sessionId = "session-unused",
+            closeResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED"),
+        )
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        assertFalse(hotSwap.replaceInTest(unusedRuntime).success)
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        val close = hotSwap.closeRuntime(timeoutMs = 1_000L)
+
+        assertFalse(close.success)
+        assertFalse(close.runtimeReusable)
+        assertEquals("RETAINED_UNUSED_RUNTIME_CLEANUP_INCOMPLETE", close.code)
+        assertTrue(close.detail.orEmpty().contains("UNUSED_CLOSE_REJECTED"))
+        assertEquals(RuntimeFacadeAvailability.CLOSED, hotSwap.availability())
+        assertEquals(2, unusedRuntime.closeCalls)
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        val terminalRetry = hotSwap.closeRuntime(timeoutMs = 1_000L)
+        assertTrue(terminalRetry.detail.orEmpty().contains("remaining=1"))
+        assertEquals(3, unusedRuntime.closeCalls)
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+    }
+
+    @Test
+    fun `unsupported new lifetime remains owned after rejection`() {
+        val oldRuntime = StubFacade(sessionId = "session-old")
+        val unsupportedNewRuntime = NoLifetimeFacade(sessionId = "session-new")
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+
+        val replacement = hotSwap.replaceInTest(unsupportedNewRuntime)
+
+        assertFalse(replacement.success)
+        assertEquals("NEW_RUNTIME_LIFETIME_UNSUPPORTED", replacement.code)
+        assertTrue(replacement.detail.orEmpty().contains("unusedRuntimeCleanup=retained"))
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+        assertEquals("session-old", hotSwap.createSession().value)
+        val retry = hotSwap.retryRetainedUnusedDelegateCleanup(timeoutMs = 50L)
+        assertTrue(retry.single().contains("UNUSED_RUNTIME_LIFETIME_UNSUPPORTED"))
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        val close = hotSwap.closeRuntime(timeoutMs = 50L)
+        assertFalse(close.success)
+        assertFalse(close.runtimeReusable)
+        assertEquals("RETAINED_UNUSED_RUNTIME_CLEANUP_INCOMPLETE", close.code)
+        assertTrue(close.detail.orEmpty().contains("UNUSED_RUNTIME_LIFETIME_UNSUPPORTED"))
+        assertEquals(RuntimeFacadeAvailability.CLOSED, hotSwap.availability())
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        val terminalRetry = hotSwap.closeRuntime(timeoutMs = 50L)
+        assertEquals("RETAINED_UNUSED_RUNTIME_CLEANUP_INCOMPLETE", terminalRetry.code)
+        assertTrue(terminalRetry.detail.orEmpty().contains("remaining=1"))
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+    }
+
+    @Test
+    fun `unsupported old lifetime retains failed new cleanup until retry`() {
+        val oldRuntime = NoLifetimeFacade(sessionId = "session-old")
+        val newRuntime = RetryableCleanupFacade(
+            sessionId = "session-new",
+            firstCloseResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED"),
+        )
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+
+        val replacement = hotSwap.replaceInTest(newRuntime)
+
+        assertFalse(replacement.success)
+        assertEquals("OLD_RUNTIME_LIFETIME_UNSUPPORTED", replacement.code)
+        assertTrue(replacement.detail.orEmpty().contains("unusedRuntimeCleanup=retained"))
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+        assertEquals("session-old", hotSwap.createSession().value)
+        hotSwap.retryRetainedUnusedDelegateCleanup()
+        assertEquals(2, newRuntime.cleanupCloseCalls)
+        assertEquals(0, hotSwap.retainedUnusedDelegateCount())
     }
 
     @Test
@@ -460,6 +582,53 @@ class HotSwappableRuntimeFacadeTest {
         assertTrue(result.warmed)
         assertTrue(result.attempted)
     }
+
+    @Test
+    fun `published delegate guard rejects stale warmup target`() {
+        val first = StubFacade(sessionId = "session-old")
+        val second = StubFacade(sessionId = "session-new")
+        val hotSwap = HotSwappableRuntimeFacade(first)
+        var warmupSchedules = 0
+
+        assertTrue(hotSwap.runIfPublished(first) { warmupSchedules += 1 })
+        assertTrue(hotSwap.replaceInTest(second).success)
+        assertFalse(hotSwap.runIfPublished(first) { warmupSchedules += 1 })
+        assertTrue(hotSwap.runIfPublished(second) { warmupSchedules += 1 })
+        assertEquals(2, warmupSchedules)
+    }
+
+    @Test
+    fun `cancelled facade warmup drains its lease before old runtime closes`() {
+        val oldRuntime = BlockingWarmupCloseFacade()
+        val newRuntime = RecordingWarmupFacade()
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val orchestrator = RuntimeWarmupOrchestrator(
+            scope = scope,
+            dispatcher = Dispatchers.Default,
+            warmupTimeoutMs = 5_000L,
+            logger = {},
+        )
+        try {
+            orchestrator.scheduleWarmupIfSupported(hotSwap)
+            assertTrue(oldRuntime.warmupStarted.await(2, TimeUnit.SECONDS))
+
+            orchestrator.cancelActiveWarmup()
+            val replacement = hotSwap.replaceInTest(newRuntime)
+
+            assertTrue(replacement.success)
+            assertTrue(oldRuntime.closeObservedWarmupStopped.get())
+            assertEquals(1, oldRuntime.warmupCalls.get())
+            assertFalse(oldRuntime.warmupInvokedAfterClose.get())
+
+            orchestrator.scheduleWarmupIfSupported(hotSwap)
+            assertTrue(newRuntime.warmupStarted.await(2, TimeUnit.SECONDS))
+            assertEquals(1, newRuntime.warmupCalls.get())
+            assertEquals(1, oldRuntime.warmupCalls.get(), "new warmup must not capture stale delegate")
+        } finally {
+            orchestrator.shutdown()
+        }
+    }
 }
 
 private open class StubFacade(
@@ -504,6 +673,24 @@ private open class StubFacade(
         closeCalls += 1
         closeTimeouts += timeoutMs
         return closeResult
+    }
+}
+
+private class NoLifetimeFacade(
+    sessionId: String,
+) : MvpRuntimeFacade by StubFacade(sessionId = sessionId)
+
+private class RetryableCleanupFacade(
+    sessionId: String,
+    private val firstCloseResult: RuntimeCloseResult,
+) : StubFacade(sessionId = sessionId) {
+    var cleanupCloseCalls: Int = 0
+    val cleanupTimeouts = mutableListOf<Long>()
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        cleanupCloseCalls += 1
+        cleanupTimeouts += timeoutMs
+        return if (cleanupCloseCalls == 1) firstCloseResult else RuntimeCloseResult.closed()
     }
 }
 
@@ -654,6 +841,50 @@ private class WarmupStubFacade : StubFacade(), RuntimeWarmupSupport {
             residentHit = false,
             loadDurationMs = 5L,
             warmupDurationMs = 5L,
+        )
+    }
+}
+
+private class BlockingWarmupCloseFacade : StubFacade(), RuntimeWarmupSupport {
+    val warmupStarted = CountDownLatch(1)
+    val warmupCalls = AtomicInteger(0)
+    val warmupInvokedAfterClose = AtomicBoolean(false)
+    val closeObservedWarmupStopped = AtomicBoolean(false)
+    private val warmupStopped = AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
+
+    override fun warmupActiveModel(): WarmupResult {
+        warmupCalls.incrementAndGet()
+        warmupInvokedAfterClose.set(closed.get())
+        warmupStarted.countDown()
+        try {
+            CountDownLatch(1).await()
+        } catch (_: InterruptedException) {
+            return WarmupResult.skipped("warmup_interrupted")
+        } finally {
+            warmupStopped.set(true)
+        }
+        return WarmupResult.skipped("unexpected")
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        closeObservedWarmupStopped.set(warmupStopped.get())
+        closed.set(true)
+        return super.closeRuntime(timeoutMs)
+    }
+}
+
+private class RecordingWarmupFacade : StubFacade(), RuntimeWarmupSupport {
+    val warmupStarted = CountDownLatch(1)
+    val warmupCalls = AtomicInteger(0)
+
+    override fun warmupActiveModel(): WarmupResult {
+        warmupCalls.incrementAndGet()
+        warmupStarted.countDown()
+        return WarmupResult(
+            attempted = true,
+            warmed = true,
+            residentHit = false,
         )
     }
 }

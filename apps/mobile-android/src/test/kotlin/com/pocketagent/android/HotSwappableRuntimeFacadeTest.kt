@@ -17,24 +17,152 @@ import com.pocketagent.runtime.RuntimeWarmupSupport
 import com.pocketagent.runtime.StreamChatRequestV2
 import com.pocketagent.runtime.WarmupResult
 import com.pocketagent.nativebridge.ModelLifecycleEvent
+import com.pocketagent.nativebridge.ModelLifecycleErrorCode
 import com.pocketagent.nativebridge.RuntimeCloseResult
 import com.pocketagent.nativebridge.RuntimeLifetimePort
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class HotSwappableRuntimeFacadeTest {
+    @Test
+    fun `blocking runtime close does not stall the UI dispatcher`() {
+        val oldRuntime = BlockingCloseFacade()
+        val newRuntime = StubFacade(sessionId = "session-new")
+        val replacementExecutor = Executors.newSingleThreadExecutor()
+        val uiExecutor = Executors.newSingleThreadExecutor()
+        val replacementDispatcher = replacementExecutor.asCoroutineDispatcher()
+        val uiDispatcher = uiExecutor.asCoroutineDispatcher()
+        val uiScope = CoroutineScope(SupervisorJob() + uiDispatcher)
+        val hotSwap = HotSwappableRuntimeFacade(
+            initial = oldRuntime,
+            replacementDispatcher = replacementDispatcher,
+        )
+        try {
+            val replacement = uiScope.async { hotSwap.replace(newRuntime) }
+            runBlocking { withTimeout(2_000L) { oldRuntime.closeStarted.await() } }
+
+            assertFailsWith<RuntimeFacadeUnavailableException> {
+                hotSwap.createSession()
+            }
+            assertEquals(1, hotSwap.activeGenerationCount(), "transition must report busy")
+            assertEquals(
+                ModelLifecycleErrorCode.BUSY_GENERATION,
+                hotSwap.loadModel("model", "v1").errorCode,
+            )
+            val terminal = runBlocking { hotSwap.streamChat(testStreamRequest()).toList().single() }
+            assertEquals(
+                "RUNTIME_REPLACEMENT_IN_PROGRESS",
+                assertIs<ChatStreamEvent.Failed>(terminal).errorCode,
+            )
+            hotSwap.setRoutingMode(RoutingMode.QWEN_0_8B)
+            val uiMarker = uiExecutor.submit<String> { "ui-responsive" }
+            assertEquals("ui-responsive", uiMarker.get(2, TimeUnit.SECONDS))
+
+            oldRuntime.releaseClose.countDown()
+            assertTrue(runBlocking { withTimeout(2_000L) { replacement.await() } }.success)
+            assertEquals("session-new", hotSwap.createSession().value)
+            assertEquals(RoutingMode.QWEN_0_8B, hotSwap.getRoutingMode())
+        } finally {
+            oldRuntime.releaseClose.countDown()
+            uiScope.cancel()
+            replacementDispatcher.close()
+            uiDispatcher.close()
+            replacementExecutor.shutdownNow()
+            uiExecutor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `concurrent replacements have one deterministic lifetime owner`() = runBlocking {
+        val first = BlockingCloseFacade()
+        val second = StubFacade(sessionId = "session-second")
+        val third = StubFacade(sessionId = "session-third")
+        val replacementExecutor = Executors.newSingleThreadExecutor()
+        val replacementDispatcher = replacementExecutor.asCoroutineDispatcher()
+        val hotSwap = HotSwappableRuntimeFacade(
+            initial = first,
+            replacementDispatcher = replacementDispatcher,
+        )
+        try {
+            val replaceSecond = async { hotSwap.replace(second) }
+            withTimeout(2_000L) { first.closeStarted.await() }
+            val replaceThird = async { hotSwap.replace(third) }
+            yield()
+
+            first.releaseClose.countDown()
+            assertTrue(withTimeout(2_000L) { replaceSecond.await() }.success)
+            assertTrue(withTimeout(2_000L) { replaceThird.await() }.success)
+            assertEquals(1, second.closeCalls)
+            assertEquals("session-third", hotSwap.createSession().value)
+        } finally {
+            first.releaseClose.countDown()
+            replacementDispatcher.close()
+            replacementExecutor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `replacement drains stale call lease before close and rejects new calls`() = runBlocking {
+        val oldRuntime = BlockingFacade(
+            sessionId = "session-old",
+            callStarted = CountDownLatch(1),
+            releaseCall = CountDownLatch(1),
+        )
+        val newRuntime = StubFacade(sessionId = "session-new")
+        val replacementExecutor = Executors.newSingleThreadExecutor()
+        val callExecutor = Executors.newSingleThreadExecutor()
+        val replacementDispatcher = replacementExecutor.asCoroutineDispatcher()
+        val hotSwap = HotSwappableRuntimeFacade(
+            initial = oldRuntime,
+            replacementDispatcher = replacementDispatcher,
+        )
+        try {
+            val staleCall = callExecutor.submit<SessionId> { hotSwap.createSession() }
+            assertTrue(oldRuntime.callStarted.await(2, TimeUnit.SECONDS))
+            val replacement = async { hotSwap.replace(newRuntime) }
+            withTimeout(2_000L) {
+                while (hotSwap.availability() != RuntimeFacadeAvailability.REPLACING) {
+                    yield()
+                }
+            }
+
+            assertEquals(1L, oldRuntime.closeStarted.count, "close must wait for the stale lease")
+            assertFailsWith<RuntimeFacadeUnavailableException> { hotSwap.createSession() }
+
+            oldRuntime.releaseCall.countDown()
+            assertTrue(oldRuntime.closeStarted.await(2, TimeUnit.SECONDS))
+            assertEquals("session-old", staleCall.get(2, TimeUnit.SECONDS).value)
+            assertTrue(withTimeout(2_000L) { replacement.await() }.success)
+            assertEquals("session-new", hotSwap.createSession().value)
+        } finally {
+            oldRuntime.releaseCall.countDown()
+            replacementDispatcher.close()
+            replacementExecutor.shutdownNow()
+            callExecutor.shutdownNow()
+        }
+    }
+
     @Test
     fun `failed old close retains old delegate and closes unused new delegate`() {
         val first = StubFacade(
@@ -44,7 +172,7 @@ class HotSwappableRuntimeFacadeTest {
         val second = StubFacade(sessionId = "session-new")
         val hotSwap = HotSwappableRuntimeFacade(first)
 
-        val replacement = hotSwap.replace(second)
+        val replacement = hotSwap.replaceInTest(second)
 
         assertFalse(replacement.success)
         assertEquals("session-old", hotSwap.createSession().value)
@@ -59,7 +187,7 @@ class HotSwappableRuntimeFacadeTest {
         val second = StubFacade(sessionId = "session-new")
         val hotSwap = HotSwappableRuntimeFacade(first)
 
-        val replacement = hotSwap.replace(second)
+        val replacement = hotSwap.replaceInTest(second)
         active.close()
 
         assertFalse(replacement.success)
@@ -80,7 +208,7 @@ class HotSwappableRuntimeFacadeTest {
             }
             assertTrue(first.flowStarted.await(2, TimeUnit.SECONDS))
 
-            val replacement = executor.submit<RuntimeReplacementResult> { hotSwap.replace(second) }
+            val replacement = executor.submit<RuntimeReplacementResult> { hotSwap.replaceInTest(second) }
             assertTrue(replacement.get(2, TimeUnit.SECONDS).success)
             collection.get(2, TimeUnit.SECONDS)
 
@@ -104,7 +232,7 @@ class HotSwappableRuntimeFacadeTest {
             }
             assertTrue(first.flowStarted.await(2, TimeUnit.SECONDS))
 
-            val replacement = executor.submit<RuntimeReplacementResult> { hotSwap.replace(second) }
+            val replacement = executor.submit<RuntimeReplacementResult> { hotSwap.replaceInTest(second) }
 
             assertTrue(replacement.get(2, TimeUnit.SECONDS).success)
             assertEquals("session-new", hotSwap.createSession().value)
@@ -126,7 +254,7 @@ class HotSwappableRuntimeFacadeTest {
         val second = StubFacade(sessionId = "session-new")
         val hotSwap = HotSwappableRuntimeFacade(first)
 
-        val replacement = hotSwap.replace(second)
+        val replacement = hotSwap.replaceInTest(second)
 
         assertTrue(replacement.success)
         assertEquals("DISPATCHER_JOIN_TIMEOUT", replacement.code)
@@ -140,7 +268,7 @@ class HotSwappableRuntimeFacadeTest {
         val second = StubFacade(sessionId = "session-new")
         val hotSwap = HotSwappableRuntimeFacade(first)
 
-        val replacement = hotSwap.replace(second)
+        val replacement = hotSwap.replaceInTest(second)
 
         assertTrue(replacement.success)
         assertEquals("OLD_RUNTIME_CLOSE_EXCEPTION", replacement.code)
@@ -164,7 +292,7 @@ class HotSwappableRuntimeFacadeTest {
             val inFlight = executor.submit<SessionId> { hotSwap.createSession() }
             assertTrue(callStarted.await(2, TimeUnit.SECONDS))
 
-            val replaceFuture = executor.submit<RuntimeReplacementResult> { hotSwap.replace(second) }
+            val replaceFuture = executor.submit<RuntimeReplacementResult> { hotSwap.replaceInTest(second) }
             assertFailsWith<TimeoutException> {
                 replaceFuture.get(100, TimeUnit.MILLISECONDS)
             }
@@ -302,15 +430,33 @@ private class ThrowingCloseFacade : StubFacade(sessionId = "session-old") {
     }
 }
 
+private class BlockingCloseFacade : StubFacade(sessionId = "session-old") {
+    val closeStarted = CompletableDeferred<Unit>()
+    val releaseClose = CountDownLatch(1)
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        closeStarted.complete(Unit)
+        releaseClose.await(timeoutMs, TimeUnit.MILLISECONDS)
+        return RuntimeCloseResult.closed()
+    }
+}
+
 private class BlockingFacade(
     sessionId: String,
-    private val callStarted: CountDownLatch,
-    private val releaseCall: CountDownLatch,
+    val callStarted: CountDownLatch,
+    val releaseCall: CountDownLatch,
 ) : StubFacade(sessionId) {
+    val closeStarted = CountDownLatch(1)
+
     override fun createSession(): SessionId {
         callStarted.countDown()
         releaseCall.await(2, TimeUnit.SECONDS)
         return super.createSession()
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        closeStarted.countDown()
+        return RuntimeCloseResult.closed()
     }
 }
 
@@ -346,4 +492,8 @@ private fun testStreamRequest(): StreamChatRequestV2 {
         deviceState = DeviceState(batteryPercent = 80, thermalLevel = 3, ramClassGb = 8),
         requestId = "request-1",
     )
+}
+
+private fun HotSwappableRuntimeFacade.replaceInTest(newDelegate: MvpRuntimeFacade): RuntimeReplacementResult {
+    return runBlocking { replace(newDelegate) }
 }

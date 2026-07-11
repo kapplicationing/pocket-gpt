@@ -75,6 +75,7 @@ object AppRuntimeDependencies {
     }
 
     fun installProductionRuntime(context: Context) {
+        MainThreadGuard.assertNotMainThread("AppRuntimeDependencies.installProductionRuntime")
         if (runtimeFacadeFactory !== productionRuntimeFacadeFactory) {
             return
         }
@@ -87,7 +88,7 @@ object AppRuntimeDependencies {
             }
         }
         val newFacade = AppRuntimeFacadeFactory.buildProductionRuntimeFacade(context, graph)
-        val replacement = graph.runtimeFacade.replace(newFacade)
+        val replacement = graph.runtimeFacade.replaceFromBackground(newFacade)
         if (!replacement.success) {
             Log.e(
                 "AppRuntimeDeps",

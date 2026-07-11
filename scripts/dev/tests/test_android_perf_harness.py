@@ -1,7 +1,11 @@
 import hashlib
 import json
+import os
 import re
+import shlex
+import subprocess
 import sys
+import tempfile
 import unittest
 from html import escape
 from pathlib import Path
@@ -312,6 +316,117 @@ class AndroidPerfHarnessTest(unittest.TestCase):
             "    path: /data/app/pocket/base.apk\n"
             f"      arm64: [status={status}] [reason={reason}]\n"
         )
+
+
+class AndroidBenchmarkProfileShellTest(unittest.TestCase):
+    PACKAGE = "com.pocketagent.android.benchmark"
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.bin_dir = self.root / "bin"
+        self.bin_dir.mkdir()
+        self.adb_log = self.root / "adb.log"
+        fake_adb = self.bin_dir / "adb"
+        fake_adb.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_ADB_LOG"
+if [[ "$*" == *"shell pm list packages"* ]]; then
+  case "$FAKE_ADB_MODE" in
+    absent) ;;
+    lookalike) printf 'package:com.pocketagent.android.benchmark.extra\\n' ;;
+    present|path_transport|path_empty)
+      printf 'package:com.pocketagent.android.benchmark.extra\\n'
+      printf 'package:com.pocketagent.android.benchmark\\n'
+      ;;
+    list_transport)
+      printf 'error: device offline\\n' >&2
+      exit 1
+      ;;
+  esac
+elif [[ "$*" == *"shell pm path"* ]]; then
+  case "$FAKE_ADB_MODE" in
+    present)
+      printf 'package:/data/app/pocket/base.apk\\n'
+      printf 'package:/data/app/pocket/split_config.arm64_v8a.apk\\n'
+      ;;
+    path_transport)
+      printf 'error: transport closed\\n' >&2
+      exit 1
+      ;;
+    path_empty) ;;
+    *)
+      printf 'unexpected pm path call for mode %s\\n' "$FAKE_ADB_MODE" >&2
+      exit 2
+      ;;
+  esac
+else
+  printf 'unexpected adb command: %s\\n' "$*" >&2
+  exit 2
+fi
+""",
+            encoding="utf-8",
+        )
+        fake_adb.chmod(0o755)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def discover(self, mode: str) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+        paths_output = self.root / f"{mode}-paths.txt"
+        list_output = self.root / f"{mode}-list.txt"
+        helper = SCRIPT_DIR / "android-benchmark-profile.sh"
+        command = (
+            f"source {shlex.quote(str(helper))}; "
+            "pocketgpt_discover_exact_package_paths "
+            f"serial {self.PACKAGE} {shlex.quote(str(paths_output))} "
+            f"{shlex.quote(str(list_output))}"
+        )
+        environment = {
+            **os.environ,
+            "PATH": f"{self.bin_dir}:{os.environ['PATH']}",
+            "FAKE_ADB_MODE": mode,
+            "FAKE_ADB_LOG": str(self.adb_log),
+        }
+        result = subprocess.run(
+            ["bash", "-c", command],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        return result, paths_output, list_output
+
+    def test_absent_or_lookalike_package_succeeds_with_empty_paths(self):
+        for mode in ("absent", "lookalike"):
+            with self.subTest(mode=mode):
+                self.adb_log.write_text("", encoding="utf-8")
+                result, paths_output, _ = self.discover(mode)
+
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                self.assertEqual(paths_output.read_text(encoding="utf-8"), "")
+                self.assertNotIn("shell pm path", self.adb_log.read_text(encoding="utf-8"))
+
+    def test_exact_present_package_requires_and_returns_valid_paths(self):
+        result, paths_output, _ = self.discover("present")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(
+            paths_output.read_text(encoding="utf-8").splitlines(),
+            [
+                "package:/data/app/pocket/base.apk",
+                "package:/data/app/pocket/split_config.arm64_v8a.apk",
+            ],
+        )
+        self.assertIn("shell pm path", self.adb_log.read_text(encoding="utf-8"))
+
+    def test_list_transport_path_transport_and_empty_present_paths_fail_closed(self):
+        for mode in ("list_transport", "path_transport", "path_empty"):
+            with self.subTest(mode=mode):
+                result, _, _ = self.discover(mode)
+
+                self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

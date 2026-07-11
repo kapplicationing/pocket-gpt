@@ -24,6 +24,47 @@ pocketgpt_require_success_line() {
   fi
 }
 
+pocketgpt_discover_exact_package_paths() {
+  local serial="$1"
+  local package="$2"
+  local paths_output="$3"
+  local list_output="$4"
+  local exact_count=""
+
+  : >"$paths_output"
+  if ! adb -s "$serial" shell pm list packages "$package" >"$list_output" 2>&1; then
+    cat "$list_output" >&2
+    return 1
+  fi
+  exact_count="$(awk -v expected="package:$package" '
+    { sub(/\r$/, "") }
+    $0 == expected { count += 1 }
+    END { print count + 0 }
+  ' "$list_output")"
+  if [[ "$exact_count" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$exact_count" -ne 1 ]]; then
+    echo "Package manager returned $exact_count exact entries for $package" >&2
+    return 1
+  fi
+  if ! adb -s "$serial" shell pm path "$package" >"$paths_output" 2>&1; then
+    cat "$paths_output" >&2
+    return 1
+  fi
+  if ! awk '
+    { sub(/\r$/, "") }
+    /^$/ { next }
+    !/^package:\/.*\.apk$/ { exit 1 }
+    { valid += 1 }
+    END { if (valid == 0) exit 1 }
+  ' "$paths_output"; then
+    echo "Package manager listed $package but returned no valid APK paths" >&2
+    cat "$paths_output" >&2
+    return 1
+  fi
+}
+
 pocketgpt_verify_benchmark_apk() {
   local repo_root="$1"
   local apk="$2"
@@ -57,16 +98,19 @@ pocketgpt_activate_benchmark_profile() {
   local output_dir="$4"
   local harness="$5"
   local receiver_component="$package/$POCKETGPT_PROFILE_RECEIVER"
+  local package_list_output="$output_dir/package-list-before-install.txt"
 
   pocketgpt_require_isolated_benchmark_package "$package"
   mkdir -p "$output_dir"
 
-  if ! adb -s "$serial" shell pm path "$package" \
-    >"$output_dir/package-paths-before-install.txt" 2>&1; then
-    cat "$output_dir/package-paths-before-install.txt" >&2
+  if ! pocketgpt_discover_exact_package_paths \
+    "$serial" \
+    "$package" \
+    "$output_dir/package-paths-before-install.txt" \
+    "$package_list_output"; then
     return 1
   fi
-  if grep -q '^package:' "$output_dir/package-paths-before-install.txt"; then
+  if [[ -s "$output_dir/package-paths-before-install.txt" ]]; then
     if ! adb -s "$serial" uninstall "$package" >"$output_dir/uninstall-before-install.txt" 2>&1; then
       cat "$output_dir/uninstall-before-install.txt" >&2
       return 1
@@ -134,13 +178,14 @@ pocketgpt_uninstall_isolated_benchmark() {
   local package="$2"
   local output_file="$3"
   local paths_file="${output_file%.txt}-paths.txt"
+  local list_file="${output_file%.txt}-package-list.txt"
 
   pocketgpt_require_isolated_benchmark_package "$package"
-  if ! adb -s "$serial" shell pm path "$package" >"$paths_file" 2>&1; then
-    cat "$paths_file" >&2
+  if ! pocketgpt_discover_exact_package_paths \
+    "$serial" "$package" "$paths_file" "$list_file"; then
     return 1
   fi
-  if ! grep -q '^package:' "$paths_file"; then
+  if [[ ! -s "$paths_file" ]]; then
     printf 'not-installed\n' >"$output_file"
     return 0
   fi

@@ -1,0 +1,36 @@
+{
+  "app": {
+    "build": "native-enabled nondebuggable benchmark",
+    "package": "com.pocketagent.android",
+    "runtime_state": "manually verified unloaded"
+  },
+  "device": {
+    "android_release": "13",
+    "model": "SM-A515F",
+    "refresh_rate_hz": 60,
+    "vendor": "Samsung"
+  },
+  "gfxinfo": {
+    "janky_frames": 69,
+    "janky_pct": 27.27,
+    "p50_ms": 20,
+    "p90_ms": 42,
+    "p99_ms": 250,
+    "slow_bitmap_uploads": 0,
+    "slow_draw_commands": 31,
+    "slow_ui_thread": 57,
+    "total_frames": 253
+  },
+  "thermal": {
+    "battery_c_after": 34.2,
+    "battery_c_before": 34.1,
+    "status_after": 0,
+    "status_before": 0
+  },
+  "trace": {
+    "negative_timestamp_packets_dropped": 45,
+    "processor": "Perfetto v57.2-da1d152cf",
+    "sha256": "74d7d518d72faa9707c751cc05910093523ea2023cb5948ffea3a02201295e1c",
+    "size_bytes": 26310444
+  }
+}

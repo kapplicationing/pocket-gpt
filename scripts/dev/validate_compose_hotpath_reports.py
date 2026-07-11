@@ -77,12 +77,25 @@ def _required_nonnegative_integer(payload: dict[str, Any], field: str, path: Pat
     return value
 
 
+def _composable_declaration_prefix(report_text: str, name: str) -> str:
+    matches = re.findall(
+        rf"(?m)^(?P<prefix>[^\n]*?)\bfun\s+{re.escape(name)}\s*\(",
+        report_text,
+    )
+    if len(matches) != 1:
+        raise ReportValidationError(
+            f"expected exactly one Compose declaration for {name}, found {len(matches)}"
+        )
+    return matches[0]
+
+
 def validate_reports(
     *,
     report_dir: Path,
     metrics_dir: Path,
     variant: str,
     expected_composables: Sequence[str],
+    expected_skippable_composables: Sequence[str],
     not_before_epoch: float,
     freshness_inputs: Sequence[Path] = (),
 ) -> dict[str, Any]:
@@ -160,12 +173,27 @@ def validate_reports(
         )
     if not expected_composables:
         raise ReportValidationError("expected composable list must not be empty")
+    if not expected_skippable_composables:
+        raise ReportValidationError("expected skippable composable list must not be empty")
+
+    non_skippable = []
+    for name in expected_skippable_composables:
+        prefix = _composable_declaration_prefix(report_text, name)
+        declaration_flags = set(prefix.split())
+        if not {"restartable", "skippable"}.issubset(declaration_flags):
+            non_skippable.append(name)
+    if non_skippable:
+        raise ReportValidationError(
+            "Compose hot-path boundaries must be restartable and skippable: "
+            + ", ".join(non_skippable)
+        )
 
     return {
         "variant": variant,
         "total_composables": module_metrics["totalComposables"],
         "module_metrics": module_metrics,
         "expected_composables": list(expected_composables),
+        "expected_skippable_composables": list(expected_skippable_composables),
         "report_dir": str(report_dir),
         "metrics_dir": str(metrics_dir),
     }
@@ -180,6 +208,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--variant", required=True)
     parser.add_argument("--not-before-epoch", required=True, type=float)
     parser.add_argument("--expected-composable", action="append", default=[])
+    parser.add_argument("--expected-skippable-composable", action="append", default=[])
     parser.add_argument("--freshness-input", action="append", default=[], type=Path)
     parser.add_argument("--output", type=Path)
     return parser.parse_args(argv)
@@ -196,6 +225,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             metrics_dir=args.metrics_dir,
             variant=args.variant,
             expected_composables=args.expected_composable,
+            expected_skippable_composables=args.expected_skippable_composable,
             not_before_epoch=args.not_before_epoch,
             freshness_inputs=args.freshness_input,
         )

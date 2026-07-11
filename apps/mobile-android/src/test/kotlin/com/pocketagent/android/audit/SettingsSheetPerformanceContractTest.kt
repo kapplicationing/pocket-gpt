@@ -8,8 +8,11 @@ class SettingsSheetPerformanceContractTest {
     @Test
     fun `general settings compose keyed lazy sections instead of one eager scrolling column`() {
         val source = settingsSheetSource().readText()
-        val generalTab = source.substringAfter("private fun GeneralTabContent(")
-            .substringBefore("@Composable\nprivate fun ModelTabContent(")
+        val generalTab = source.requireSection(
+            start = "private fun GeneralTabContent(",
+            end = "@Composable\nprivate fun ModelTabContent(",
+            label = "GeneralTabContent",
+        )
         val expectedSections = listOf(
             "settings_general_performance",
             "settings_general_downloads",
@@ -31,6 +34,11 @@ class SettingsSheetPerformanceContractTest {
     @Test
     fun `completion settings compose keyed lazy sections around the hot text field`() {
         val source = completionSettingsSheetSource().readText()
+        val completionSheet = source.requireSection(
+            start = "internal fun CompletionSettingsSheet(",
+            end = "@Composable\nprivate fun CompletionCommonSettingsSection(",
+            label = "CompletionSettingsSheet",
+        )
         val expectedSections = listOf(
             "completion_reset",
             "completion_system_prompt",
@@ -41,11 +49,11 @@ class SettingsSheetPerformanceContractTest {
         )
 
         assertTrue(
-            "LazyColumn(" in source && ".verticalScroll(" !in source,
+            "LazyColumn(" in completionSheet && ".verticalScroll(" !in completionSheet,
             "Completion settings must not redraw an eager scrolling Column while the system prompt changes.",
         )
         assertTrue(
-            expectedSections.all { section -> "key = \"$section\"" in source },
+            expectedSections.all { section -> "key = \"$section\"" in completionSheet },
             "Completion settings must keep expensive controls in independently keyed lazy sections.",
         )
     }
@@ -59,4 +67,17 @@ class SettingsSheetPerformanceContractTest {
         File("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt"),
         File("apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt"),
     ).first { it.exists() }
+
+    private fun String.requireSection(start: String, end: String, label: String): String {
+        assertTrue(
+            start in this,
+            "$label start marker is missing; update the contract test with the production rename.",
+        )
+        val sectionAndRemainder = substringAfter(start)
+        assertTrue(
+            end in sectionAndRemainder,
+            "$label end marker is missing; update the contract test with the production boundary.",
+        )
+        return sectionAndRemainder.substringBefore(end)
+    }
 }

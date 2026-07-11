@@ -1,0 +1,8 @@
+metric,value,unit
+main_running_max_ms,12.401,ms
+main_runnable_wait_max_ms,0.962,ms
+render_drawframes_24_to_30_ms_count,12,count
+fullscreen_drawing_slice_count,19,count
+fullscreen_drawing_avg_ms,18.067,ms
+flush_commands_avg_ms,5.366,ms
+egl_swap_avg_ms,7.525,ms

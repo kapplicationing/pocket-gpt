@@ -342,12 +342,26 @@ class PerformanceContractAuditTest {
             "SessionDrawer",
             "CompletionSettingsSheet",
         )
+        val expectedSkippableNames = listOf(
+            "GeneralTabContent",
+            "PerformanceSettingsSection",
+            "DownloadSettingsSection",
+            "KeepAliveSettingsSection",
+            "VoiceSettingsSection",
+            "ReasoningSettingsSection",
+            "CompletionCommonSettingsSection",
+            "CompletionThinkingSection",
+            "CompletionAdvancedSettingsSection",
+        )
         assertTrue(
             expectedNames.all { name -> name in reportScript } &&
+                expectedSkippableNames.all { name -> name in reportScript } &&
                 "totalComposables" in validator &&
                 "stale" in validator &&
-                "expected exactly one" in validator,
-            "Compose evidence must reject missing hot composables and empty, stale, or incomplete metrics.",
+                "expected exactly one" in validator &&
+                "expected_skippable_composables" in validator &&
+                "restartable and skippable" in validator,
+            "Compose evidence must reject missing or non-skippable hot boundaries and empty, stale, or incomplete metrics.",
         )
     }
 

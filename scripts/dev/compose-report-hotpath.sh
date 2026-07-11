@@ -27,6 +27,18 @@ EXPECTED_COMPOSABLES=(
   SessionDrawer
   CompletionSettingsSheet
 )
+EXPECTED_SKIPPABLE_COMPOSABLES=(
+  GeneralTabContent
+  PerformanceSettingsSection
+  DownloadSettingsSection
+  KeepAliveSettingsSection
+  VoiceSettingsSection
+  ReasoningSettingsSection
+  CompletionSettingsSheet
+  CompletionCommonSettingsSection
+  CompletionThinkingSection
+  CompletionAdvancedSettingsSection
+)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -91,13 +103,16 @@ validator_args=(
 for composable in "${EXPECTED_COMPOSABLES[@]}"; do
   validator_args+=(--expected-composable "$composable")
 done
+for composable in "${EXPECTED_SKIPPABLE_COMPOSABLES[@]}"; do
+  validator_args+=(--expected-skippable-composable "$composable")
+done
 "${validator_args[@]}"
 
 echo "Compose hot-path instability scan: $REPORT_DIR"
 echo
 matches="$(
   grep -RInE 'unstable|skippable=false|restartable scheme' "$REPORT_DIR" 2>/dev/null |
-    grep -E 'ChatApp|ChatScreen|ChatComposer|MessageBubble|ModelSheet|ModelLibrary|SessionDrawer|ChatUiState|ModelProvisioningUiState|RuntimeUiState|ComposerUiState' || true
+    grep -E 'ChatApp|ChatScreen|ChatComposer|MessageBubble|ModelSheet|ModelLibrary|SessionDrawer|CompletionSettings|CompletionCommon|CompletionThinking|CompletionAdvanced|GeneralTab|PerformanceSettings|DownloadSettings|KeepAliveSettings|VoiceSettings|ReasoningSettings|ChatUiState|ModelProvisioningUiState|RuntimeUiState|ComposerUiState' || true
 )"
 
 if [[ -z "$matches" ]]; then

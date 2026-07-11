@@ -218,6 +218,20 @@ sample directories and `evaluation.json`. Run separate three-sample groups for
 `loaded-idle`, active downloads, or active voice. Never mix conditions inside one
 median group.
 
+The three workload flags are operator declarations, not app-observed telemetry.
+Confirm the runtime, download queue, and voice listener in the app before the
+group. The gate records and consistency-checks the declarations, while its
+device checks prove package, foreground, journey, refresh, thermal, and
+compilation state.
+
+The gate owns an atomic lock for the selected device and package across build,
+install, and all three samples. A contention error prints the lock path and its
+owner PID, start time, and command. If `SIGKILL` leaves a stale lock under
+`${TMPDIR}/pocketgpt-android-perf-locks` (or
+`POCKETGPT_ANDROID_PERF_LOCK_ROOT`), verify that exact owner process is dead
+before removing only the reported hashed lock directory. Never bypass a live
+owner.
+
 ## Perfetto Capture For Worst Jank
 
 Use this after benchmark medians are bad. Capture only the worst journey first.
@@ -236,7 +250,11 @@ adb -s <serial> shell perfetto \
   power/suspend_resume power/cpu_frequency power/cpu_idle \
   am wm gfx view binder_driver hal dalvik
 
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh \
+  --scenario settings-nav \
+  --runtime-state unloaded \
+  --download-state idle \
+  --voice-state inactive
 
 adb -s <serial> pull \
   /data/misc/perfetto-traces/settings-nav.perfetto-trace \

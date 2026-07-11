@@ -54,9 +54,14 @@ onboarding, voice, and tooling gates, see
   hot composables, and highlights instability/non-skippable churn. Use `--strict` only
   after the current instability baseline is intentionally cleaned up.
 - `scripts/dev/perf-interaction-gate.sh` requires explicit runtime/download/voice
-  conditions and retains device, refresh-rate, thermal, battery, package-compilation,
-  and frame-window evidence for each sample. Acceptance rejects missing
+  declarations and retains device, refresh-rate, thermal, battery, package-compilation,
+  and frame-window evidence for each sample. Operators must verify those three
+  app states before the group; the gate checks declaration consistency, not app
+  telemetry. Acceptance rejects missing
   refresh/compilation provenance, fewer than 20 frames, or any nonzero thermal status.
+  One atomic device/package lease covers build, install, and all three samples;
+  each child validates the owning token, and end-state checks still fail closed
+  against tools that do not honor the lease.
 - `bash scripts/dev/test.sh core|merge` includes `:apps:mobile-android:assembleBenchmark`
   when Android SDK is configured, so the benchmark variant remains buildable even
   when no physical device is attached.

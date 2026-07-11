@@ -12,6 +12,7 @@ from validate_compose_hotpath_reports import ReportValidationError, validate_rep
 
 
 EXPECTED_COMPOSABLES = ("PocketAgentApp", "ComposerInputRow", "ModelSheet")
+EXPECTED_SKIPPABLE_COMPOSABLES = ("ComposerInputRow", "ModelSheet")
 
 
 class ValidateComposeHotpathReportsTest(unittest.TestCase):
@@ -64,6 +65,7 @@ class ValidateComposeHotpathReportsTest(unittest.TestCase):
             "metrics_dir": self.metrics_dir,
             "variant": "benchmark",
             "expected_composables": EXPECTED_COMPOSABLES,
+            "expected_skippable_composables": EXPECTED_SKIPPABLE_COMPOSABLES,
             "not_before_epoch": 0,
         }
         arguments.update(overrides)
@@ -76,6 +78,30 @@ class ValidateComposeHotpathReportsTest(unittest.TestCase):
 
         self.assertEqual(result["total_composables"], 10)
         self.assertEqual(result["expected_composables"], list(EXPECTED_COMPOSABLES))
+        self.assertEqual(
+            result["expected_skippable_composables"],
+            list(EXPECTED_SKIPPABLE_COMPOSABLES),
+        )
+
+    def test_rejects_expected_boundary_that_is_restartable_but_not_skippable(self):
+        self.write_valid_reports()
+        composables = next(self.report_dir.glob("*-composables.txt"))
+        composables.write_text(
+            composables.read_text(encoding="utf-8").replace(
+                'restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun ComposerInputRow()',
+                'restartable scheme("[androidx.compose.ui.UiComposable]") fun ComposerInputRow()',
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ReportValidationError, "restartable and skippable"):
+            self.validate()
+
+    def test_rejects_empty_expected_skippable_boundary_list(self):
+        self.write_valid_reports()
+
+        with self.assertRaisesRegex(ReportValidationError, "skippable composable list"):
+            self.validate(expected_skippable_composables=())
 
     def test_rejects_empty_module_metrics_instead_of_reporting_a_false_green(self):
         self.write_valid_reports()

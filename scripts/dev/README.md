@@ -111,10 +111,16 @@ Run only the scenario that matches the changed risk. The gate builds one
 native-enabled benchmark APK, captures three samples on that same installed
 build, validates their provenance, and enforces the median targets in
 `docs/testing/test-strategy.md`. Runtime, download, and voice conditions are
-required declarations and must remain constant across the three samples. Device,
-refresh-rate, thermal, battery, and compilation evidence is retained alongside
+operator declarations and must remain constant across the three samples; verify
+the declared state in the app before starting because the gate does not observe
+those three app states. Device, refresh-rate, thermal, battery, and compilation
+evidence is retained alongside
 the frame metrics. Use `perf-interaction.sh` directly only for a single diagnostic
 sample; it does not provide three-sample acceptance evidence.
+
+The gate holds one atomic device/package lock for build, install, and all three
+samples. On contention, inspect the reported owner PID/start/command. Remove a
+reported stale lock only after proving its owner is dead.
 
 ## Stage-2 Benchmark Wrapper
 

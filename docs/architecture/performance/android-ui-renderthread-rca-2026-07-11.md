@@ -3,7 +3,7 @@
 ## Decision
 
 Treat normal-navigation jank as a product rendering problem, not an inference
-cost. The accepted physical-device baselines were red while the model runtime
+cost. Historical physical-device diagnostics were red while the model runtime
 was unloaded, downloads were idle, and voice activation was inactive.
 
 The first corrective order is:
@@ -13,10 +13,12 @@ The first corrective order is:
 3. keep runtime replacement and teardown off the UI thread;
 4. re-run three thermally valid samples under one package and compilation state.
 
-## Accepted baseline
+## Historical diagnostic baseline
 
-The benchmark APK was native-enabled, non-debuggable, and measured on a Samsung
-SM-A515F running Android 13 at 60 Hz.
+The benchmark APK was native-enabled, nondebuggable, and measured on a Samsung
+SM-A515F running Android 13 at 60 Hz. These groups predate the current evidence
+schema. Their device and workload conditions were inspected manually, so retain
+them as diagnostic baselines rather than current acceptance evidence.
 
 | Scenario | Jank samples | Median jank | p50 | p90 | p99 |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -36,7 +38,9 @@ were high.
 ## Trace finding
 
 One thermally valid settings journey was captured with Perfetto and inspected
-with trace processor v57.2.
+with trace processor v57.2. The reproducible SQL, result table, trace hash, and
+sanitized device/gfx manifest live in the
+[2026-07-11 evidence ledger](../../operations/evidence/android-ui-renderthread-2026-07-11/README.md).
 
 - PocketGPT's main thread had a maximum observed running slice of 12.4 ms and a
   maximum runnable wait of about 1 ms.
@@ -47,9 +51,11 @@ with trace processor v57.2.
   main-thread-versus-RenderThread conclusion is retained; fine-grained event
   ordering from those packets is not used.
 
-This points to full-screen Compose draw cost and scene breadth as the dominant
-normal-navigation problem in this capture. It does not rule out ART/JIT cost,
-which is why Baseline Profile packaging remains a separate cross-cutting fix.
+RenderThread-bound full-frame work dominated this capture. Scene breadth is the
+first ablation, not a proven root cause; invalidation frequency, overdraw,
+surface layering, and GPU/driver contention remain live hypotheses. The trace
+also does not rule out ART/JIT cost, which is why Baseline Profile packaging
+remains a separate cross-cutting fix.
 
 ## Implemented ablation
 
@@ -84,7 +90,9 @@ Repeat for `model-sheet` and `drawer-search` only after the device is thermal
 status 0 and no other instrumentation owns the transport. The gate requires
 three chronological samples with one package identity, one refresh rate, one
 compilation mode, non-empty frame windows, and thermal status 0 before and
-after every sample.
+after every sample. Runtime, download, and voice flags are operator declarations
+recorded for reproducibility; verify them against the app before starting. The
+gate checks their vocabulary and consistency, not their underlying app state.
 
 ## Acceptance
 

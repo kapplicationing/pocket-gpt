@@ -21,7 +21,7 @@ PocketAgent is local-first by default:
 1. Sensitive user content stays local unless user explicitly opts into an external action.
 2. Tool calls execute through a local sandbox with schema validation.
 3. Any network-capable action must pass `PolicyModule` checks.
-4. Android platform backup is disabled so conversations, model/runtime files, caches, and diagnostics are not copied through OS backup or device-transfer backup channels.
+4. Android cloud backup is disabled. Android 12+ data-extraction rules also exclude every supported app-data domain from device transfer, while manufacturer device-to-device behavior remains an explicit device-dependent boundary.
 
 ## Threat Model
 
@@ -74,7 +74,7 @@ Do not publish these as available controls until implementation and validation a
 | Tool safety | strict schema validation + allowlist | Implemented (schema validation + deterministic rejection contracts) |
 | Diagnostics privacy | no raw prompt/response by default | Implemented (redaction checks in runtime tests and UI export path) |
 | Network gating | explicit policy checks per action | Implemented (policy wiring integrated with Android platform enforcement checks) |
-| Platform backup boundary | no OS backup of local conversations or runtime artifacts | Implemented (`android:allowBackup="false"`, enforced by manifest regression test) |
+| Platform backup boundary | no cloud backup; Android 12+ supported app-data domains excluded from configured device transfer | Implemented (`android:allowBackup="false"` plus `@xml/data_extraction_rules`, enforced by manifest/rules regression test); OEM D2D behavior remains device-dependent |
 | End-user retention controls | user can tune retention/reset in app UI | Not implemented |
 | Voice privacy (future STT/TTS) | equivalent controls to text/image paths | Planned (post-MVP) |
 

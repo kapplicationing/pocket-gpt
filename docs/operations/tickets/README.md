@@ -17,6 +17,7 @@ Current tickets include:
 - `eng-24-startup-readiness-metadata-self-healing.md`
 - `prod-12-human-required-gate-split.md`
 - `prod-13-play-store-submission-readiness.md`
+- `prod-14-generative-ai-safety-and-reporting.md`
 - `qa-13-send-capture-gate-operationalization.md`
 - `qa-14-cloud-first-qa-evidence-migration.md`
 - `qa-15-agent-assisted-qa-triage.md`

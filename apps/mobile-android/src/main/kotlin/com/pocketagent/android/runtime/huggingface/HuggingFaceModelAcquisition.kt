@@ -398,14 +398,14 @@ class DefaultHuggingFaceModelAcquisition(
             throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SHA,
                 userMessage = "This file does not expose a usable Hugging Face LFS checksum, " +
-                    "so PocketGPT cannot verify the download.",
+                    "so PocketAgent cannot verify the download.",
             )
         }
         val sizeBytes = metadata.sizeBytes?.takeIf { it > 0L }
             ?: throw HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.MISSING_SIZE,
                 userMessage = "This file does not expose a usable file size, " +
-                    "so PocketGPT cannot check storage before download.",
+                    "so PocketAgent cannot check storage before download.",
             )
         val repositoryMetadata = runCatching { hubClient.lookupRepository(reference) }.getOrNull()
         val spec = ModelCatalog.normalizedSpecFor(target.modelId)
@@ -490,7 +490,7 @@ class DefaultHuggingFaceModelAcquisition(
             HuggingFaceAcquisitionException(
                 reason = HuggingFaceAcquisitionBlockReason.COMPANION_ARTIFACT_REQUIRED,
                 userMessage = "This model needs extra companion files. " +
-                    "PocketGPT only supports single-file text GGUF downloads here.",
+                    "PocketAgent only supports single-file text GGUF downloads here.",
             )
         } else {
             HuggingFaceAcquisitionException(

@@ -1,148 +1,150 @@
 # Execution Board
 
-Last updated: 2026-07-06
+Last updated: 2026-07-11
 
-This is the single mutable board for planning and delivery.
+This is the single mutable board for planning and delivery. Ticket acceptance
+criteria live in `docs/operations/tickets/`; fixed evidence baselines live in
+`docs/operations/evidence/evidence-ledger.json`.
 
 ## Program Standard
 
-Engineering and quality excellence are mandatory.
-
-1. Task completion requires acceptance criteria, test proof, and evidence links.
-2. Regressions are blockers and must be resolved before scope expansion.
-3. Promotion decisions require technical correctness and UX quality confidence.
+1. Completion requires acceptance criteria, proof, and evidence links.
+2. A promoted product gate and a publishable Play Store package are separate
+   states.
+3. Regressions block scope expansion.
+4. Verify live branch/CI/device state at execution time; do not copy moving
+   status into multiple documents.
 
 ## Status Legend
 
-- `Done`: completed with evidence and acceptance criteria met
+- `Done`: acceptance criteria and required evidence are complete
 - `In Progress`: currently being executed
 - `Ready`: unblocked and queued
-- `Blocked`: cannot proceed (blocker listed)
+- `Blocked`: cannot proceed until the named dependency changes
 - `Backlog`: not started and not yet ready
-
-## Source Links
-
-- Current release plan: `docs/roadmap/current-release-plan.md`
-- Active ticket specs: `docs/operations/tickets/`
-- Evidence inventory + retention: `docs/operations/evidence/index.md`
-- Program learnings: `docs/operations/historical/launch-program-learnings.md`
-- Command/process canon: `scripts/dev/README.md`, `docs/testing/test-strategy.md`, `docs/testing/runbooks.md`
 
 ## Current Status Snapshot
 
-The July HF/CI branch stack is merged and published through PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4)-[#9](https://github.com/kapplicationing/pocket-gpt/pull/9). Fixed CI, CodeQL, nightly, hardware-runner guard, and controlled-MVP baselines are retained in `docs/operations/evidence/evidence-ledger.json`. Verify the live `main`/`origin/main` SHA with `git status --short --branch` and GitHub Actions before release action instead of hard-coding a moving docs-only tip here.
+The 2026-07-11 launch-readiness snapshot reports:
 
-Branch/publication hygiene is closed for the `codex/simplify-model-selection` and post-merge CI cleanup stack: merged PRs [#4](https://github.com/kapplicationing/pocket-gpt/pull/4), [#5](https://github.com/kapplicationing/pocket-gpt/pull/5), [#6](https://github.com/kapplicationing/pocket-gpt/pull/6), [#7](https://github.com/kapplicationing/pocket-gpt/pull/7), [#8](https://github.com/kapplicationing/pocket-gpt/pull/8), and [#9](https://github.com/kapplicationing/pocket-gpt/pull/9) are all on `main`.
+1. Controlled-MVP gate: `promoted`
+2. `PROD-10`: `Promote`
+3. Required rows: `8/8 PASS`
+4. Publication readiness: `blocked`
+5. Explicit board blockers: Play generative-AI policy controls, final asset capture/approval, and signed Play package execution
+
+The July Hugging Face/CI stack and the July 11 model-import/runtime-ownership
+hardening are published on `main` and `origin/main`. The latter adds
+cancellable/durable import transactions, model and bounded GGUF validation,
+serialized runtime operation ownership, cancellation/close recovery, Android
+cloud-backup and Android 12+ transfer exclusions, and interaction-performance
+gates. The release-closeout
+payload is isolated on `codex/release-closeout` for review; it does not include
+the engineer-owned runtime/CI worktree changes. The open path is that review,
+then Play Store package and rollout execution.
+
+Generate the current repository decision with:
+
+`bash scripts/dev/launch-readiness.sh`
 
 ## Work Packages
 
-| ID | Work Package | Status | Notes |
+| ID | Work package | Status | Current boundary |
 |---|---|---|---|
-| WP-00 .. WP-08 | Foundation through launch prep packages | Done | Historical evidence summarized in `docs/operations/evidence/index.md` |
-| WP-09 | Distribution plan and beta operations | In Progress | Active full evidence retained in `docs/operations/evidence/wp-09/`; fixed repository baselines live in `docs/operations/evidence/evidence-ledger.json` |
-| WP-10 | Voice limited-beta rail | Ready | Kept in locked launch scope for controlled/closed-track use; broad public claims remain excluded pending evidence + claim parity |
-| WP-11 | Android MVP UX package | Done | Historical evidence summarized in `docs/operations/evidence/index.md` |
-| WP-12 | Backend production runtime closure | Done | Production-claim-critical evidence retained in `docs/operations/evidence/wp-12/` |
-| WP-13 | UX quality closure | In Progress | Active full evidence retained in `docs/operations/evidence/wp-13/` |
+| WP-00 .. WP-08 | Foundation through launch preparation | Done | Historical summaries remain in the evidence index |
+| WP-09 | Distribution plan and beta operations | In Progress | Closes only after controlled publication and operator follow-through |
+| WP-10 | Voice limited-beta rail | Ready | Closed-track only; excluded from broad public claims |
+| WP-11 | Android MVP UX | Done | Controlled-MVP UX gate closed |
+| WP-12 | Production runtime | Done | Includes July 11 import/runtime hardening on `main` |
+| WP-13 | UX quality closure | Done | Controlled-MVP leg closed by the disclosed promote-level AI human-proxy packet; human moderation remains an expansion follow-up |
 
 ## Current Sprint Board
 
 ### In Progress
 
 - [ ] WP-09 distribution plan and beta operations execution
-- [ ] QA-13 send-capture gate operationalization in weekly regression workflow
+- [ ] MKT-10 apply the frozen claims to approved assets and the first live scorecard
+- [ ] UX-13 direct timeout-to-retry acceptance closure
 
 ### Blocked
 
-None.
+- [ ] PROD-14 in-app AI-output reporting plus restricted-content prevention — needs an approved developer-controlled intake, privacy/Data Safety contract, and implemented/tested product controls
+- [ ] MKT-08 final screenshots/video and Product + Marketing approval — needs a connected current Android canary with the release candidate installed
+- [ ] PROD-13 signed bundle, physical install proof, and Play upload — needs the existing upload key, a connected physical canary, and an enrolled Play developer account with two-step verification
 
 ### Ready
 
-- [ ] PROD-13 Play Store submission readiness package
-- [ ] UX-13 stuck send + timeout recovery UX acceptance coverage
-- [ ] PROD-11 pilot support + incident UX-ops playbook
-- [ ] MKT-08 proof asset capture + listing shotlist finalization
-- [ ] MKT-09 first 7-day channel scorecard execution
-- [ ] MKT-10 claim freeze v1
+- [ ] MKT-09 first 7-day channel scorecard after rollout (non-blocking for initial controlled publication)
 
 ### Done (Recent)
 
-- [x] Dynamic Hugging Face search/import and follow-up CI stabilization stack landed on `main` through PRs #4-#9.
-- [x] Branch/publication hygiene is closed for the July stack: PRs #4-#9 are merged and published on `main`.
-- [x] Fixed July CI, CodeQL, and nightly baselines are recorded in `docs/operations/evidence/evidence-ledger.json`.
-- [x] Live CI/nightly status is no longer hand-maintained in this board; use GitHub Actions for current run state.
-- [x] Nightly hardware runner availability is guarded by PR [#9](https://github.com/kapplicationing/pocket-gpt/pull/9); missing self-hosted runner capacity is now reported as lane availability, not confused with product failure.
-- [x] PROD-09 soft-gate pilot policy published
-- [x] UX-12 recovery journey spec published
-- [x] ENG-21 interaction architecture refactor landed
-- [x] ENG-19 devctl package UID parser hardening landed (`userId`/`appId`/`uid` + tests)
-- [x] ENG-22 provisioning startup-check lane blocker closed (`docs/operations/tickets/archive/eng-22-provisioning-startup-check-lane-blocker.md`)
-- [x] ENG-23 host-side native runtime provisioning `SIGILL` mitigation landed; the retained provisioning crash is no longer the live blocker in the launch program
-- [x] ENG-24 startup/readiness metadata self-healing landed; the later setup/provisioning gap was narrowed to missing multimodal companion (`mmproj`) sync in `devctl` preflight and fixed in local code
-- [x] ENG-20 host-side runtime cancel/timeout contract coverage landed; preserved strict-journey evidence now carries current physical send authority for the controlled MVP
-- [x] Local authoritative onboarding proof is now represented in `android-instrumented` coverage through `MainActivityAuthoritativeOnboardingInstrumentationTest`; that contract is now preserved in the promoted evidence set
-- [x] Current-window `android-instrumented` rerun passed on the S906N canary and remains part of the promoted evidence set alongside the now-green hosted/default targeted cloud surface and preserved strict `journey`
-- [x] Local `main` is already fast-forwarded to the same tip as `codex/launch-readiness-implementation`; branch-closeout risk is now publication to `origin/main`, not an internal merge between those two local refs
-- [x] WP-12 package closeout complete
-- [x] `docs/testing/generated/launch-flow-truth.md` is now the only selector/copy/runtime-state authority for automated QA flow maintenance and agent-assisted deterministic QA tooling
-- [x] Android hot-path launch work is now explicitly governed by `docs/architecture/android-performance-contract.md` and benchmark-only evidence rules
-- [x] DOC-03 superpower-plan canon sync and docs-health cleanup completed; broken local plan references are cleared and the launch/testing canon now reflects the controlled-MVP evidence policy
-- [x] DOC-01 timeline/status reconciliation across roadmap + board + role docs
-- [x] DOC-02 product/UX doc parity sync for timeout/cancel/send-capture + manifest outage UX
-- [x] QA-11 rerun preservation/closure now has current-window authority: `android-instrumented` remains preserved, hosted account 1 `send-after-ready` now passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, hosted account 2 model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`, and strict S22 `journey` remains preserved as physical send authority
-- [x] QA-WP13-RUN02 now has a current disclosed `AI human-proxy` packet with measured values and a `promote` recommendation at `docs/operations/evidence/wp-13/2026-05-03-wp13-packet-ai-human-proxy.md`
-- [x] WP-13 run-01 hold closure prep is complete; the current disclosed proxy packet is now the active controlled-MVP moderation-backed leg
-- [x] PROD-10 rerun from current evidence now lands on `Promote` for the controlled MVP
-- [x] PROD-12 human-required gate split is closed; machine-verifiable versus moderation-backed evidence is now canon and the disclosed `AI human-proxy` fallback path is fully documented for the controlled MVP
-- [x] SEC-02 privacy claim parity audit is closed; publish-safe privacy claims are now limited to `Verified` rows and `P-04` remains explicitly internal-only
-- [x] QA-14 cloud-first QA evidence migration is closed for the controlled MVP; the promoted evidence set now carries current hosted/default proofs plus the preserved narrow physical canary
-- [x] QA-15 agent-assisted QA triage loop is closed for the controlled MVP; cloud failures were triaged through the agent loop with first-failure classification and evidence packaging
+- [x] QA-13 now has one required weekly send-capture wrapper, Monday hardware schedule, retained packet/delta contract, fail-closed runner handling, and deduplicated issue routing with automatic stale-blocker closure.
+- [x] PROD-11 now has a public support path, private contact, incident/SLA rules, weekly rollout template, and claim/rollout pause rules.
+- [x] PocketAgent is now the canonical customer-facing name in app strings, listing copy, policy/support pages, and release metadata; technical `pocketgpt` identifiers remain compatible.
+- [x] Release identity, internal-track plan, reproducible signing/build contract, Play metadata worksheet, claim-safe copy, adaptive launcher icon, and draft store brand graphics are prepared in-repo.
+- [x] July 11 model-import/runtime-ownership hardening landed on `main` and `origin/main` with focused tests and CI wiring.
+- [x] Dynamic Hugging Face discovery/import and CI stabilization landed through PRs #4-#9.
+- [x] July CI, CodeQL, nightly, and hardware-runner baselines were recorded in the evidence ledger.
+- [x] Branch/publication hygiene closed for the July engineering baseline; the new release-closeout payload is isolated on `codex/release-closeout` for review.
+- [x] `PROD-10` required rows reached `8/8 PASS` and the decision advanced to `Promote`.
+- [x] The disclosed AI human-proxy WP-13 packet reached a `promote` recommendation for the controlled MVP.
+- [x] `SEC-02` closed privacy parity for verified external claims; partial `P-04` controls remain internal-only.
+- [x] Required hosted/default send and model-management proof, S906N Android instrumentation, S22 physical canary, and strict journey authority were preserved.
+- [x] Cloud-first evidence and agent-assisted first-failure triage were operationalized for the controlled-MVP decision.
+- [x] Android hot-path launch work gained mandatory performance-contract audits and benchmark-only evidence rules.
 
-## Critical Path And Parallel Streams
+## Publication Critical Path
 
-### Critical Path
+1. Close `PROD-14` with in-app reporting that reaches the developer without
+   leaving the app, plus evidenced restricted-content prevention and the
+   matching privacy/Data Safety contract.
+2. Close `UX-13` with a green direct timeout-to-retry contract without losing
+   session context.
+3. Apply the frozen `MKT-10` copy blocks to the final approved assets.
+4. Close `MKT-08` with approved current UI screenshots/video; approve the
+   prepared icon and feature graphic.
+5. Close `PROD-13` with final versioning, selected Play track, reproducible
+   bundle, canary install proof, and artifact identifiers.
+6. Complete developer enrollment, privacy policy, Data Safety, content rating,
+   category, support, and
+   rollout metadata in Play Console.
+7. Regenerate launch readiness and publish only if it still reports `Promote`
+   with no required row regression.
 
-1. Preserve the S906N `android-instrumented` pass at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`.
-2. Preserve the current hosted/default pass roots and the S22 physical canary/journey artifacts as the publication evidence set.
-3. Use the narrow Samsung canary only for OEM/runtime confirmation; do not reopen local wireless Maestro as launch authority.
-4. Carry the disclosed `AI human-proxy` packet as the closed moderation-backed leg for the controlled MVP.
-5. Execute final publication/package steps from the now-promoted evidence set. The July branch publication step is already complete; keep future publication changes on reviewed PRs unless the release owner explicitly authorizes direct-main docs-only maintenance.
-6. Keep the approved `AI human-proxy` bundle documented as a fallback closure path only; it never substitutes for machine-verifiable evidence.
+`MKT-09` starts after the real cohort launches and informs expansion. It does
+not block the initial controlled-MVP publication.
 
-### Parallel Streams
+## Owner Focus
 
-1. Stream A, closed: hosted/default machine-verifiable evidence closure (`QA-11`, `QA-14`, `QA-15`, `QA-13`) is sufficient for the controlled-MVP decision.
-2. Stream B, closed for controlled MVP: the disclosed `AI human-proxy` fallback packet now supplies the moderation-backed leg when moderators are unavailable.
-3. Stream C, active: support/claim/package readiness (`PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, `PROD-13`).
-4. Stream D, closed for the July branch stack: PRs #4-#9 are merged and published on `main`; future branch hygiene work only reopens when a new release branch or unmerged worktree appears.
+1. QA: monitor the weekly send-capture gate and preserve fixed evidence roots.
+2. Product/Release Ops: provide signing/account access, complete live Play
+   declarations, and record the final bundle/install identifiers.
+3. Marketing: capture and approve only claim-safe current assets.
+4. Engineering: close the isolated UX-13 retry defect; avoid unrelated release
+   scope.
+5. Product Research: run the prepared seven-day scorecard after rollout and
+   plan human-moderated evidence before broader non-proxy
+   expansion.
 
-### Parallel Agent Support Topology
+## Evidence Rules
 
-1. Subagent A, Cloud Run Operator: hosted reruns, upload polling, artifact capture, retry bookkeeping.
-2. Subagent B, Failure Triage Analyst: screenshot/logcat/report inspection and first-failure classification.
-3. Subagent C, Flow Truth / Docs Auditor: validates automated flows against `docs/testing/generated/launch-flow-truth.md` and flags doc drift or over-claims.
-4. Subagent D, Evidence Packager: updates pass-id mapping, evidence inventory, and launch-readiness snapshots.
-5. Release-owner only: approve proxy fallback use, interpret disclosed proxy output, and make the final go/no-go recommendation.
+1. Fixed CI/device/program baselines belong in the evidence ledger and evidence
+   index.
+2. Live CI state comes from GitHub Actions.
+3. New targeted runs must retain wrapper-generated status and first-failure
+   artifacts.
+4. A new non-pass gets one classification: `product defect`,
+   `harness/bootstrap failure`, `cloud infra failure`, or
+   `device transport failure`.
+5. Preserve the promoted set unless a fresh artifact proves a regression; do
+   not rerun broad lanes for reassurance alone.
 
-### Dependency Rules
+## Source Links
 
-1. Stream C and Stream D now consume the promoted evidence state from closed Streams A and B.
-2. Copy and assets must stay frozen to the verified current claim surface.
-3. Pushing `main` remains a post-gate action, not a substitute for passing evidence.
-
-## Owner Focus (Current)
-
-1. Engineering: preserve the current hosted/device evidence roots and avoid reopening solved send/setup contracts without a new first-failure artifact.
-2. QA: keep the promoted evidence set intact and use the preserved S22 strict-journey perf caution only as rollout context.
-3. Product: execute the publication package from the promoted state and keep the proxy-derived moderation leg explicitly disclosed.
-4. Marketing: execute `MKT-08` and `MKT-09`, then finalize `MKT-10` claim freeze against verified behavior only, with voice still bounded to limited-beta/closed-track language and image claims staying single-image only.
-5. Performance: for any post-promotion UI/runtime hot-path changes, require clean performance-contract audits and benchmark-only evidence before widening rollout confidence.
-
-Full owner/dependency split: `docs/operations/play-store-launch-program.md`
-
-## Evidence Requirements (Current)
-
-1. Active package evidence belongs in `docs/operations/evidence/wp-09/` and `docs/operations/evidence/wp-13/`.
-2. Production-claim-critical WP-12 evidence remains in `docs/operations/evidence/wp-12/`.
-3. Fixed CI/nightly/hardware baselines and historical package detail are summarized in `docs/operations/evidence/index.md` and `docs/operations/evidence/evidence-ledger.json`.
-4. Older May local artifact paths remain provenance when present, but they are not the current repository sync signal. Use GitHub Actions for live CI/nightly/hardware status and wrapper-generated `status.json` files for any new targeted device/cloud evidence.
+- Current plan: `docs/roadmap/current-release-plan.md`
+- Active tickets: `docs/operations/tickets/`
+- Evidence ledger: `docs/operations/evidence/evidence-ledger.json`
+- Evidence index: `docs/operations/evidence/index.md`
+- Testing strategy: `docs/testing/test-strategy.md`
+- Short commands: `docs/testing/runbooks.md`
+- Program learnings: `docs/operations/historical/launch-program-learnings.md`

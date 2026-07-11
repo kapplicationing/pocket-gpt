@@ -1,71 +1,60 @@
 # Play Store Submission Readiness
 
-Last updated: 2026-05-04  
+Last updated: 2026-07-11
 Owner: Product + Marketing + Release Ops
 
-Mutable status stays in `docs/operations/execution-board.md`.
+Mutable ticket ordering stays in `docs/operations/execution-board.md`. This document defines the package contract.
 
-## Objective
+## Current Decision
 
-Define the final cross-functional checklist that must be complete before PocketAgent is submitted to the Play Store.
+The controlled-MVP product gate is promoted. The repository now contains the release identity, build/signing contract, rollout/rollback notes, claim-safe listing copy, privacy/support package, Play metadata worksheet, asset shotlist, and scorecard packet.
 
-## Hard Prerequisites
+Submission is not complete. The app still lacks Play-required in-app AI-output reporting and evidenced restricted-content prevention, no upload signing identity is configured in the repository, no Android canary is connected, no fresh listing assets are approved, and no Play artifact/review record exists.
 
-1. `PROD-10` required rows are all `PASS`.
-2. Latest `android-instrumented` and `journey` pass IDs exist in the current release window, plus a valid current-window physical canary substitute while wireless Maestro remains harness-class only.
-3. Latest journey send-capture report shows `phase=completed` and `placeholder_visible=false`.
-4. WP-13 packet has measured values with no placeholder fields.
-5. `SEC-02`, `PROD-11`, `MKT-08`, and `MKT-10` are closed enough to support publish-safe copy and support handling.
+## Required Package
 
-## Current State
+| Area | Prepared | Required Before Upload |
+|---|---|---|
+| Product gate | `PROD-10` retained `8/8 PASS` | Re-run launch-readiness on final SHA |
+| Release identity | `0.1.0` / `20260711`, internal track | Confirm Play accepts the version code |
+| Build path | Signed/unsigned modes, checksums, provenance | Existing upload key + clean signed build |
+| Install | Device-pinned validation command | Connected physical canary + passing install/launch |
+| Support | Email, URL, issue template, incident playbook | Check live inbox/issues for open `S0`/`S1` |
+| Privacy/policy | Public policy draft + metadata worksheet | Public URL check + live Console declarations |
+| Generative-AI safety | `PROD-14` gap and acceptance contract documented | In-app developer reporting, real intake, restricted-content prevention, tests, Privacy/Data Safety parity |
+| Listing copy | Short/full copy and `CH-*` freeze | Paste and verify in Console |
+| Assets | Seven-shot plan and manifest | Fresh capture, icon/graphic exports, dual approval |
+| Scorecard | Run-01 packet prepared | Execute seven days after first real install |
 
-As of 2026-05-04, the promotion gate is already green for the controlled MVP. The remaining work is submission/package execution:
+## Artifact Contract
 
-1. final release build versioning and install validation,
-2. final claim-safe listing assets,
-3. current support/publication metadata,
-4. and Play Console submission inputs.
+1. Build from a clean reviewed `main` matching `origin/main`.
+2. Use `config/release/controlled-mvp.json` as the identity/config source.
+3. Use the existing secure upload key through environment variables; never commit it, generate a replacement implicitly, or use debug signing.
+4. Treat `--unsigned` output as non-publishable inspection material.
+5. A publishable package includes a verified signed AAB, signed release APK, SHA-256 checksums, provenance JSON, physical-canary install/start/version proof, and the separate manual first-run/send checklist.
+6. Promote the same accepted AAB between tracks rather than rebuilding for a wider rollout.
 
-## Release Package
+## Listing And Claim Contract
 
-1. Release build version code/name is final for the target track.
-2. Release bundle or APK is reproducible from the documented command path.
-3. Install validation succeeds on the canary device path.
-4. Rollout plan and rollback notes are prepared.
-
-## Listing And Asset Package
-
-1. Short and full descriptions match `docs/ux/play-store-listing-spec.md`, including prompt-first tool wording and single-image claim bounds.
-2. Every screenshot or video asset maps to a `PROD-10` row and uses only claim-safe copy.
-3. No asset implies unsupported or unverified behavior, including broad voice-now, direct-tool-richness, or broader image-analysis claims.
-4. Beta limitations and supported device-tier language match the retained evidence.
-5. Any voice mention is limited to clearly labeled closed-track beta materials, not the broad public listing package.
-
-## Privacy, Policy, And Support
-
-1. Privacy policy URL matches the implemented privacy posture.
-2. Contact email and support path are current.
-3. Content rating, data safety, and category answers are aligned to verified behavior only.
-4. Any unsupported privacy-control claim remains excluded from external copy.
-
-## Release Decision Package
-
-1. Launch-readiness report from `bash scripts/dev/launch-readiness.sh`
-2. Current `PROD-10` decision state
-3. Current WP-13 packet
-4. Current claim map (`SEC-02` / `MKT-10`)
-5. Current support-readiness packet (`PROD-11`)
+1. Use only the exact copy in `docs/ux/play-store-listing-spec.md`.
+2. Every screenshot/video maps to the asset manifest and a passing `PROD-10` row.
+3. Voice remains limited beta and absent from public listing claims/assets.
+4. Single-image copy must not imply multi-image or document analysis.
+5. Prompt-shortcut copy must not imply unrestricted autonomous tool dispatch.
+6. Do not publish universal speed/device claims or the unimplemented delete-all/retention controls.
 
 ## Stop Rules
 
-Do not submit if any of the following remain true:
+Do not upload or widen rollout when:
 
-1. required `PROD-10` rows are failing or pending,
-2. the latest lane evidence is blocked or stale,
-3. WP-13 still contains `not collected` fields,
-4. claim parity is partial for any external claim block being used,
-5. or the release build cannot be reproduced cleanly.
+1. a required `PROD-10` row is not passing;
+2. the signed artifact or physical install proof is missing;
+3. source SHA/version/checksum provenance is ambiguous;
+4. a fresh asset lacks Product and Marketing approval;
+5. a listing line exceeds `MKT-10` or privacy parity;
+6. an `S0` or unmitigated `S1` incident is open; or
+7. `PROD-14` in-app reporting or restricted-content prevention is not evidenced; or
+8. Play policy/contact declarations cannot be answered from verified behavior.
 
-## Human-Needed Closeout
-
-Use `docs/operations/publication-closeout-checklist.md` as the operator-facing final sequence for publication and wrap-up.
+Use `docs/operations/publication-closeout-checklist.md` for the remaining operator actions and `docs/operations/play-console-metadata.md` for typed Console inputs.

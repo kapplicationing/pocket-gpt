@@ -167,7 +167,7 @@ Source files (2):
 
 ## RuntimeStatus
 
-Source files (41):
+Source files (42):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatStatusHeader.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuProbeService.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppRuntimeHost.kt`
@@ -189,6 +189,7 @@ Source files (41):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RemoteLlamaCppRuntimeBridge.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ProvisioningAggregateState.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/StoredModelSidecarMetadata.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ModelImportIdentityValidator.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/IpcSendMonitor.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RemoteRuntimeTransport.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ProvisioningRuntimeBindings.kt`
@@ -317,7 +318,7 @@ Source files (4):
 - `ui_hf_candidate_model_card` = "Model card: %1$s"
 - `ui_hf_candidate_prompt_profile` = "Prompt profile: %1$s"
 - `ui_hf_open_model_card` = "Open model card"
-- `ui_hf_target_model_hint` = "Choose the PocketGPT model family this file is compatible with. This does not load the model."
+- `ui_hf_target_model_hint` = "Choose the PocketAgent model family this file is compatible with. This does not load the model."
 - `ui_hf_target_model_label` = "Runs as"
 - `ui_load_button_disabled_already_loaded` = "Already loaded"
 - `ui_local_tools_title` = "Local tools"
@@ -378,6 +379,7 @@ Source files (4):
 - `ui_model_import_cancelled` = "Model import cancelled."
 - `ui_model_import_failure` = "Model import failed: %1$s"
 - `ui_model_import_in_progress` = "Importing model file. This can take a while for large GGUF files."
+- `ui_model_import_in_progress_named` = "Importing %1$s. This can take a while for large GGUF files."
 - `ui_model_import_success` = "Imported and verified metadata for %1$s."
 - `ui_model_import_success_active` = "Imported %1$s (%2$s): verified and active."
 - `ui_model_import_success_inactive` = "Imported %1$s (%2$s): verified, activation pending."
@@ -504,7 +506,7 @@ Source files (4):
 - `ui_onboarding_privacy_body` = "Offline-only runtime flows avoid sending prompts outside your device."
 - `ui_onboarding_privacy_headline` = "Privacy first"
 - `ui_onboarding_skip` = "Skip"
-- `ui_onboarding_welcome_body` = "PocketGPT keeps chats, tools, and runtime state local to your device."
+- `ui_onboarding_welcome_body` = "PocketAgent keeps chats, tools, and runtime state local to your device."
 - `ui_onboarding_welcome_headline` = "Welcome"
 - `ui_open_advanced_controls` = "Open advanced controls"
 - `ui_open_model_library` = "Open model library"

@@ -1,0 +1,35 @@
+{
+  "schema": "pocketagent-release-config-v1",
+  "release_id": "controlled-mvp-0.1.0",
+  "product_name": "PocketAgent",
+  "application_id": "com.pocketagent.android",
+  "version_code": 20260711,
+  "version_name": "0.1.0",
+  "play_track": "internal",
+  "release_scope": "controlled-mvp",
+  "default_language": "en-US",
+  "category": "Productivity",
+  "support_email": "mohamad.kamar.msk@gmail.com",
+  "support_url": "https://github.com/kapplicationing/pocket-gpt/blob/main/SUPPORT.md",
+  "privacy_policy_url": "https://github.com/kapplicationing/pocket-gpt/blob/main/PRIVACY.md",
+  "release_notes": "docs/operations/release/controlled-mvp-0.1.0.md",
+  "listing_spec": "docs/ux/play-store-listing-spec.md",
+  "asset_manifest": "docs/operations/assets/mkt-04/controlled-mvp-asset-manifest.json",
+  "claim_ids": [
+    "C-01",
+    "C-02",
+    "C-03",
+    "C-04",
+    "C-05",
+    "C-08",
+    "C-09",
+    "C-10"
+  ],
+  "artifact_policy": {
+    "signed_upload_artifact_required": true,
+    "unsigned_artifact_publishable": false,
+    "clean_worktree_required": true,
+    "head_must_match_origin_main": true,
+    "install_validation_required": true
+  }
+}

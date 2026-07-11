@@ -1,6 +1,9 @@
+import hashlib
+import json
 import re
 import sys
 import unittest
+from html import escape
 from pathlib import Path
 
 
@@ -10,11 +13,14 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from android_perf_harness import (  # noqa: E402
     HarnessValidationError,
+    assert_appended_probe,
     assert_foreground,
     assert_package_identity_unchanged,
+    assert_restored_text,
     assert_scenario_final_state,
     find_node_center,
     node_text_length,
+    redacted_selector_inventory,
     run_id,
 )
 
@@ -59,6 +65,88 @@ class AndroidPerfHarnessTest(unittest.TestCase):
         assert_scenario_final_state(source, "model-sheet")
         with self.assertRaisesRegex(HarnessValidationError, "expected exact text"):
             assert_scenario_final_state(source.replace('text="qwen"', 'text="qwen2"'), "model-sheet")
+
+    def test_append_and_restore_compare_arbitrary_original_text_without_roundtrip(self):
+        original = 'System λ "quoted"\nمرحبا & goodbye'
+        probe = "SmoothSettingsProbe"
+        before = self.hierarchy_with_text(original)
+        appended = self.hierarchy_with_text(original + probe)
+        restored = self.hierarchy_with_text(original)
+
+        append_proof = assert_appended_probe(
+            before,
+            appended,
+            "completion_system_prompt_input",
+            probe,
+        )
+        restore_proof = assert_restored_text(
+            before,
+            restored,
+            "completion_system_prompt_input",
+        )
+        serialized_proof = json.dumps(
+            {"append": append_proof, "restore": restore_proof},
+            ensure_ascii=False,
+        )
+        self.assertNotIn(original, serialized_proof)
+        self.assertNotIn(hashlib.sha256(original.encode("utf-8")).hexdigest(), serialized_proof)
+        self.assertNotIn("sha256", serialized_proof)
+        self.assertTrue(append_proof["exact_appended"])
+        self.assertTrue(restore_proof["exact_restored"])
+
+    def test_append_assertion_rejects_missing_or_extra_probe_text(self):
+        original = 'Keep "this"\nexactly'
+        before = self.hierarchy_with_text(original)
+
+        with self.assertRaisesRegex(HarnessValidationError, "original text plus exact probe"):
+            assert_appended_probe(
+                before,
+                self.hierarchy_with_text(original),
+                "completion_system_prompt_input",
+                "SmoothSettingsProbe",
+            )
+        with self.assertRaisesRegex(HarnessValidationError, "original text plus exact probe"):
+            assert_appended_probe(
+                before,
+                self.hierarchy_with_text(original + "SmoothSettingsProbe!"),
+                "completion_system_prompt_input",
+                "SmoothSettingsProbe",
+            )
+
+    def test_restore_assertion_rejects_any_original_text_drift(self):
+        before = self.hierarchy_with_text("α\nβ")
+
+        with self.assertRaisesRegex(HarnessValidationError, "restored text does not exactly match"):
+            assert_restored_text(
+                before,
+                self.hierarchy_with_text("α\nβ "),
+                "completion_system_prompt_input",
+            )
+
+    def test_redacted_selector_inventory_omits_text_and_content_description(self):
+        sensitive = 'secret prompt "and session"'
+        source = (
+            '<hierarchy><node resource-id="completion_system_prompt_input" '
+            'class="android.widget.EditText" bounds="[1,2][3,4]" '
+            f'text="{escape(sensitive, quote=True)}" '
+            'content-desc="private description" /></hierarchy>'
+        )
+
+        inventory = redacted_selector_inventory(source)
+        serialized = json.dumps(inventory)
+
+        self.assertNotIn(sensitive, serialized)
+        self.assertNotIn("private description", serialized)
+        self.assertEqual(
+            inventory["selectors"],
+            [
+                {
+                    "resource_id": "completion_system_prompt_input",
+                    "class": "android.widget.EditText",
+                    "bounds": "[1,2][3,4]",
+                }
+            ],
+        )
 
     def test_exact_foreground_accepts_pocketgpt(self):
         observed = assert_foreground(
@@ -129,6 +217,14 @@ class AndroidPerfHarnessTest(unittest.TestCase):
             "  versionName=0.2.0\n"
             f"  lastUpdateTime={last_update}\n"
             "  pkgFlags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]\n"
+        )
+
+    @staticmethod
+    def hierarchy_with_text(text: str) -> str:
+        encoded = escape(text, quote=True).replace("\n", "&#10;")
+        return (
+            '<hierarchy><node resource-id="completion_system_prompt_input" '
+            f'text="{encoded}" bounds="[0,0][100,100]" /></hierarchy>'
         )
 
 

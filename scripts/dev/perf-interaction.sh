@@ -25,17 +25,37 @@ DECLARED_RUNTIME_CONDITION=""
 DECLARED_DOWNLOAD_CONDITION=""
 DECLARED_VOICE_CONDITION=""
 PARENT_LOCK_TOKEN=""
+SETTINGS_PROMPT_MUTATION_PENDING=0
+SETTINGS_PROMPT_RESTORATION_VERIFIED=0
+REMOTE_UI_DIRTY=0
 BUILD_SOURCE="preinstalled-nondebuggable"
 BUILD_VARIANT="unverified-nondebuggable"
 NATIVE_RUNTIME_PACKAGED_JSON="null"
 DEBUGGABLE=0
 STARTED_AT_UTC=""
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-interaction.xml"
-LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-interaction.XXXXXX.xml)"
+LOCAL_UI_XML=""
+SETTINGS_PROMPT_BEFORE_XML=""
+SETTINGS_PROMPT_RESTORED_XML=""
 
 cleanup() {
   local exit_code=$?
-  rm -f "$LOCAL_UI_XML"
+  local temp_path=""
+  if [[ "$SETTINGS_PROMPT_MUTATION_PENDING" -eq 1 &&
+        "$SETTINGS_PROMPT_RESTORATION_VERIFIED" -ne 1 &&
+        -n "$SERIAL" ]]; then
+    echo "[perf-interaction] force-stopping unverified settings prompt mutation" >&2
+    adb -s "$SERIAL" shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
+  fi
+  if [[ "$REMOTE_UI_DIRTY" -eq 1 && -n "$SERIAL" ]]; then
+    adb -s "$SERIAL" shell rm -f "$REMOTE_UI_XML" >/dev/null 2>&1 || true
+  fi
+  for temp_path in \
+    "$LOCAL_UI_XML" \
+    "$SETTINGS_PROMPT_BEFORE_XML" \
+    "$SETTINGS_PROMPT_RESTORED_XML"; do
+    [[ -z "$temp_path" ]] || rm -f "$temp_path"
+  done
   if ! perf_lock_release; then
     if [[ "$exit_code" -eq 0 ]]; then
       exit_code=73
@@ -47,6 +67,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-interaction.XXXXXX.xml)"
+SETTINGS_PROMPT_BEFORE_XML="$(mktemp -t pocketgpt-settings-prompt-before.XXXXXX.xml)"
+SETTINGS_PROMPT_RESTORED_XML="$(mktemp -t pocketgpt-settings-prompt-restored.XXXXXX.xml)"
 
 usage() {
   cat <<EOF
@@ -192,7 +215,15 @@ wait_for_app_foreground() {
 
 dump_ui() {
   adb_shell uiautomator dump "$REMOTE_UI_XML" >/dev/null 2>&1 || return 1
+  REMOTE_UI_DIRTY=1
   adb -s "$SERIAL" exec-out cat "$REMOTE_UI_XML" >"$LOCAL_UI_XML" 2>/dev/null || return 1
+}
+
+write_redacted_ui() {
+  local output_path="$1"
+  python3 "$HARNESS_HELPER" redact-ui \
+    --xml "$LOCAL_UI_XML" \
+    >"$output_path"
 }
 
 tag_center_from_dump() {
@@ -216,7 +247,7 @@ wait_tag() {
     sleep 1
   done
   echo "[perf-interaction] tag not found: $tag" >&2
-  cp "$LOCAL_UI_XML" "$OUT_DIR/last-ui.xml" 2>/dev/null || true
+  write_redacted_ui "$OUT_DIR/last-ui-selectors.json" 2>/dev/null || true
   exit 69
 }
 
@@ -236,7 +267,7 @@ tap_tag() {
     sleep 1
   done
   echo "[perf-interaction] tag not found: $tag" >&2
-  cp "$LOCAL_UI_XML" "$OUT_DIR/last-ui.xml" 2>/dev/null || true
+  write_redacted_ui "$OUT_DIR/last-ui-selectors.json" 2>/dev/null || true
   exit 69
 }
 
@@ -327,10 +358,10 @@ clear_text_field() {
 }
 
 prepare_scenario_input() {
+  if [[ "$SCENARIO" == "settings-nav" ]]; then
+    return 0
+  fi
   case "$SCENARIO" in
-    settings-nav)
-      tap_tag "completion_settings_button"
-      ;;
     model-sheet)
       tap_tag "open_model_library"
       ;;
@@ -345,12 +376,44 @@ prepare_scenario_input() {
   adb_shell input keyevent KEYCODE_BACK >/dev/null
   sleep 1
 
-  # Relaunch after preconditioning so every measured journey starts from the
-  # same chat surface with an empty target, including persisted system prompts.
+  # Relaunch after preconditioning so each search journey starts empty.
   adb_shell am force-stop "$PACKAGE" >/dev/null
   adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
   wait_for_app_foreground
   wait_tag "composer_input"
+  sleep 1
+}
+
+restore_settings_prompt() {
+  local probe_length=${#FINAL_INPUT_TEXT}
+  local i=0
+  local keycodes=()
+
+  if [[ "$SCENARIO" != "settings-nav" || "$SETTINGS_PROMPT_MUTATION_PENDING" -ne 1 ]]; then
+    return 0
+  fi
+  adb_shell input keyevent KEYCODE_MOVE_END >/dev/null
+  for (( i = 0; i < probe_length; i++ )); do
+    keycodes+=(KEYCODE_DEL)
+  done
+  adb_shell input keyevent "${keycodes[@]}" >/dev/null
+  sleep 1
+  dump_ui || {
+    echo "[perf-interaction] failed to capture restored settings prompt" >&2
+    exit 70
+  }
+  cp "$LOCAL_UI_XML" "$SETTINGS_PROMPT_RESTORED_XML"
+  python3 "$HARNESS_HELPER" assert-restored-text \
+    --before-xml "$SETTINGS_PROMPT_BEFORE_XML" \
+    --restored-xml "$SETTINGS_PROMPT_RESTORED_XML" \
+    --resource-id "$FINAL_INPUT_TAG" \
+    >"$OUT_DIR/settings-prompt-restoration-proof.json"
+
+  SETTINGS_PROMPT_RESTORATION_VERIFIED=1
+  SETTINGS_PROMPT_MUTATION_PENDING=0
+  adb_shell input keyevent KEYCODE_BACK >/dev/null
+  sleep 1
+  adb_shell input keyevent KEYCODE_BACK >/dev/null
   sleep 1
 }
 
@@ -452,9 +515,14 @@ case "$SCENARIO" in
     sleep 1
     tap_tag "completion_settings_button"
     tap_tag "$FINAL_INPUT_TAG"
-    clear_text_field "$FINAL_INPUT_TAG"
+    dump_ui || {
+      echo "[perf-interaction] failed to capture original settings prompt" >&2
+      exit 70
+    }
+    cp "$LOCAL_UI_XML" "$SETTINGS_PROMPT_BEFORE_XML"
+    adb_shell input keyevent KEYCODE_MOVE_END >/dev/null
+    SETTINGS_PROMPT_MUTATION_PENDING=1
     type_text_slowly "$FINAL_INPUT_TEXT"
-    adb_shell input keyevent KEYCODE_BACK >/dev/null
     ;;
   model-sheet)
     tap_tag "open_model_library"
@@ -478,10 +546,19 @@ dump_ui || {
   echo "[perf-interaction] failed to capture final UI hierarchy" >&2
   exit 70
 }
-cp "$LOCAL_UI_XML" "$OUT_DIR/final-ui.xml"
-python3 "$HARNESS_HELPER" assert-scenario-final \
-  --xml "$OUT_DIR/final-ui.xml" \
-  --scenario "$SCENARIO"
+write_redacted_ui "$OUT_DIR/final-ui-selectors.json"
+if [[ "$SCENARIO" == "settings-nav" ]]; then
+  python3 "$HARNESS_HELPER" assert-appended-probe \
+    --before-xml "$SETTINGS_PROMPT_BEFORE_XML" \
+    --after-xml "$LOCAL_UI_XML" \
+    --resource-id "$FINAL_INPUT_TAG" \
+    --probe "$FINAL_INPUT_TEXT" \
+    >"$OUT_DIR/settings-prompt-append-proof.json"
+else
+  python3 "$HARNESS_HELPER" assert-scenario-final \
+    --xml "$LOCAL_UI_XML" \
+    --scenario "$SCENARIO"
+fi
 
 adb -s "$SERIAL" shell dumpsys package "$PACKAGE" >"$OUT_DIR/package-dump-after.txt" 2>&1 || true
 adb -s "$SERIAL" shell pm path "$PACKAGE" >"$OUT_DIR/package-paths-after.txt" 2>&1 || true
@@ -521,6 +598,9 @@ python3 "$HARNESS_HELPER" assert-foreground \
   --package "$PACKAGE" \
   >"$OUT_DIR/window-focus-post-gfxinfo.json"
 
+COMPLETED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+restore_settings_prompt
+
 JANKY="$(parse_metric janky "$RAW_DUMP")"
 P50="$(parse_metric p50 "$RAW_DUMP")"
 P90="$(parse_metric p90 "$RAW_DUMP")"
@@ -536,7 +616,7 @@ if ! [[ "$TOTAL_FRAMES" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if awk -v p="$P50" 'BEGIN { exit !(p + 0 >= 1000) }'; then
   echo "[perf-interaction] invalid harness state: p50=${P50}ms suggests gfxinfo captured a blocked or non-interactive window." >&2
-  cp "$LOCAL_UI_XML" "$OUT_DIR/last-ui.xml" 2>/dev/null || true
+  write_redacted_ui "$OUT_DIR/last-ui-selectors.json" 2>/dev/null || true
   exit 70
 fi
 if [[ "$DEBUGGABLE" -eq 1 ]]; then
@@ -544,8 +624,6 @@ if [[ "$DEBUGGABLE" -eq 1 ]]; then
 else
   DEBUGGABLE_JSON=false
 fi
-COMPLETED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
 python3 "$SCRIPT_DIR/build_android_perf_summary.py" \
   --output "$OUT_DIR/summary.json" \
   --artifact-dir "$OUT_DIR" \

@@ -81,7 +81,71 @@ def find_node_center(source: str, resource_id: str) -> tuple[int, int]:
 
 
 def node_text_length(source: str, resource_id: str) -> int:
-    return len(_find_exact_node(source, resource_id).attrib.get("text", ""))
+    return len(_node_text(source, resource_id))
+
+
+def _node_text(source: str, resource_id: str) -> str:
+    return _find_exact_node(source, resource_id).attrib.get("text", "")
+
+
+def assert_appended_probe(
+    before_source: str,
+    after_source: str,
+    resource_id: str,
+    probe: str,
+) -> dict[str, object]:
+    if not probe or any(not 0x20 <= ord(character) <= 0x7E for character in probe):
+        raise HarnessValidationError("settings probe must be non-empty printable ASCII")
+    original = _node_text(before_source, resource_id)
+    observed = _node_text(after_source, resource_id)
+    if observed != original + probe:
+        raise HarnessValidationError(
+            f"{resource_id!r} must contain original text plus exact probe; "
+            f"original_length={len(original)}, probe_length={len(probe)}, "
+            f"observed_length={len(observed)}"
+        )
+    return {
+        "resource_id": resource_id,
+        "original_length": len(original),
+        "probe_length": len(probe),
+        "observed_length": len(observed),
+        "exact_appended": True,
+    }
+
+
+def assert_restored_text(
+    before_source: str,
+    restored_source: str,
+    resource_id: str,
+) -> dict[str, object]:
+    original = _node_text(before_source, resource_id)
+    restored = _node_text(restored_source, resource_id)
+    if restored != original:
+        raise HarnessValidationError(
+            f"{resource_id!r} restored text does not exactly match the original; "
+            f"original_length={len(original)}, restored_length={len(restored)}"
+        )
+    return {
+        "resource_id": resource_id,
+        "original_length": len(original),
+        "restored_length": len(restored),
+        "exact_restored": True,
+    }
+
+
+def redacted_selector_inventory(source: str) -> dict[str, object]:
+    selectors = [
+        {
+            "resource_id": node.attrib.get("resource-id", ""),
+            "class": node.attrib.get("class", ""),
+            "bounds": node.attrib.get("bounds", ""),
+        }
+        for node in _parse_ui(source).iter("node")
+    ]
+    return {
+        "selector_count": len(selectors),
+        "selectors": selectors,
+    }
 
 
 def scenario_final_state(scenario: str) -> tuple[str, str]:
@@ -93,6 +157,10 @@ def scenario_final_state(scenario: str) -> tuple[str, str]:
 
 def assert_scenario_final_state(source: str, scenario: str) -> None:
     resource_id, expected_text = scenario_final_state(scenario)
+    if scenario == "settings-nav":
+        raise HarnessValidationError(
+            "settings-nav final state requires XML-to-XML append verification"
+        )
     node = _find_exact_node(source, resource_id)
     observed_text = node.attrib.get("text", "")
     if observed_text != expected_text:
@@ -210,6 +278,20 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     final.add_argument("--xml", required=True, type=Path)
     final.add_argument("--scenario", required=True)
 
+    appended = subparsers.add_parser("assert-appended-probe")
+    appended.add_argument("--before-xml", required=True, type=Path)
+    appended.add_argument("--after-xml", required=True, type=Path)
+    appended.add_argument("--resource-id", required=True)
+    appended.add_argument("--probe", required=True)
+
+    restored = subparsers.add_parser("assert-restored-text")
+    restored.add_argument("--before-xml", required=True, type=Path)
+    restored.add_argument("--restored-xml", required=True, type=Path)
+    restored.add_argument("--resource-id", required=True)
+
+    redacted = subparsers.add_parser("redact-ui")
+    redacted.add_argument("--xml", required=True, type=Path)
+
     foreground = subparsers.add_parser("assert-foreground")
     foreground.add_argument("--window", required=True, type=Path)
     foreground.add_argument("--package", required=True)
@@ -237,6 +319,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("\t".join(scenario_final_state(args.scenario)))
         elif args.command == "assert-scenario-final":
             assert_scenario_final_state(_read(args.xml), args.scenario)
+        elif args.command == "assert-appended-probe":
+            proof = assert_appended_probe(
+                _read(args.before_xml),
+                _read(args.after_xml),
+                args.resource_id,
+                args.probe,
+            )
+            print(json.dumps(proof, sort_keys=True))
+        elif args.command == "assert-restored-text":
+            proof = assert_restored_text(
+                _read(args.before_xml),
+                _read(args.restored_xml),
+                args.resource_id,
+            )
+            print(json.dumps(proof, sort_keys=True))
+        elif args.command == "redact-ui":
+            print(json.dumps(redacted_selector_inventory(_read(args.xml)), sort_keys=True))
         elif args.command == "assert-foreground":
             observed = assert_foreground(_read(args.window), args.package)
             print(json.dumps(observed, sort_keys=True))

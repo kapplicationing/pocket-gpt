@@ -382,7 +382,12 @@ class PerformanceContractAuditTest {
             "--download-state",
             "--voice-state",
             "assert-scenario-final",
+            "assert-appended-probe",
+            "assert-restored-text",
             "assert-package-stable",
+            "settings-prompt-append-proof.json",
+            "settings-prompt-restoration-proof.json",
+            "final-ui-selectors.json",
             "window-focus-after.txt",
             "window-focus-post-gfxinfo.txt",
             "TOTAL_FRAMES",
@@ -419,6 +424,49 @@ class PerformanceContractAuditTest {
                 "trap cleanup EXIT" in gate &&
                 "trap cleanup EXIT" in script,
             "The three-sample gate must own one device/package lease and each child must validate its token.",
+        )
+    }
+
+    @Test
+    fun `settings performance probe is reversible fail closed and redacted`() {
+        val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
+        val cleanupContract = script.substringAfter("cleanup() {")
+            .substringBefore("trap cleanup EXIT")
+        val settingsJourney = script.substringAfter("adb_shell dumpsys gfxinfo \"\$PACKAGE\" reset")
+            .substringAfter("settings-nav)")
+            .substringBefore("model-sheet)")
+        val measuredCloseout = script.substringAfter("RAW_DUMP=\"\$OUT_DIR/gfxinfo.txt\"")
+            .substringBefore("JANKY=\"")
+
+        val cleanupEvidence = listOf(
+            "SETTINGS_PROMPT_MUTATION_PENDING",
+            "SETTINGS_PROMPT_RESTORATION_VERIFIED",
+            "am force-stop",
+        )
+        val privacyEvidence = listOf(
+            "SETTINGS_PROMPT_BEFORE_XML",
+            "SETTINGS_PROMPT_RESTORED_XML",
+            "restore_settings_prompt",
+            "redact-ui",
+        )
+        assertTrue(
+            cleanupEvidence.all { evidence -> evidence in cleanupContract } &&
+                privacyEvidence.all { evidence -> evidence in script } &&
+                "final-ui.xml" !in script &&
+                "last-ui.xml" !in script,
+            "The settings probe must restore exactly, fail closed, and retain only redacted evidence.",
+        )
+        assertTrue(
+            "clear_text_field" !in settingsJourney &&
+                "SETTINGS_PROMPT_BEFORE_XML" in settingsJourney &&
+                "KEYCODE_MOVE_END" in settingsJourney &&
+                settingsJourney.indexOf("SETTINGS_PROMPT_MUTATION_PENDING=1") <
+                settingsJourney.indexOf("type_text_slowly"),
+            "Settings measurement must append only after capturing the original and arming fail-closed cleanup.",
+        )
+        assertTrue(
+            measuredCloseout.indexOf("gfxinfo_dump") < measuredCloseout.indexOf("restore_settings_prompt"),
+            "Settings restoration must run only after the measured gfxinfo snapshot is closed.",
         )
     }
 

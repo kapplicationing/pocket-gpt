@@ -3,15 +3,13 @@ package com.pocketagent.android.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -115,79 +113,156 @@ internal fun CompletionSettingsSheet(
         }
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = PocketAgentDimensions.sheetHorizontalPadding)
             .navigationBarsPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState()),
+            .imePadding(),
+        contentPadding = PaddingValues(bottom = PocketAgentDimensions.screenPadding),
         verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = {
-                haptic.tickLight()
-                resetDefaults()
-            }) {
-                Text(stringResource(id = R.string.ui_completion_reset_defaults))
+        item(key = "completion_reset") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = {
+                    haptic.tickLight()
+                    resetDefaults()
+                }) {
+                    Text(stringResource(id = R.string.ui_completion_reset_defaults))
+                }
             }
         }
 
-        SectionHeader(
-            title = stringResource(id = R.string.ui_completion_system_prompt_label),
-            subtitle = stringResource(id = R.string.ui_completion_system_prompt_desc),
-        )
-        OutlinedTextField(
-            value = systemPrompt,
-            onValueChange = { systemPrompt = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("completion_system_prompt_input")
-                .onFocusChanged { focusState ->
-                    if (!focusState.isFocused) {
-                        commitSystemPromptIfChanged()
-                    }
+        item(key = "completion_system_prompt") {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+            ) {
+                SectionHeader(
+                    title = stringResource(id = R.string.ui_completion_system_prompt_label),
+                    subtitle = stringResource(id = R.string.ui_completion_system_prompt_desc),
+                )
+                OutlinedTextField(
+                    value = systemPrompt,
+                    onValueChange = { systemPrompt = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("completion_system_prompt_input")
+                        .onFocusChanged { focusState ->
+                            if (!focusState.isFocused) {
+                                commitSystemPromptIfChanged()
+                            }
+                        },
+                    minLines = 3,
+                    maxLines = 6,
+                    placeholder = {
+                        Text(stringResource(id = R.string.ui_completion_system_prompt_placeholder))
+                    },
+                )
+            }
+        }
+
+        item(key = "completion_common") {
+            CompletionCommonSettingsSection(
+                temperature = temperature,
+                maxTokens = maxTokens,
+                onTemperatureChanged = { temperature = it },
+                onMaxTokensChanged = { maxTokens = it },
+                onValueChangeFinished = { emitUpdate() },
+            )
+        }
+
+        item(key = "completion_thinking") {
+            CompletionThinkingSection(showThinking = settings.showThinking)
+        }
+
+        item(key = "completion_advanced") {
+            CompletionAdvancedSettingsSection(
+                showAdvanced = showAdvanced,
+                topP = topP,
+                topK = topK,
+                repeatPenalty = repeatPenalty,
+                frequencyPenalty = frequencyPenalty,
+                presencePenalty = presencePenalty,
+                onToggle = {
+                    haptic.tickLight()
+                    showAdvanced = !showAdvanced
                 },
-            minLines = 3,
-            maxLines = 6,
-            placeholder = { Text(stringResource(id = R.string.ui_completion_system_prompt_placeholder)) },
-        )
+                onTopPChanged = { topP = it },
+                onTopKChanged = { topK = it },
+                onRepeatPenaltyChanged = { repeatPenalty = it },
+                onFrequencyPenaltyChanged = { frequencyPenalty = it },
+                onPresencePenaltyChanged = { presencePenalty = it },
+                onValueChangeFinished = { emitUpdate() },
+            )
+        }
 
+        item(key = "completion_done") {
+            Button(
+                onClick = {
+                    haptic.tickLight()
+                    commitSystemPromptIfChanged()
+                    onClose()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(id = R.string.ui_completion_done))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompletionCommonSettingsSection(
+    temperature: Float,
+    maxTokens: Int,
+    onTemperatureChanged: (Float) -> Unit,
+    onMaxTokensChanged: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+    ) {
         HorizontalDivider(modifier = Modifier.padding(vertical = PocketAgentDimensions.sectionSpacing))
-
         SectionHeader(title = stringResource(id = R.string.ui_completion_common_section))
-
         SliderSetting(
             label = stringResource(id = R.string.ui_completion_temperature_label),
             description = stringResource(id = R.string.ui_completion_temperature_desc),
             value = temperature,
             valueRange = 0f..2f,
             valueLabel = "%.2f".format(temperature),
-            onValueChange = { temperature = it },
-            onValueChangeFinished = { emitUpdate() },
+            onValueChange = onTemperatureChanged,
+            onValueChangeFinished = onValueChangeFinished,
         )
-
         SliderSetting(
             label = stringResource(id = R.string.ui_completion_max_tokens_label),
             description = stringResource(id = R.string.ui_completion_max_tokens_desc),
             value = maxTokens.toFloat(),
             valueRange = DEFAULT_CHAT_MAX_TOKENS.toFloat()..8192f,
             valueLabel = maxTokens.toString(),
-            onValueChange = { maxTokens = it.roundToInt() },
-            onValueChangeFinished = { emitUpdate() },
+            onValueChange = { onMaxTokensChanged(it.roundToInt()) },
+            onValueChangeFinished = onValueChangeFinished,
         )
+    }
+}
 
+@Composable
+private fun CompletionThinkingSection(showThinking: Boolean) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+    ) {
         HorizontalDivider(modifier = Modifier.padding(vertical = PocketAgentDimensions.sectionSpacing))
-
-        // --- Thinking (read-only informational row) ---
         Text(
             text = stringResource(
                 id = R.string.ui_completion_thinking_status,
-                if (settings.showThinking) stringResource(id = R.string.ui_completion_thinking_on) else stringResource(id = R.string.ui_completion_thinking_off),
+                if (showThinking) {
+                    stringResource(id = R.string.ui_completion_thinking_on)
+                } else {
+                    stringResource(id = R.string.ui_completion_thinking_off)
+                },
             ),
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -196,16 +271,33 @@ internal fun CompletionSettingsSheet(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
 
+@Composable
+private fun CompletionAdvancedSettingsSection(
+    showAdvanced: Boolean,
+    topP: Float,
+    topK: Int,
+    repeatPenalty: Float,
+    frequencyPenalty: Float,
+    presencePenalty: Float,
+    onToggle: () -> Unit,
+    onTopPChanged: (Float) -> Unit,
+    onTopKChanged: (Int) -> Unit,
+    onRepeatPenaltyChanged: (Float) -> Unit,
+    onFrequencyPenaltyChanged: (Float) -> Unit,
+    onPresencePenaltyChanged: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+    ) {
         HorizontalDivider(modifier = Modifier.padding(vertical = PocketAgentDimensions.sectionSpacing))
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable {
-                    haptic.tickLight()
-                    showAdvanced = !showAdvanced
-                }
+                .clickable(onClick = onToggle)
                 .semantics(mergeDescendants = true) { role = Role.Button },
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -215,12 +307,15 @@ internal fun CompletionSettingsSheet(
                 style = MaterialTheme.typography.labelLarge,
             )
             Text(
-                text = if (showAdvanced) stringResource(id = R.string.action_hide_advanced) else stringResource(id = R.string.action_show_advanced),
+                text = if (showAdvanced) {
+                    stringResource(id = R.string.action_hide_advanced)
+                } else {
+                    stringResource(id = R.string.action_show_advanced)
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-
         if (showAdvanced) {
             SliderSetting(
                 label = stringResource(id = R.string.ui_completion_top_p_label),
@@ -228,63 +323,46 @@ internal fun CompletionSettingsSheet(
                 value = topP,
                 valueRange = 0f..1f,
                 valueLabel = "%.2f".format(topP),
-                onValueChange = { topP = it },
-                onValueChangeFinished = { emitUpdate() },
+                onValueChange = onTopPChanged,
+                onValueChangeFinished = onValueChangeFinished,
             )
-
             SliderSetting(
                 label = stringResource(id = R.string.ui_completion_top_k_label),
                 description = stringResource(id = R.string.ui_completion_top_k_desc),
                 value = topK.toFloat(),
                 valueRange = 1f..200f,
                 valueLabel = topK.toString(),
-                onValueChange = { topK = it.roundToInt() },
-                onValueChangeFinished = { emitUpdate() },
+                onValueChange = { onTopKChanged(it.roundToInt()) },
+                onValueChangeFinished = onValueChangeFinished,
             )
-
             SliderSetting(
                 label = stringResource(id = R.string.ui_completion_repeat_penalty_label),
                 description = stringResource(id = R.string.ui_completion_repeat_penalty_desc),
                 value = repeatPenalty,
                 valueRange = 0.5f..2f,
                 valueLabel = "%.2f".format(repeatPenalty),
-                onValueChange = { repeatPenalty = it },
-                onValueChangeFinished = { emitUpdate() },
+                onValueChange = onRepeatPenaltyChanged,
+                onValueChangeFinished = onValueChangeFinished,
             )
-
             SliderSetting(
                 label = stringResource(id = R.string.ui_completion_frequency_penalty_label),
                 description = stringResource(id = R.string.ui_completion_frequency_penalty_desc),
                 value = frequencyPenalty,
                 valueRange = 0f..2f,
                 valueLabel = "%.2f".format(frequencyPenalty),
-                onValueChange = { frequencyPenalty = it },
-                onValueChangeFinished = { emitUpdate() },
+                onValueChange = onFrequencyPenaltyChanged,
+                onValueChangeFinished = onValueChangeFinished,
             )
-
             SliderSetting(
                 label = stringResource(id = R.string.ui_completion_presence_penalty_label),
                 description = stringResource(id = R.string.ui_completion_presence_penalty_desc),
                 value = presencePenalty,
                 valueRange = 0f..2f,
                 valueLabel = "%.2f".format(presencePenalty),
-                onValueChange = { presencePenalty = it },
-                onValueChangeFinished = { emitUpdate() },
+                onValueChange = onPresencePenaltyChanged,
+                onValueChangeFinished = onValueChangeFinished,
             )
         }
-
-        Spacer(modifier = Modifier.height(PocketAgentDimensions.screenPadding))
-        Button(
-            onClick = {
-                haptic.tickLight()
-                commitSystemPromptIfChanged()
-                onClose()
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(id = R.string.ui_completion_done))
-        }
-        Spacer(modifier = Modifier.height(PocketAgentDimensions.screenPadding))
     }
 }
 

@@ -770,7 +770,7 @@ private fun AboutTabContent(
 }
 
 @Composable
-@Suppress("CyclomaticComplexMethod")
+@Suppress("CyclomaticComplexMethod", "MaxLineLength")
 private fun DiagnosticsSection(
     runtime: RuntimeUiState,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
@@ -894,9 +894,21 @@ private fun PrivacySection(
     }
     if (expanded) {
         Column(verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.tightSpacing)) {
-            Text(stringResource(id = R.string.ui_privacy_item_1), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(stringResource(id = R.string.ui_privacy_item_2), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(stringResource(id = R.string.ui_privacy_item_3), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = stringResource(id = R.string.ui_privacy_item_1),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_privacy_item_2),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_privacy_item_3),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

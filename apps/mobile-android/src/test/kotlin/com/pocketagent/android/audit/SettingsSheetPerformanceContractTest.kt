@@ -28,8 +28,35 @@ class SettingsSheetPerformanceContractTest {
         )
     }
 
+    @Test
+    fun `completion settings compose keyed lazy sections around the hot text field`() {
+        val source = completionSettingsSheetSource().readText()
+        val expectedSections = listOf(
+            "completion_reset",
+            "completion_system_prompt",
+            "completion_common",
+            "completion_thinking",
+            "completion_advanced",
+            "completion_done",
+        )
+
+        assertTrue(
+            "LazyColumn(" in source && ".verticalScroll(" !in source,
+            "Completion settings must not redraw an eager scrolling Column while the system prompt changes.",
+        )
+        assertTrue(
+            expectedSections.all { section -> "key = \"$section\"" in source },
+            "Completion settings must keep expensive controls in independently keyed lazy sections.",
+        )
+    }
+
     private fun settingsSheetSource(): File = listOf(
         File("src/main/kotlin/com/pocketagent/android/ui/SettingsSheet.kt"),
         File("apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/SettingsSheet.kt"),
+    ).first { it.exists() }
+
+    private fun completionSettingsSheetSource(): File = listOf(
+        File("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt"),
+        File("apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt"),
     ).first { it.exists() }
 }

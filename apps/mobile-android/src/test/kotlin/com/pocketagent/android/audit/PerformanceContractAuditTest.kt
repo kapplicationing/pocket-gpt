@@ -236,12 +236,16 @@ class PerformanceContractAuditTest {
 
     @Test
     fun `completion settings system prompt does not commit on every keystroke`() {
-        val source = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt").readText()
-        val systemPromptField = source.substringAfter("OutlinedTextField(")
-            .substringBefore("HorizontalDivider(modifier = Modifier.padding(vertical = PocketAgentDimensions.sectionSpacing))")
+        val file = resolveAppSource("src/main/kotlin/com/pocketagent/android/ui/CompletionSettingsSheet.kt")
+        val source = file.readText()
+        val sheetSource = composableFunctionSource(file, "CompletionSettingsSheet")
+        val systemPromptField = sheetSource
+            .substringAfter("item(key = \"completion_system_prompt\")")
+            .substringBefore("item(key = \"completion_common\")")
 
         assertTrue(
-            "onValueChange = { systemPrompt = it }" in systemPromptField &&
+            "OutlinedTextField(" in systemPromptField &&
+                "onValueChange = { systemPrompt = it }" in systemPromptField &&
                 "emitUpdate()" !in systemPromptField &&
                 "onSettingsChanged(" !in systemPromptField,
             "Completion system prompt typing must stay compose-local; commit on focus loss, Done, reset, dismiss, or slider boundaries.",

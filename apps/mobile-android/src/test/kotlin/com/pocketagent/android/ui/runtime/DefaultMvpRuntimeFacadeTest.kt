@@ -20,13 +20,19 @@ import com.pocketagent.runtime.RuntimePerformanceProfile
 import com.pocketagent.runtime.RuntimeRequestContext
 import com.pocketagent.runtime.SamplingOverrides
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.test.assertFailsWith
@@ -56,6 +62,41 @@ class DefaultMvpRuntimeFacadeTest {
         assertTrue(phases.contains(ChatStreamPhase.CHAT_END))
         assertEquals("hello", container.lastUserText)
         assertEquals(64, container.lastMaxTokens)
+    }
+
+    @Test
+    fun `protocol start does not signal admission before container generation ownership`() = runTest {
+        val container = FakeRuntimeContainer().apply {
+            sendGate = CountDownLatch(1)
+        }
+        val facade = DefaultMvpRuntimeFacade(container)
+        val startedSeen = CompletableDeferred<Unit>()
+        val admissionSeen = AtomicBoolean(false)
+        val collection = backgroundScope.launch {
+            facade.streamChatWithAdmission(requestV2()) {
+                admissionSeen.set(true)
+            }.collect { event ->
+                if (event is ChatStreamEvent.Started) {
+                    startedSeen.complete(Unit)
+                }
+            }
+        }
+        try {
+            withTimeout(2_000L) { startedSeen.await() }
+            assertFalse(admissionSeen.get())
+
+            container.sendGate?.countDown()
+            withTimeout(2_000L) {
+                while (!admissionSeen.get()) {
+                    yield()
+                }
+            }
+            collection.join()
+            assertTrue(admissionSeen.get())
+        } finally {
+            container.sendGate?.countDown()
+            collection.cancel()
+        }
     }
 
     @Test
@@ -357,10 +398,12 @@ private class FakeRuntimeContainer : RuntimeContainer {
         context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit,
+        onGenerationAdmitted: () -> Unit,
     ): ChatResponse {
         beforeSend?.invoke()
         sendError?.let { throw it }
         sendGate?.await()
+        onGenerationAdmitted()
         lastContext = context
         lastUserText = messages.lastOrNull { it.role == InteractionRole.USER }
             ?.parts

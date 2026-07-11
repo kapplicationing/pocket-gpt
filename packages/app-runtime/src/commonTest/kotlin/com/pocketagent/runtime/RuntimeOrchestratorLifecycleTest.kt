@@ -91,6 +91,86 @@ class RuntimeOrchestratorLifecycleTest {
     }
 
     @Test
+    fun `native close rejection with observer reattach exception remains reusable`() {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val modelFile = File.createTempFile("runtime-orchestrator-reattach-reject", ".gguf").apply {
+            writeText("fake-gguf-payload")
+            deleteOnExit()
+        }
+        val operations = RuntimeOperationCoordinator()
+        var admissionDuringReattach: GenerationAdmissionResult? = null
+        val module = RecordingLifecycleInferenceModule(RecordingLifecycleBridge(modelId)).apply {
+            closeResult = RuntimeCloseResult.rejected("NATIVE_CLOSE_REJECTED")
+            failObserveOnCall = 2
+            onObserve = { call ->
+                if (call == 2) {
+                    admissionDuringReattach = operations.tryAcquireGeneration(
+                        "request-during-reattach",
+                        "session-a",
+                    )
+                }
+            }
+        }
+        val orchestrator = RuntimeOrchestrator(
+            inferenceModule = module,
+            runtimeConfig = lifecycleRuntimeConfig(modelId = modelId, file = modelFile),
+            operationCoordinator = operations,
+        )
+        try {
+            val close = orchestrator.closeRuntime(timeoutMs = 1_000L)
+
+            assertEquals(false, close.success)
+            assertTrue(close.runtimeReusable)
+            assertEquals("RUNTIME_SUBSCRIPTION_REATTACH_EXCEPTION", close.code)
+            assertTrue(close.detail.orEmpty().contains("closeCode=NATIVE_CLOSE_REJECTED"))
+            assertEquals(2, module.observeCalls)
+            assertIs<GenerationAdmissionResult.Rejected>(admissionDuringReattach)
+            val admitted = assertIs<GenerationAdmissionResult.Acquired>(
+                operations.tryAcquireGeneration("request-after-reattach-failure", "session-a"),
+            )
+            admitted.lease.close()
+        } finally {
+            module.failObserveOnCall = null
+            module.closeResult = RuntimeCloseResult.closed()
+            orchestrator.closeRuntime(timeoutMs = 1_000L)
+            modelFile.delete()
+        }
+    }
+
+    @Test
+    fun `native close exception rolls back instead of claiming terminal teardown`() {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val modelFile = File.createTempFile("runtime-orchestrator-close-exception", ".gguf").apply {
+            writeText("fake-gguf-payload")
+            deleteOnExit()
+        }
+        val module = RecordingLifecycleInferenceModule(RecordingLifecycleBridge(modelId)).apply {
+            closeException = IllegalStateException("native close exploded")
+        }
+        val operations = RuntimeOperationCoordinator()
+        val orchestrator = RuntimeOrchestrator(
+            inferenceModule = module,
+            runtimeConfig = lifecycleRuntimeConfig(modelId = modelId, file = modelFile),
+            operationCoordinator = operations,
+        )
+        try {
+            val close = orchestrator.closeRuntime(timeoutMs = 1_000L)
+
+            assertEquals(false, close.success)
+            assertTrue(close.runtimeReusable)
+            assertEquals("NATIVE_RUNTIME_CLOSE_EXCEPTION", close.code)
+            val admitted = assertIs<GenerationAdmissionResult.Acquired>(
+                operations.tryAcquireGeneration("request-after-close-exception", "session-a"),
+            )
+            admitted.lease.close()
+        } finally {
+            module.closeException = null
+            orchestrator.closeRuntime(timeoutMs = 1_000L)
+            modelFile.delete()
+        }
+    }
+
+    @Test
     fun `load fails closed when active generation rejects cancellation`() {
         val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
         val modelFile = File.createTempFile("runtime-orchestrator-busy-load", ".gguf").apply {
@@ -285,6 +365,10 @@ private class RecordingLifecycleInferenceModule(
     private var runtimeResidencyState: RuntimeResidencyState = RuntimeResidencyState()
     var closeCalls: Int = 0
     var closeResult: RuntimeCloseResult = RuntimeCloseResult.closed()
+    var closeException: RuntimeException? = null
+    var observeCalls: Int = 0
+    var failObserveOnCall: Int? = null
+    var onObserve: ((Int) -> Unit)? = null
 
     override fun runtimeInferencePorts(): RuntimeInferencePorts {
         return RuntimeInferencePorts(
@@ -375,6 +459,11 @@ private class RecordingLifecycleInferenceModule(
     override fun currentModelLifecycleState(): ModelLifecycleEvent = bridge.currentModelLifecycleState()
 
     override fun observeModelLifecycleState(listener: (ModelLifecycleEvent) -> Unit): AutoCloseable {
+        observeCalls += 1
+        onObserve?.invoke(observeCalls)
+        if (observeCalls == failObserveOnCall) {
+            error("observer reattach exploded")
+        }
         return bridge.observeModelLifecycleState(listener)
     }
 
@@ -434,6 +523,7 @@ private class RecordingLifecycleInferenceModule(
 
     override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
         closeCalls += 1
+        closeException?.let { error -> throw error }
         if (closeResult.success) bridge.unloadModel()
         return closeResult
     }

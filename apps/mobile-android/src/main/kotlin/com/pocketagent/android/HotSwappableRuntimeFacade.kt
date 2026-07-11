@@ -11,6 +11,7 @@ import com.pocketagent.runtime.MvpRuntimeFacade
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import com.pocketagent.runtime.RuntimeResourceControl
+import com.pocketagent.runtime.RuntimeStreamAdmissionSupport
 import com.pocketagent.runtime.RuntimeWarmupSupport
 import com.pocketagent.runtime.StreamChatRequestV2
 import com.pocketagent.runtime.ToolExecutionResult
@@ -29,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -96,7 +98,7 @@ internal class HotSwappableRuntimeFacade(
     }
 
     private fun replaceOwned(newDelegate: MvpRuntimeFacade): RuntimeReplacementResult {
-        retryRetainedUnusedDelegates(REPLACEMENT_CLOSE_TIMEOUT_MS)
+        rejectIfRetainedCleanupPending(newDelegate)?.let { rejection -> return rejection }
         if (newDelegate !is RuntimeLifetimePort) {
             return RuntimeReplacementResult.rejected(
                 code = "NEW_RUNTIME_LIFETIME_UNSUPPORTED",
@@ -122,6 +124,40 @@ internal class HotSwappableRuntimeFacade(
                 detail = cleanup.detail,
             )
         }
+        return finishOwnedReplacement(
+            newDelegate = newDelegate,
+            transition = transition,
+            oldDelegate = oldDelegate,
+            oldLifetime = oldLifetime,
+        )
+    }
+
+    private fun rejectIfRetainedCleanupPending(
+        newDelegate: MvpRuntimeFacade,
+    ): RuntimeReplacementResult? {
+        val retainedCleanup = retryRetainedUnusedDelegates(REPLACEMENT_CLOSE_TIMEOUT_MS)
+        if (retainedCleanup.retainedCount == 0) {
+            return null
+        }
+        val unusedNewCleanup = closeUnusedDelegate(
+            delegate = newDelegate,
+            reason = "retained_cleanup_preflight_rejected",
+        )
+        return RuntimeReplacementResult.rejected(
+            code = "RETAINED_UNUSED_RUNTIME_CLEANUP_PENDING",
+            detail = listOf(
+                retainedCleanup.incompleteDetail(),
+                unusedNewCleanup.detail,
+            ).joinToString(separator = "|"),
+        )
+    }
+
+    private fun finishOwnedReplacement(
+        newDelegate: MvpRuntimeFacade,
+        transition: TransitionStart,
+        oldDelegate: MvpRuntimeFacade,
+        oldLifetime: RuntimeLifetimePort,
+    ): RuntimeReplacementResult {
         val previousRoutingMode = desiredRoutingMode
             ?: runCatching { oldDelegate.getRoutingMode() }.getOrDefault(RoutingMode.AUTO)
         val oldClose = closeOldRuntime(
@@ -260,6 +296,19 @@ internal class HotSwappableRuntimeFacade(
         }
     }
 
+    internal fun prepareForRuntimeInstall(
+        timeoutMs: Long = REPLACEMENT_CLOSE_TIMEOUT_MS,
+    ): RuntimeInstallPreflight {
+        return lifetimeOwnerLock.withLock {
+            val cleanup = retryRetainedUnusedDelegates(timeoutMs = timeoutMs)
+            if (cleanup.retainedCount == 0) {
+                RuntimeInstallPreflight.Ready
+            } else {
+                RuntimeInstallPreflight.Deferred(cleanup.incompleteDetail())
+            }
+        }
+    }
+
     internal fun retainedUnusedDelegateCount(): Int {
         return stateLock.withLock { retainedUnusedDelegates.size }
     }
@@ -274,7 +323,8 @@ internal class HotSwappableRuntimeFacade(
         }
         return runCatching { oldLifetime.closeRuntime(timeoutMs) }
             .getOrElse { error ->
-                RuntimeCloseResult.terminated(
+                // An exception does not prove native teardown. Keep the old owner published.
+                RuntimeCloseResult.rejected(
                     code = "OLD_RUNTIME_CLOSE_EXCEPTION",
                     detail = error.message ?: error::class.simpleName,
                 )
@@ -406,20 +456,27 @@ internal class HotSwappableRuntimeFacade(
                     ),
                 )
                 is DelegateSelection.Acquired -> {
-                    var admissionHandedOff = false
+                    val selectionLeaseReleased = AtomicBoolean(false)
+                    val releaseSelectionLease = {
+                        if (selectionLeaseReleased.compareAndSet(false, true)) {
+                            releaseDelegate()
+                        }
+                    }
                     try {
-                        selection.delegate.streamChat(request).collect { event ->
-                            if (!admissionHandedOff) {
-                                admissionHandedOff = true
-                                releaseDelegate()
-                            }
-                            // After the first event, RuntimeLifetimePort owns active-stream drain.
+                        val delegateStream = (selection.delegate as? RuntimeStreamAdmissionSupport)
+                            ?.streamChatWithAdmission(
+                                request = request,
+                                onGenerationAdmitted = releaseSelectionLease,
+                            )
+                            ?: selection.delegate.streamChat(request)
+                        delegateStream.collect { event ->
                             emit(event)
                         }
                     } finally {
-                        if (!admissionHandedOff) {
-                            releaseDelegate()
-                        }
+                        // Unknown delegates and never-admitted/cancelled streams retain selection
+                        // ownership through collection. The atomic handoff also prevents underflow
+                        // if a broken delegate signals admission more than once.
+                        releaseSelectionLease()
                     }
                 }
             }
@@ -668,7 +725,8 @@ internal class HotSwappableRuntimeFacade(
             val result = runCatching {
                 lifetime.closeRuntime(deadline.remainingTimeoutMs())
             }.getOrElse { error ->
-                RuntimeCloseResult.terminated(
+                // Preserve ownership unless the delegate positively reports terminal teardown.
+                RuntimeCloseResult.rejected(
                     code = "RUNTIME_CLOSE_EXCEPTION",
                     detail = error.message ?: error::class.simpleName,
                 )
@@ -693,12 +751,7 @@ internal class HotSwappableRuntimeFacade(
         if (cleanup.retainedCount == 0) {
             return result
         }
-        val cleanupDetail = buildString {
-            append("retainedUnusedRuntimeCleanup=incomplete:remaining=")
-            append(cleanup.retainedCount)
-            append(":attempts=")
-            append(cleanup.attemptDetails.joinToString(","))
-        }
+        val cleanupDetail = cleanup.incompleteDetail()
         safeLogWarning("RUNTIME_CLOSE|phase=retained_cleanup_incomplete|$cleanupDetail")
         val combinedDetail = listOfNotNull(result.detail, cleanupDetail).joinToString(separator = "|")
         return if (result.success) {
@@ -817,7 +870,16 @@ internal class HotSwappableRuntimeFacade(
     private data class RetainedUnusedCleanupReport(
         val attemptDetails: List<String>,
         val retainedCount: Int,
-    )
+    ) {
+        fun incompleteDetail(): String {
+            return buildString {
+                append("retainedUnusedRuntimeCleanup=incomplete:remaining=")
+                append(retainedCount)
+                append(":attempts=")
+                append(attemptDetails.joinToString(","))
+            }
+        }
+    }
 
     private data class OperationDeadline(private val deadlineNanos: Long) {
         fun remainingTimeoutMs(): Long {

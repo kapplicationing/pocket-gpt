@@ -36,6 +36,7 @@ import com.pocketagent.nativebridge.runtimeInferencePorts
 import com.pocketagent.tools.SafeLocalToolRuntime
 import com.pocketagent.tools.ToolModule
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
@@ -194,10 +195,11 @@ class RuntimeOrchestrator(
     }
 
     override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        val deadline = RuntimeCloseDeadline.fromNow(timeoutMs)
         val runtimeLifetime = runtimeInferencePorts.lifetime
             ?: return RuntimeCloseResult.rejected("RUNTIME_LIFETIME_UNSUPPORTED")
         val preparation = operationCoordinator.prepareClose(
-            timeoutMs = timeoutMs,
+            timeoutMs = deadline.remainingTimeoutMs(),
             cancel = inferenceExecutor::cancelNativeGenerationForLifetime,
         )
         if (preparation is RuntimeClosePreparationResult.Rejected) {
@@ -212,19 +214,24 @@ class RuntimeOrchestrator(
                 detail = error.message ?: error::class.simpleName,
             )
         }
-        val nativeClose = runCatching { runtimeLifetime.closeRuntime(timeoutMs) }.getOrElse { error ->
-            closeLease.commit()
-            return RuntimeCloseResult.terminated(
-                code = "NATIVE_RUNTIME_CLOSE_EXCEPTION",
-                detail = error.message ?: error::class.simpleName,
+        managedRuntimeLifecycleSubscription = null
+        val nativeClose = runCatching {
+            runtimeLifetime.closeRuntime(deadline.remainingTimeoutMs())
+        }.getOrElse { error ->
+            return rollbackReusableRuntimeClose(
+                closeLease = closeLease,
+                rejection = RuntimeCloseResult.rejected(
+                    code = "NATIVE_RUNTIME_CLOSE_EXCEPTION",
+                    detail = error.message ?: error::class.simpleName,
+                ),
             )
         }
         if (!nativeClose.success) {
             if (nativeClose.runtimeReusable) {
-                closeLease.close()
-                managedRuntimeLifecycleSubscription = runtimeInferencePorts.managedRuntime
-                    ?.observeModelLifecycleState(::emitRuntimeLifecycleEvent)
-                return nativeClose
+                return rollbackReusableRuntimeClose(
+                    closeLease = closeLease,
+                    rejection = nativeClose,
+                )
             }
             closeLease.commit()
             return nativeClose
@@ -232,7 +239,9 @@ class RuntimeOrchestrator(
         closeLease.commit()
         managedRuntimeLifecycleSubscription = null
         val residencyClosed = runCatching { runtimeResidencyManager.close() }.isSuccess
-        val dispatcherClosed = runCatching { stopRuntimeLifecycleDispatcher(timeoutMs) }.getOrDefault(false)
+        val dispatcherClosed = runCatching {
+            stopRuntimeLifecycleDispatcher(deadline.remainingTimeoutMs())
+        }.getOrDefault(false)
         if (!residencyClosed || !dispatcherClosed) {
             return RuntimeCloseResult.terminated("RUNTIME_POST_CLOSE_CLEANUP_FAILED")
         }
@@ -240,6 +249,34 @@ class RuntimeOrchestrator(
             runtimeLifecycleObservers.clear()
         }
         return RuntimeCloseResult.closed()
+    }
+
+    private fun rollbackReusableRuntimeClose(
+        closeLease: RuntimeCloseLease,
+        rejection: RuntimeCloseResult,
+    ): RuntimeCloseResult {
+        val rollbackResult = runCatching {
+            managedRuntimeLifecycleSubscription = runtimeInferencePorts.managedRuntime
+                ?.observeModelLifecycleState(::emitRuntimeLifecycleEvent)
+            rejection
+        }.getOrElse { error ->
+            managedRuntimeLifecycleSubscription = null
+            RuntimeCloseResult.rejected(
+                code = "RUNTIME_SUBSCRIPTION_REATTACH_EXCEPTION",
+                detail = buildString {
+                    append("closeCode=")
+                    append(rejection.code ?: "UNKNOWN")
+                    rejection.detail?.let { detail ->
+                        append("|closeDetail=")
+                        append(detail)
+                    }
+                    append("|reattachDetail=")
+                    append(error.message ?: error::class.simpleName)
+                },
+            )
+        }
+        closeLease.close()
+        return rollbackResult
     }
 
     internal fun isLifecycleDispatcherAliveForTests(): Boolean {
@@ -255,6 +292,7 @@ class RuntimeOrchestrator(
         context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit,
+        onGenerationAdmitted: () -> Unit,
     ): ChatResponse {
         val latestUserText = messages
             .asReversed()
@@ -273,6 +311,7 @@ class RuntimeOrchestrator(
                 executionContext = context,
                 onToken = onToken,
                 onThinkingStateChanged = onThinkingStateChanged,
+                onGenerationAdmitted = onGenerationAdmitted,
                 routingMode = routingMode,
             ),
         )
@@ -1049,6 +1088,23 @@ private fun jsonEscape(value: String): String {
                 '\t' -> append("\\t")
                 else -> append(character)
             }
+        }
+    }
+}
+
+private data class RuntimeCloseDeadline(private val deadlineNanos: Long) {
+    fun remainingTimeoutMs(): Long {
+        val remainingNanos = (deadlineNanos - System.nanoTime()).coerceAtLeast(0L)
+        if (remainingNanos == 0L) {
+            return 0L
+        }
+        return TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
+    }
+
+    companion object {
+        fun fromNow(timeoutMs: Long): RuntimeCloseDeadline {
+            val timeoutNanos = TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceAtLeast(0L))
+            return RuntimeCloseDeadline(System.nanoTime() + timeoutNanos)
         }
     }
 }

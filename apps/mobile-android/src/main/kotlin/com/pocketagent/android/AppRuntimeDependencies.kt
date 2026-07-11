@@ -91,6 +91,7 @@ object AppRuntimeDependencies {
             readInstalledFingerprint = {
                 synchronized(runtimeInstallFingerprintLock) { lastRuntimeInstallFingerprint }
             },
+            preflight = { graph -> graph.runtimeFacade.prepareForRuntimeInstall() },
             build = { graph -> AppRuntimeFacadeFactory.buildProductionRuntimeFacade(context, graph) },
             replace = { graph, newFacade ->
                 // A real fingerprint change owns warmup cancellation. Same-fingerprint waiters
@@ -115,6 +116,10 @@ object AppRuntimeDependencies {
             RuntimeInstallOutcome.PublishedDelegateStale -> Log.w(
                 "AppRuntimeDeps",
                 "RUNTIME_SWAP|phase=finalize_skipped|reason=delegate_not_published",
+            )
+            is RuntimeInstallOutcome.Deferred -> Log.w(
+                "AppRuntimeDeps",
+                "RUNTIME_SWAP|phase=deferred|reason=retained_cleanup|detail=${outcome.detail}",
             )
             RuntimeInstallOutcome.Coalesced,
             RuntimeInstallOutcome.Installed,

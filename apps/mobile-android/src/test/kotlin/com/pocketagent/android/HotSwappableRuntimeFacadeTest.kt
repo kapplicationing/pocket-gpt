@@ -10,6 +10,7 @@ import com.pocketagent.runtime.MvpRuntimeFacade
 import com.pocketagent.runtime.RuntimeResourceControl
 import com.pocketagent.runtime.RuntimeOperationCoordinator
 import com.pocketagent.runtime.RuntimeCloseAdmissionResult
+import com.pocketagent.runtime.RuntimeStreamAdmissionSupport
 import com.pocketagent.runtime.GenerationAdmissionResult
 import com.pocketagent.runtime.GenerationLease
 import com.pocketagent.runtime.CancellationResult
@@ -32,12 +33,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import kotlin.test.Test
@@ -273,8 +276,8 @@ class HotSwappableRuntimeFacadeTest {
     }
 
     @Test
-    fun `cold stream admission hands off before replacement closes selected runtime`() {
-        val oldRuntime = ColdAdmissionFacade()
+    fun `started event retains selected runtime until explicit generation admission`() {
+        val oldRuntime = AdmissionBarrierFacade()
         val newRuntime = StubFacade(sessionId = "session-new")
         val executor = Executors.newFixedThreadPool(2)
         val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
@@ -282,27 +285,44 @@ class HotSwappableRuntimeFacadeTest {
             val collection = executor.submit<List<ChatStreamEvent>> {
                 runBlocking { hotSwap.streamChat(testStreamRequest()).toList() }
             }
-            assertTrue(oldRuntime.streamSelected.await(2, TimeUnit.SECONDS))
+            assertTrue(oldRuntime.startedEmitted.await(2, TimeUnit.SECONDS))
             val replacement = executor.submit<RuntimeReplacementResult> { hotSwap.replaceInTest(newRuntime) }
             awaitAvailability(hotSwap, RuntimeFacadeAvailability.REPLACING)
             assertEquals(1L, oldRuntime.closeStarted.count)
+            assertEquals(1L, oldRuntime.producerStarted.count)
 
-            oldRuntime.allowFlowReturn.countDown()
-            assertTrue(oldRuntime.collectionStarted.await(2, TimeUnit.SECONDS))
-            assertEquals(1L, oldRuntime.closeStarted.count, "close must wait for first stream event")
-            oldRuntime.allowFirstEvent.countDown()
+            oldRuntime.allowAdmission.countDown()
 
+            assertTrue(oldRuntime.producerStarted.await(2, TimeUnit.SECONDS))
             assertTrue(oldRuntime.closeStarted.await(2, TimeUnit.SECONDS))
             assertTrue(replacement.get(2, TimeUnit.SECONDS).success)
             assertIs<ChatStreamEvent.Started>(collection.get(2, TimeUnit.SECONDS).single())
-            assertFalse(oldRuntime.enteredClosedRuntime.get())
+            assertFalse(oldRuntime.producerEnteredClosedRuntime.get())
+            assertEquals(1, oldRuntime.cancellationRequests.get())
             assertEquals("session-new", hotSwap.createSession().value)
         } finally {
-            oldRuntime.allowFlowReturn.countDown()
-            oldRuntime.allowFirstEvent.countDown()
-            oldRuntime.releaseCollection.countDown()
+            oldRuntime.allowAdmission.countDown()
+            oldRuntime.releaseProducer.countDown()
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun `cancelled never admitted stream releases selection ownership exactly once`() = runBlocking {
+        val oldRuntime = NeverAdmittedFacade()
+        val newRuntime = StubFacade(sessionId = "session-new")
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        val collection = launch(Dispatchers.Default) {
+            hotSwap.streamChat(testStreamRequest()).toList()
+        }
+        assertTrue(oldRuntime.startedEmitted.await(2, TimeUnit.SECONDS))
+
+        collection.cancelAndJoin()
+        val replacement = hotSwap.replace(newRuntime)
+
+        assertTrue(replacement.success)
+        assertEquals(1, oldRuntime.closeCalls)
+        assertEquals("session-new", hotSwap.createSession().value)
     }
 
     @Test
@@ -381,6 +401,54 @@ class HotSwappableRuntimeFacadeTest {
         val terminalRetry = hotSwap.closeRuntime(timeoutMs = 1_000L)
         assertTrue(terminalRetry.detail.orEmpty().contains("remaining=1"))
         assertEquals(3, unusedRuntime.closeCalls)
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+    }
+
+    @Test
+    fun `install preflight prevents repeated delegate builds while cleanup remains unresolved`() {
+        val oldRuntime = StubFacade(
+            sessionId = "session-old",
+            closeResult = RuntimeCloseResult.rejected("OLD_CLOSE_REJECTED"),
+        )
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+        val installs = RuntimeInstallSingleFlight()
+        val builds = AtomicInteger(0)
+
+        fun install(): RuntimeInstallOutcome {
+            return installs.install(
+                shouldInstall = { true },
+                readCandidate = { RuntimeInstallCandidate("fingerprint", Unit) },
+                readInstalledFingerprint = { null },
+                preflight = { hotSwap.prepareForRuntimeInstall(timeoutMs = 50L) },
+                build = {
+                    builds.incrementAndGet()
+                    StubFacade(
+                        sessionId = "session-unused",
+                        closeResult = RuntimeCloseResult.rejected("UNUSED_CLOSE_REJECTED"),
+                    )
+                },
+                replace = { _, delegate -> hotSwap.replaceInTest(delegate) },
+                finalizePublished = { _, _ -> error("rejected install must not finalize") },
+                commitFingerprint = { error("rejected install must not commit") },
+                onCoalesced = { error("install must not coalesce") },
+            )
+        }
+
+        assertIs<RuntimeInstallOutcome.Rejected>(install())
+        assertEquals(1, builds.get())
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        val directCandidate = StubFacade(sessionId = "session-direct")
+        val directReplacement = hotSwap.replaceInTest(directCandidate)
+        assertFalse(directReplacement.success)
+        assertEquals("RETAINED_UNUSED_RUNTIME_CLEANUP_PENDING", directReplacement.code)
+        assertEquals(1, directCandidate.closeCalls)
+        assertEquals(1, oldRuntime.closeCalls)
+        assertEquals(1, hotSwap.retainedUnusedDelegateCount())
+
+        assertIs<RuntimeInstallOutcome.Deferred>(install())
+        assertIs<RuntimeInstallOutcome.Deferred>(install())
+        assertEquals(1, builds.get())
         assertEquals(1, hotSwap.retainedUnusedDelegateCount())
     }
 
@@ -519,17 +587,31 @@ class HotSwappableRuntimeFacadeTest {
     }
 
     @Test
-    fun `close exception fails closed by publishing new delegate`() {
+    fun `close exception keeps old owner and cleans unused new delegate`() {
         val first = ThrowingCloseFacade()
         val second = StubFacade(sessionId = "session-new")
         val hotSwap = HotSwappableRuntimeFacade(first)
 
         val replacement = hotSwap.replaceInTest(second)
 
-        assertTrue(replacement.success)
+        assertFalse(replacement.success)
         assertEquals("OLD_RUNTIME_CLOSE_EXCEPTION", replacement.code)
-        assertEquals("session-new", hotSwap.createSession().value)
-        assertEquals(0, second.closeCalls)
+        assertEquals("session-old", hotSwap.createSession().value)
+        assertEquals(1, second.closeCalls)
+    }
+
+    @Test
+    fun `facade close exception preserves reusable old owner`() {
+        val oldRuntime = ThrowingCloseFacade()
+        val hotSwap = HotSwappableRuntimeFacade(oldRuntime)
+
+        val close = hotSwap.closeRuntime(timeoutMs = 500L)
+
+        assertFalse(close.success)
+        assertTrue(close.runtimeReusable)
+        assertEquals("RUNTIME_CLOSE_EXCEPTION", close.code)
+        assertEquals(RuntimeFacadeAvailability.READY, hotSwap.availability())
+        assertEquals("session-old", hotSwap.createSession().value)
     }
 
     @Test
@@ -696,13 +778,21 @@ private class RetryableCleanupFacade(
 
 private class BlockingFlowFacade(
     private val order: MutableList<String>,
-) : StubFacade() {
+) : StubFacade(), RuntimeStreamAdmissionSupport {
     val flowStarted = CountDownLatch(1)
     val releaseFlow = CountDownLatch(1)
 
-    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = flow {
+    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
+        return streamChatWithAdmission(request = request, onGenerationAdmitted = {})
+    }
+
+    override fun streamChatWithAdmission(
+        request: StreamChatRequestV2,
+        onGenerationAdmitted: () -> Unit,
+    ): Flow<ChatStreamEvent> = flow {
         synchronized(order) { order += "flow_started" }
         flowStarted.countDown()
+        onGenerationAdmitted()
         emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
         releaseFlow.await(2, TimeUnit.SECONDS)
         synchronized(order) { order += "flow_finished" }
@@ -715,46 +805,96 @@ private class BlockingFlowFacade(
     }
 }
 
-private class SlowTerminalFlowFacade : StubFacade() {
+private class SlowTerminalFlowFacade : StubFacade(), RuntimeStreamAdmissionSupport {
     val flowStarted = CountDownLatch(1)
     val releaseFlow = CountDownLatch(1)
 
-    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = flow {
+    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
+        return streamChatWithAdmission(request = request, onGenerationAdmitted = {})
+    }
+
+    override fun streamChatWithAdmission(
+        request: StreamChatRequestV2,
+        onGenerationAdmitted: () -> Unit,
+    ): Flow<ChatStreamEvent> = flow {
         flowStarted.countDown()
+        onGenerationAdmitted()
         emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
         releaseFlow.await(2, TimeUnit.SECONDS)
     }
 }
 
-private class ColdAdmissionFacade : StubFacade(sessionId = "session-old") {
-    val streamSelected = CountDownLatch(1)
-    val allowFlowReturn = CountDownLatch(1)
-    val collectionStarted = CountDownLatch(1)
-    val allowFirstEvent = CountDownLatch(1)
+private class AdmissionBarrierFacade : StubFacade(sessionId = "session-old"), RuntimeStreamAdmissionSupport {
+    private val operations = RuntimeOperationCoordinator()
+    val startedEmitted = CountDownLatch(1)
+    val allowAdmission = CountDownLatch(1)
+    val producerStarted = CountDownLatch(1)
     val closeStarted = CountDownLatch(1)
-    val releaseCollection = CountDownLatch(1)
-    val enteredClosedRuntime = AtomicBoolean(false)
-    @Volatile private var closed: Boolean = false
+    val releaseProducer = CountDownLatch(1)
+    val producerEnteredClosedRuntime = AtomicBoolean(false)
+    val cancellationRequests = AtomicInteger(0)
+    private val closed = AtomicBoolean(false)
 
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
-        streamSelected.countDown()
-        allowFlowReturn.await(2, TimeUnit.SECONDS)
-        return flow {
-            collectionStarted.countDown()
-            allowFirstEvent.await(2, TimeUnit.SECONDS)
-            if (closed) {
-                enteredClosedRuntime.set(true)
-            }
-            emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
-            releaseCollection.await(2, TimeUnit.SECONDS)
+        return streamChatWithAdmission(request = request, onGenerationAdmitted = {})
+    }
+
+    override fun streamChatWithAdmission(
+        request: StreamChatRequestV2,
+        onGenerationAdmitted: () -> Unit,
+    ): Flow<ChatStreamEvent> = flow {
+        emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+        startedEmitted.countDown()
+        allowAdmission.await(2, TimeUnit.SECONDS)
+        val admission = operations.tryAcquireGeneration(request.requestId, request.sessionId.value)
+        val generationLease = (admission as GenerationAdmissionResult.Acquired).lease
+        try {
+            onGenerationAdmitted()
+            onGenerationAdmitted()
+            producerEnteredClosedRuntime.set(closed.get())
+            producerStarted.countDown()
+            releaseProducer.await(2, TimeUnit.SECONDS)
+        } finally {
+            generationLease.close()
         }
     }
 
     override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
         closeStarted.countDown()
-        closed = true
-        releaseCollection.countDown()
-        return RuntimeCloseResult.closed()
+        val result = when (
+            val admission = operations.closePermanently(timeoutMs) {
+                cancellationRequests.incrementAndGet()
+                releaseProducer.countDown()
+                CancellationResult(cancelled = true, code = "CANCELLED_FOR_CLOSE")
+            }
+        ) {
+            RuntimeCloseAdmissionResult.Ready -> RuntimeCloseResult.closed()
+            is RuntimeCloseAdmissionResult.Rejected -> RuntimeCloseResult.rejected(
+                admission.code,
+                admission.detail,
+            )
+        }
+        if (result.success) {
+            closed.set(true)
+        }
+        return result
+    }
+}
+
+private class NeverAdmittedFacade : StubFacade(sessionId = "session-old"), RuntimeStreamAdmissionSupport {
+    val startedEmitted = CountDownLatch(1)
+
+    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
+        return streamChatWithAdmission(request = request, onGenerationAdmitted = {})
+    }
+
+    override fun streamChatWithAdmission(
+        request: StreamChatRequestV2,
+        onGenerationAdmitted: () -> Unit,
+    ): Flow<ChatStreamEvent> = flow {
+        emit(ChatStreamEvent.Started(request.requestId, startedAtEpochMs = 1L))
+        startedEmitted.countDown()
+        kotlinx.coroutines.awaitCancellation()
     }
 }
 

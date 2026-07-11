@@ -50,6 +50,7 @@ internal class SendMessageUseCase(
         val executionContext: RuntimeRequestContext,
         val onToken: (String) -> Unit,
         val onThinkingStateChanged: (Boolean) -> Unit = {},
+        val onGenerationAdmitted: () -> Unit = {},
         val routingMode: RoutingMode,
     )
 
@@ -60,6 +61,7 @@ internal class SendMessageUseCase(
             sessionId = request.sessionId.value,
         )
         return try {
+            request.onGenerationAdmitted()
             executeAdmitted(request = request, generationLease = generationLease)
         } finally {
             generationLease.close()

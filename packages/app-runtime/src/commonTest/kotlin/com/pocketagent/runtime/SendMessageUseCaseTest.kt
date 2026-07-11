@@ -55,18 +55,50 @@ class SendMessageUseCaseTest {
             inferenceModule = SendRecordingInferenceModule(),
             operationCoordinator = operations,
         )
+        var admissionCallbacks = 0
 
         try {
             val failure = assertFailsWith<RuntimeGenerationFailureException> {
-                fixture.useCase.execute(fixture.request())
+                fixture.useCase.execute(
+                    fixture.request().copy(
+                        onGenerationAdmitted = { admissionCallbacks += 1 },
+                    ),
+                )
             }
 
             assertEquals(RUNTIME_BUSY_GENERATION_CODE, failure.errorCode)
             assertEquals(emptyList(), fixture.conversationModule.listTurns(SessionId("session-1")))
             assertEquals(0, fixture.inferenceModule.loadCalls)
+            assertEquals(0, admissionCallbacks)
         } finally {
             active.close()
         }
+    }
+
+    @Test
+    fun `admission callback runs once while generation lease owns request`() {
+        val operations = RuntimeOperationCoordinator()
+        val fixture = createFixture(
+            runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
+            policyModule = permissivePolicy(),
+            inferenceModule = SendRecordingInferenceModule(generatedTokens = listOf("ok")),
+            operationCoordinator = operations,
+        )
+        var admissionCallbacks = 0
+        var callbackObservedGenerationOwner = false
+
+        fixture.useCase.execute(
+            fixture.request().copy(
+                onGenerationAdmitted = {
+                    admissionCallbacks += 1
+                    callbackObservedGenerationOwner = !operations.isGenerationIdle()
+                },
+            ),
+        )
+
+        assertEquals(1, admissionCallbacks)
+        assertTrue(callbackObservedGenerationOwner)
+        assertTrue(operations.isGenerationIdle())
     }
 
     @Test

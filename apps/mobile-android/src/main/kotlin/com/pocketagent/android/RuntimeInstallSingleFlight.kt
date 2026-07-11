@@ -13,7 +13,13 @@ internal sealed interface RuntimeInstallOutcome {
     data object Coalesced : RuntimeInstallOutcome
     data object Skipped : RuntimeInstallOutcome
     data object PublishedDelegateStale : RuntimeInstallOutcome
+    data class Deferred(val detail: String) : RuntimeInstallOutcome
     data class Rejected(val replacement: RuntimeReplacementResult) : RuntimeInstallOutcome
+}
+
+internal sealed interface RuntimeInstallPreflight {
+    data object Ready : RuntimeInstallPreflight
+    data class Deferred(val detail: String) : RuntimeInstallPreflight
 }
 
 /**
@@ -35,6 +41,7 @@ internal class RuntimeInstallSingleFlight {
         finalizePublished: (Payload, Delegate) -> Boolean,
         commitFingerprint: (String) -> Unit,
         onCoalesced: (Payload) -> Unit,
+        preflight: (Payload) -> RuntimeInstallPreflight = { RuntimeInstallPreflight.Ready },
     ): RuntimeInstallOutcome {
         return owner.withLock {
             if (!shouldInstall()) {
@@ -44,6 +51,12 @@ internal class RuntimeInstallSingleFlight {
             if (candidate.fingerprint == readInstalledFingerprint()) {
                 onCoalesced(candidate.payload)
                 return@withLock RuntimeInstallOutcome.Coalesced
+            }
+            when (val readiness = preflight(candidate.payload)) {
+                RuntimeInstallPreflight.Ready -> Unit
+                is RuntimeInstallPreflight.Deferred -> {
+                    return@withLock RuntimeInstallOutcome.Deferred(readiness.detail)
+                }
             }
             val delegate = build(candidate.payload)
             val replacement = replace(candidate.payload, delegate)

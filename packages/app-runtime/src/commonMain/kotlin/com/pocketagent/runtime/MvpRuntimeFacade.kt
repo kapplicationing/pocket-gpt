@@ -153,6 +153,19 @@ interface MvpRuntimeFacade {
         AutoCloseable { }
 }
 
+/**
+ * Signals when runtime lifetime ownership has moved from facade selection to generation admission.
+ *
+ * [onGenerationAdmitted] must run only after the generation lease is acquired and before admitted
+ * work begins. If collection ends before admission, the callback must not run.
+ */
+interface RuntimeStreamAdmissionSupport {
+    fun streamChatWithAdmission(
+        request: StreamChatRequestV2,
+        onGenerationAdmitted: () -> Unit,
+    ): Flow<ChatStreamEvent>
+}
+
 interface RuntimeContainer {
     fun createSession(): SessionId
     fun sendChatMessages(
@@ -162,6 +175,7 @@ interface RuntimeContainer {
         context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit = {},
+        onGenerationAdmitted: () -> Unit = {},
     ): ChatResponse
 
     @Deprecated(
@@ -290,15 +304,27 @@ interface RuntimeContainer {
 
 class DefaultMvpRuntimeFacade(
     private val container: RuntimeContainer = DefaultRuntimeContainer(),
-) : MvpRuntimeFacade, RuntimeWarmupSupport, RuntimeResourceControl, RuntimeLifetimePort {
+) : MvpRuntimeFacade,
+    RuntimeStreamAdmissionSupport,
+    RuntimeWarmupSupport,
+    RuntimeResourceControl,
+    RuntimeLifetimePort {
     private val streamContractV2Enabled: Boolean = streamContractV2Enabled()
 
     override fun createSession(): SessionId = container.createSession()
 
+    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
+        return streamChatWithAdmission(request = request, onGenerationAdmitted = {})
+    }
+
     @Suppress("LongMethod", "CyclomaticComplexMethod", "CognitiveComplexMethod")
-    override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = callbackFlow {
+    override fun streamChatWithAdmission(
+        request: StreamChatRequestV2,
+        onGenerationAdmitted: () -> Unit,
+    ): Flow<ChatStreamEvent> = callbackFlow {
         val startedAtMs = System.currentTimeMillis()
         val terminalSent = AtomicBoolean(false)
+        val admissionSignalled = AtomicBoolean(false)
         if (streamContractV2Enabled) {
             trySend(ChatStreamEvent.Started(requestId = request.requestId, startedAtEpochMs = startedAtMs))
             trySend(
@@ -375,6 +401,11 @@ class DefaultMvpRuntimeFacade(
                                 active = active,
                             ),
                         )
+                    },
+                    onGenerationAdmitted = {
+                        if (admissionSignalled.compareAndSet(false, true)) {
+                            onGenerationAdmitted()
+                        }
                     },
                 )
                 if (thinkingActive) {
@@ -587,6 +618,7 @@ class DefaultRuntimeContainer(
         context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit,
+        onGenerationAdmitted: () -> Unit,
     ): ChatResponse {
         return orchestrator.sendChatMessages(
             sessionId = sessionId,
@@ -595,6 +627,7 @@ class DefaultRuntimeContainer(
             context = context,
             onToken = onToken,
             onThinkingStateChanged = onThinkingStateChanged,
+            onGenerationAdmitted = onGenerationAdmitted,
         )
     }
 

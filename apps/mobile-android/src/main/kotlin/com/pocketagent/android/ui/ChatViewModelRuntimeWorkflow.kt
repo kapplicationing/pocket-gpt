@@ -197,7 +197,7 @@ internal fun ChatViewModel.onAdvancedUnlockedInternal() {
     persistState()
 }
 
-internal fun ChatViewModel.bootstrapStateInternal() {
+internal suspend fun ChatViewModel.bootstrapStateInternal() {
     val loadedState = persistenceFlow.loadBootstrapState()
     val bootstrapResult = startupFlow.bootstrap(loadedState)
     _uiState.value = bootstrapResult.state
@@ -218,6 +218,17 @@ internal fun ChatViewModel.bootstrapStateInternal() {
 
 internal fun ChatViewModel.launchStartupProbeInternal(statusDetailOverride: String? = null) {
     startupProbeOrchestrator.launch(statusDetailOverride = statusDetailOverride)
+}
+
+internal fun ChatViewModel.ensureRuntimeSessionAfterReadyProbeInternal() {
+    val state = _uiState.value
+    if (
+        state.bootstrapCompleted &&
+        state.sessions.isEmpty() &&
+        state.runtime.startupProbeState == StartupProbeState.READY
+    ) {
+        createSessionInternal()
+    }
 }
 
 internal fun ChatViewModel.refreshGpuProbeStatusIfPendingInternal() {

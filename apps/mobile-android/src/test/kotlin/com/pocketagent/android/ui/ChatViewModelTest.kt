@@ -2,6 +2,8 @@ package com.pocketagent.android.ui
 
 import com.pocketagent.android.ui.state.activeSession
 import android.net.Uri
+import com.pocketagent.android.RuntimeFacadeAvailability
+import com.pocketagent.android.RuntimeFacadeUnavailableException
 import com.pocketagent.android.data.chat.SessionPersistence
 import com.pocketagent.android.data.chat.SessionStateLoadResult
 import com.pocketagent.android.data.chat.StoredChatMessage
@@ -1100,6 +1102,7 @@ class ChatViewModelTest {
         val firstSessionId = viewModel.uiState.value.activeSession()!!.id
 
         viewModel.createSession()
+        advanceUntilIdle()
         val secondSessionId = viewModel.uiState.value.activeSession()!!.id
         viewModel.onComposerChanged("session two message")
         viewModel.sendMessage()
@@ -1137,6 +1140,144 @@ class ChatViewModelTest {
         assertTrue(state.activeSession()!!.id != initialSessionId)
         assertEquals("New chat", state.activeSession()!!.title)
     }
+
+    @Test
+    fun `new chat tap during runtime replacement fails visibly and remains retryable`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade()
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+        val initialSessionId = viewModel.uiState.value.activeSession()!!.id
+        runtime.createUnavailable = RuntimeFacadeAvailability.REPLACING
+
+        viewModel.createSession()
+
+        assertEquals(initialSessionId, viewModel.uiState.value.activeSessionId)
+        assertTrue(viewModel.sessionMutationInFlight.get())
+        advanceUntilIdle()
+        assertEquals(listOf(initialSessionId), viewModel.uiState.value.sessions.map { session -> session.id })
+        assertEquals("UI-RUNTIME-SESSION-001", viewModel.uiState.value.runtime.lastErrorCode)
+        assertTrue(
+            viewModel.uiState.value.runtime.lastErrorTechnicalDetail.orEmpty()
+                .contains("RUNTIME_REPLACEMENT_IN_PROGRESS"),
+        )
+        assertFalse(viewModel.sessionMutationInFlight.get())
+
+        runtime.createUnavailable = null
+        viewModel.createSession()
+        advanceUntilIdle()
+
+        assertEquals(2, viewModel.uiState.value.sessions.size)
+        assertEquals(2, runtime.createdSessionIds.size)
+        assertEquals(null, viewModel.uiState.value.runtime.lastErrorCode)
+    }
+
+    @Test
+    fun `startup session transition recovers after a later ready probe without duplication`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade().apply {
+            createUnavailable = RuntimeFacadeAvailability.REPLACING
+        }
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.bootstrapCompleted)
+        assertTrue(viewModel.uiState.value.sessions.isEmpty())
+        assertEquals("UI-RUNTIME-SESSION-001", viewModel.uiState.value.runtime.lastErrorCode)
+
+        runtime.createUnavailable = null
+        viewModel.refreshRuntimeReadiness()
+        advanceUntilIdle()
+
+        assertEquals(1, viewModel.uiState.value.sessions.size)
+        assertEquals(1, runtime.createdSessionIds.size)
+        assertEquals(runtime.createdSessionIds.single().value, viewModel.uiState.value.activeSessionId)
+        assertEquals(null, viewModel.uiState.value.runtime.lastErrorCode)
+    }
+
+    @Test
+    fun `rapid new chat taps admit one off main mutation without duplicate sessions`() = runTest(dispatcher) {
+        val runtime = RecordingRuntimeFacade()
+        val viewModel = buildChatViewModel(
+            runtimeFacade = runtime,
+            sessionPersistence = RecordingPersistence(),
+            presetBackingStore = FakePresetBackingStore(),
+            ioDispatcher = dispatcher,
+        )
+        advanceUntilIdle()
+
+        viewModel.createSession()
+        viewModel.createSession()
+
+        assertEquals(1, viewModel.uiState.value.sessions.size)
+        assertEquals("UI-RUNTIME-SESSION-001", viewModel.uiState.value.runtime.lastErrorCode)
+        advanceUntilIdle()
+        assertEquals(2, viewModel.uiState.value.sessions.size)
+        assertEquals(2, runtime.createdSessionIds.size)
+        assertEquals(null, viewModel.uiState.value.runtime.lastErrorCode)
+    }
+
+    @Test
+    fun `deleting one of several chats does not create an unused replacement runtime session`() =
+        runTest(dispatcher) {
+            val runtime = RecordingRuntimeFacade()
+            val viewModel = buildChatViewModel(
+                runtimeFacade = runtime,
+                sessionPersistence = RecordingPersistence(),
+                presetBackingStore = FakePresetBackingStore(),
+                ioDispatcher = dispatcher,
+            )
+            advanceUntilIdle()
+            val firstSessionId = viewModel.uiState.value.activeSession()!!.id
+            viewModel.createSession()
+            advanceUntilIdle()
+            val createdBeforeDelete = runtime.createdSessionIds.size
+
+            viewModel.deleteSession(firstSessionId)
+            advanceUntilIdle()
+
+            assertEquals(createdBeforeDelete, runtime.createdSessionIds.size)
+            assertEquals(listOf(SessionId(firstSessionId)), runtime.deletedSessions)
+            assertEquals(1, viewModel.uiState.value.sessions.size)
+        }
+
+    @Test
+    fun `last chat delete rejection rolls back its precreated replacement and keeps ui unchanged`() =
+        runTest(dispatcher) {
+            val runtime = RecordingRuntimeFacade()
+            val viewModel = buildChatViewModel(
+                runtimeFacade = runtime,
+                sessionPersistence = RecordingPersistence(),
+                presetBackingStore = FakePresetBackingStore(),
+                ioDispatcher = dispatcher,
+            )
+            advanceUntilIdle()
+            val initialSession = viewModel.uiState.value.activeSession()!!
+            runtime.deleteResults[initialSession.id] = false
+
+            viewModel.deleteSession(initialSession.id)
+            advanceUntilIdle()
+
+            assertEquals(listOf(initialSession.id), viewModel.uiState.value.sessions.map { session -> session.id })
+            assertEquals(2, runtime.createdSessionIds.size)
+            assertEquals(
+                listOf(SessionId(initialSession.id), runtime.createdSessionIds.last()),
+                runtime.deletedSessions,
+            )
+            assertEquals("UI-RUNTIME-SESSION-001", viewModel.uiState.value.runtime.lastErrorCode)
+            assertTrue(
+                viewModel.uiState.value.runtime.lastErrorTechnicalDetail.orEmpty()
+                    .contains("replacement rollback completed"),
+            )
+        }
 
     @Test
     fun `attach image success appends image user message and assistant response`() = runTest(dispatcher) {
@@ -2261,10 +2402,17 @@ private class RecordingRuntimeFacade(
     var prepareCalls: Int = 0
     var streamCalls: Int = 0
     val preparedRequestIds = mutableListOf<String>()
+    var createUnavailable: RuntimeFacadeAvailability? = null
+    val createdSessionIds = mutableListOf<SessionId>()
+    val deletedSessions = mutableListOf<SessionId>()
+    val deleteResults = mutableMapOf<String, Boolean>()
 
     override fun createSession(): SessionId {
+        createUnavailable?.let { unavailable ->
+            throw RuntimeFacadeUnavailableException(unavailable)
+        }
         sessionCounter += 1
-        return SessionId("session-$sessionCounter")
+        return SessionId("session-$sessionCounter").also(createdSessionIds::add)
     }
 
     override fun prepareChatStream(command: ChatStreamCommand): PreparedChatStream {
@@ -2429,7 +2577,10 @@ private class RecordingRuntimeFacade(
         restoredTurns += sessionId to turns
     }
 
-    override fun deleteSession(sessionId: SessionId): Boolean = true
+    override fun deleteSession(sessionId: SessionId): Boolean {
+        deletedSessions += sessionId
+        return deleteResults[sessionId.value] ?: true
+    }
 
     override fun runtimeBackend(): String? = runtimeBackend
 

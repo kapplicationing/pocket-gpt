@@ -2,14 +2,17 @@ package com.pocketagent.android.ui
 
 import com.pocketagent.android.ui.state.activeSession
 import androidx.lifecycle.viewModelScope
+import com.pocketagent.android.runtime.RuntimeSessionCreationResult
 import com.pocketagent.android.ui.controllers.ChatStateUpdate
 import com.pocketagent.android.ui.state.CompletionSettings
 import com.pocketagent.android.ui.state.MessageKind
 import com.pocketagent.android.ui.state.MessageRole
 import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.PersistedToolCallStatus
+import com.pocketagent.android.ui.state.UiError
 import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.core.SessionId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -61,29 +64,84 @@ internal fun ChatViewModel.removeAttachedImageInternal(index: Int) {
 }
 
 internal fun ChatViewModel.createSessionInternal() {
-    applyConversationUpdate(
-        conversationService.createSession(
-            state = _uiState.value,
-            sessionId = runtimeFacade.createSession().value,
-            nowEpochMs = System.currentTimeMillis(),
-        ),
-    )
+    launchRuntimeSessionMutation(
+        unexpectedFailure = UiErrorMapper::runtimeSessionCreationFailure,
+    ) {
+        when (val creation = runtimeFacade.createRuntimeSession()) {
+            is RuntimeSessionCreationResult.Created -> applyConversationUpdate(
+                conversationService.createSession(
+                    state = _uiState.value,
+                    sessionId = creation.sessionId.value,
+                    nowEpochMs = System.currentTimeMillis(),
+                ),
+                clearRuntimeSessionError = true,
+            )
+            is RuntimeSessionCreationResult.Unavailable -> {
+                applyRuntimeSessionError(UiErrorMapper.fromRuntimeSessionUnavailable(creation))
+            }
+        }
+    }
 }
 
 internal fun ChatViewModel.switchSessionInternal(sessionId: String) {
     applyConversationUpdate(conversationService.switchSession(_uiState.value, sessionId))
 }
 
+@Suppress("TooGenericExceptionCaught")
 internal fun ChatViewModel.deleteSessionInternal(sessionId: String) {
-    runtimeFacade.deleteSession(SessionId(sessionId))
-    applyConversationUpdate(
-        conversationService.deleteSession(
-            state = _uiState.value,
-            sessionId = sessionId,
-            replacementSessionId = runtimeFacade.createSession().value,
-            nowEpochMs = System.currentTimeMillis(),
-        ),
-    )
+    val snapshot = _uiState.value
+    if (snapshot.sessions.none { session -> session.id == sessionId }) {
+        return
+    }
+    val requiresReplacement = snapshot.sessions.size == 1
+    launchRuntimeSessionMutation(
+        unexpectedFailure = UiErrorMapper::runtimeSessionDeletionFailure,
+    ) {
+        val replacementSessionId = if (requiresReplacement) {
+            when (val creation = runtimeFacade.createRuntimeSession()) {
+                is RuntimeSessionCreationResult.Created -> creation.sessionId
+                is RuntimeSessionCreationResult.Unavailable -> {
+                    applyRuntimeSessionError(UiErrorMapper.fromRuntimeSessionUnavailable(creation))
+                    return@launchRuntimeSessionMutation
+                }
+            }
+        } else {
+            null
+        }
+        val deleted = try {
+            runtimeFacade.deleteSession(SessionId(sessionId))
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: RuntimeException) {
+            val rollbackDetail = replacementSessionId?.let { rollbackRuntimeSession(it) }
+            applyRuntimeSessionError(
+                UiErrorMapper.runtimeSessionDeletionFailure(
+                    listOfNotNull(error.message ?: error::class.simpleName, rollbackDetail)
+                        .joinToString(separator = "; "),
+                ),
+            )
+            return@launchRuntimeSessionMutation
+        }
+        if (!deleted) {
+            val rollbackDetail = replacementSessionId?.let { rollbackRuntimeSession(it) }
+            applyRuntimeSessionError(
+                UiErrorMapper.runtimeSessionDeletionFailure(
+                    listOfNotNull("runtime delete rejected for $sessionId", rollbackDetail)
+                        .joinToString(separator = "; "),
+                ),
+            )
+            return@launchRuntimeSessionMutation
+        }
+        applyConversationUpdate(
+            conversationService.deleteSession(
+                state = _uiState.value,
+                sessionId = sessionId,
+                replacementSessionId = replacementSessionId?.value,
+                nowEpochMs = System.currentTimeMillis(),
+            ),
+            clearRuntimeSessionError = true,
+        )
+    }
 }
 
 internal fun ChatViewModel.attachImageInternal(imagePath: String) {
@@ -191,7 +249,9 @@ internal fun ChatViewModel.runToolInternal(toolName: String, jsonArgs: String) {
 }
 
 internal fun ChatViewModel.exportDiagnosticsInternal() {
-    val activeSessionId = _uiState.value.activeSession()?.id ?: return
+    if (_uiState.value.activeSession() == null) {
+        return
+    }
     viewModelScope.launch(ioDispatcher) {
         runCatching { runtimeFacade.exportDiagnostics() }
             .onSuccess { diagnostics ->
@@ -255,8 +315,55 @@ internal fun ChatViewModel.hydrateSessionMessagesIfNeeded(sessionId: String) {
     }
 }
 
-private fun ChatViewModel.applyConversationUpdate(update: ChatStateUpdate) {
-    _uiState.value = update.state
+@Suppress("TooGenericExceptionCaught")
+private fun ChatViewModel.launchRuntimeSessionMutation(
+    unexpectedFailure: (String?) -> UiError,
+    operation: suspend ChatViewModel.() -> Unit,
+) {
+    if (!sessionMutationInFlight.compareAndSet(false, true)) {
+        applyRuntimeSessionError(UiErrorMapper.runtimeSessionOperationInProgress())
+        return
+    }
+    viewModelScope.launch(ioDispatcher) {
+        try {
+            operation()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: RuntimeException) {
+            applyRuntimeSessionError(unexpectedFailure(error.message ?: error::class.simpleName))
+        } finally {
+            sessionMutationInFlight.set(false)
+        }
+    }
+}
+
+private fun ChatViewModel.rollbackRuntimeSession(sessionId: SessionId): String {
+    val rollback = runCatching { runtimeFacade.deleteSession(sessionId) }
+    return when {
+        rollback.isFailure -> "replacement rollback failed: ${rollback.exceptionOrNull()?.message.orEmpty()}"
+        rollback.getOrDefault(false) -> "replacement rollback completed"
+        else -> "replacement rollback rejected"
+    }
+}
+
+private fun ChatViewModel.applyRuntimeSessionError(error: UiError) {
+    _uiState.update { state ->
+        state.copy(runtime = state.runtime.withUiError(error))
+    }
+}
+
+private fun ChatViewModel.applyConversationUpdate(
+    update: ChatStateUpdate,
+    clearRuntimeSessionError: Boolean = false,
+) {
+    val nextState = if (
+        clearRuntimeSessionError && UiErrorMapper.isRuntimeSessionError(update.state.runtime.lastErrorCode)
+    ) {
+        update.state.copy(runtime = update.state.runtime.clearError())
+    } else {
+        update.state
+    }
+    _uiState.value = nextState
     update.hydrateSessionId?.let(::hydrateSessionMessagesIfNeeded)
     if (update.shouldPersist) {
         persistState()

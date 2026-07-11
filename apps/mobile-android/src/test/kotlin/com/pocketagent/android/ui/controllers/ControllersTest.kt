@@ -1,5 +1,8 @@
 package com.pocketagent.android.ui.controllers
 
+import com.pocketagent.android.RuntimeFacadeAvailability
+import com.pocketagent.android.RuntimeFacadeUnavailableException
+import com.pocketagent.android.data.chat.StoredChatState
 import com.pocketagent.android.runtime.ChatRuntimeService
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
@@ -29,6 +32,48 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ControllersTest {
+    @Test
+    fun `startup bootstrap surfaces typed transition after bounded session retries`() = runTest {
+        var createCalls = 0
+        var retryDelays = 0
+        val runtime = RecordingRuntimeGateway(
+            sessionBehavior = {
+                createCalls += 1
+                throw RuntimeFacadeUnavailableException(RuntimeFacadeAvailability.REPLACING)
+            },
+        )
+        val flow = ChatStartupFlow(
+            runtimeGateway = runtime,
+            startupProbeController = StartupProbeController(),
+            startupReadinessCoordinator = StartupReadinessCoordinator(),
+            ioDispatcher = Dispatchers.IO,
+            runtimeStartupProbeTimeoutMs = 1_000L,
+            nativeRuntimeLibraryPackaged = true,
+            sessionCreationRetrier = RuntimeSessionCreationRetrier(
+                runtimeGateway = runtime,
+                maxAttempts = 2,
+                retryDelayMs = 0L,
+                retryDelay = RuntimeSessionRetryDelay { retryDelays += 1 },
+            ),
+        )
+
+        val result = flow.bootstrap(
+            PersistenceBootstrapState(
+                persisted = StoredChatState(),
+                loadError = null,
+                shouldRunStartupProbe = false,
+            ),
+        )
+
+        assertEquals(2, createCalls)
+        assertEquals(1, retryDelays)
+        assertTrue(result.state.bootstrapCompleted)
+        assertTrue(result.state.sessions.isEmpty())
+        assertEquals("UI-RUNTIME-SESSION-001", result.state.runtime.lastErrorCode)
+        assertTrue(result.state.runtime.lastErrorTechnicalDetail.orEmpty().contains("RUNTIME_REPLACEMENT_IN_PROGRESS"))
+        assertFalse(result.shouldPersist)
+    }
+
     @Test
     fun `chat send controller delegates tool execution to runtime gateway`() = runTest {
         val runtime = RecordingRuntimeGateway()
@@ -163,6 +208,7 @@ class ControllersTest {
 
 private class RecordingRuntimeGateway(
     private val startupBehavior: () -> List<String> = { emptyList() },
+    private val sessionBehavior: () -> SessionId = { SessionId("session-1") },
     private val toolBehavior: (String, String) -> ToolExecutionResult = { toolName, _ ->
         ToolExecutionResult.Success("tool:$toolName")
     },
@@ -172,7 +218,7 @@ private class RecordingRuntimeGateway(
     var lastImagePath: String? = null
     var lastImagePrompt: String? = null
 
-    override fun createSession(): SessionId = SessionId("session-1")
+    override fun createSession(): SessionId = sessionBehavior()
     override fun streamPreparedChat(prepared: PreparedChatStream): Flow<ChatStreamEvent> = emptyFlow()
 
     override fun cancelGeneration(sessionId: SessionId): Boolean = true

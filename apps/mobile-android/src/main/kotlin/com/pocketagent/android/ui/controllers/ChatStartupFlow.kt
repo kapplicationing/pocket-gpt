@@ -5,6 +5,8 @@ import com.pocketagent.android.data.chat.StoredChatMessage
 import com.pocketagent.android.data.chat.StoredChatSession
 import com.pocketagent.android.runtime.GpuProbeStatus
 import com.pocketagent.android.runtime.ChatRuntimeService
+import com.pocketagent.android.runtime.RuntimeSessionCreationResult
+import com.pocketagent.android.runtime.RuntimeSessionUnavailableReason
 import com.pocketagent.android.ui.state.ChatSessionUiModel
 import com.pocketagent.android.ui.state.ChatUiState
 import com.pocketagent.android.ui.state.CompletionSettings
@@ -17,6 +19,7 @@ import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
 import com.pocketagent.android.ui.state.StartupProbeState
 import com.pocketagent.android.ui.state.UiError
+import com.pocketagent.android.ui.state.UiErrorMapper
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
 import com.pocketagent.inference.ModelCatalog
@@ -38,6 +41,12 @@ data class StartupProbeOutcome(
     val readinessDecision: StartupReadinessDecision,
 )
 
+private data class StartupSessionResolution(
+    val sessions: List<ChatSessionUiModel>,
+    val activeSessionId: String?,
+    val creationResult: RuntimeSessionCreationResult? = null,
+)
+
 class ChatStartupFlow(
     private val runtimeGateway: ChatRuntimeService,
     private val startupProbeController: StartupProbeController,
@@ -47,8 +56,10 @@ class ChatStartupFlow(
     private val nativeRuntimeLibraryPackaged: Boolean,
     private val sessionService: AndroidChatSessionService = AndroidChatSessionService(),
     private val timelineProjector: TimelineProjector = TimelineProjector(),
+    private val sessionCreationRetrier: RuntimeSessionCreationRetrier =
+        RuntimeSessionCreationRetrier(runtimeGateway),
 ) {
-    fun bootstrap(loadedState: PersistenceBootstrapState): StartupBootstrapResult {
+    suspend fun bootstrap(loadedState: PersistenceBootstrapState): StartupBootstrapResult {
         val persisted = loadedState.persisted
         val loadError = loadedState.loadError
         val runtimeBackend = runtimeGateway.runtimeBackend()
@@ -61,11 +72,10 @@ class ChatStartupFlow(
         val restoredFirstSessionStage = FirstSessionStage.valueOf(persisted.firstSessionStage)
         val restoredAdvancedUnlocked = persisted.advancedUnlocked
         val gpuManualOverrideAllowed = BuildConfig.DEBUG
-        val initialFirstSessionStage = when {
-            !persisted.onboardingCompleted -> FirstSessionStage.ONBOARDING
-            restoredFirstSessionStage == FirstSessionStage.ONBOARDING -> FirstSessionStage.GET_READY
-            else -> restoredFirstSessionStage
-        }
+        val initialFirstSessionStage = resolveInitialFirstSessionStage(
+            onboardingCompleted = persisted.onboardingCompleted,
+            restored = restoredFirstSessionStage,
+        )
         val gpuProbe = runtimeGateway.gpuOffloadStatus()
         val gpuSupported = gpuProbe.status == GpuProbeStatus.QUALIFIED && gpuProbe.maxStableGpuLayers > 0
         val restoredGpuEnabled = persisted.gpuAccelerationEnabled && (gpuSupported || gpuManualOverrideAllowed)
@@ -120,31 +130,21 @@ class ChatStartupFlow(
             sessions = restoredSessions,
             persistedActiveSessionId = persisted.activeSessionId,
         )
-        val resolvedSessions = if (sessionBootstrap.shouldCreateInitialSession) {
-            val now = System.currentTimeMillis()
-            sessionService.createSession(
-                sessions = emptyList(),
-                sessionId = runtimeGateway.createSession().value,
-                title = "New chat",
-                nowEpochMs = now,
-                ).sessions.map { session ->
-                session.copy(
-                    completionSettings = CompletionSettings(showThinking = persisted.defaultThinkingEnabled),
-                )
-            }
-        } else {
-            sessionBootstrap.sessions
-        }
-        val activeSessionId = when {
-            sessionBootstrap.shouldCreateInitialSession -> resolvedSessions.lastOrNull()?.id
-            else -> sessionBootstrap.activeSessionId
-        }
+        val sessionResolution = resolveStartupSessions(
+            bootstrap = sessionBootstrap,
+            defaultThinkingEnabled = persisted.defaultThinkingEnabled,
+        )
+        val sessionCreationFailure = sessionResolution.creationResult
+            as? RuntimeSessionCreationResult.Unavailable
+        val resolvedBootstrapRuntimeState = sessionCreationFailure?.let { unavailable ->
+            bootstrapRuntimeState.withSessionCreationFailure(unavailable)
+        } ?: bootstrapRuntimeState
         return StartupBootstrapResult(
             state = ChatUiState(
                 bootstrapCompleted = true,
-                sessions = resolvedSessions,
-                activeSessionId = activeSessionId,
-                runtime = bootstrapRuntimeState,
+                sessions = sessionResolution.sessions,
+                activeSessionId = sessionResolution.activeSessionId,
+                runtime = resolvedBootstrapRuntimeState,
                 defaultThinkingEnabled = persisted.defaultThinkingEnabled,
                 activeSurface = if (persisted.onboardingCompleted) {
                     ModalSurface.None
@@ -157,10 +157,52 @@ class ChatStartupFlow(
                 followUpCompleted = persisted.followUpCompleted,
                 firstSessionTelemetryEvents = persisted.firstSessionTelemetryEvents,
             ),
-            hydrateSessionId = if (sessionBootstrap.shouldCreateInitialSession) null else sessionBootstrap.hydrateSessionId,
+            hydrateSessionId = if (sessionBootstrap.shouldCreateInitialSession) {
+                null
+            } else {
+                sessionBootstrap.hydrateSessionId
+            },
             shouldRunStartupProbe = loadedState.shouldRunStartupProbe,
-            shouldPersist = routingModeAdjusted || sessionBootstrap.shouldPersist || sessionBootstrap.shouldCreateInitialSession,
+            shouldPersist = routingModeAdjusted ||
+                sessionBootstrap.shouldPersist ||
+                sessionResolution.creationResult is RuntimeSessionCreationResult.Created,
         )
+    }
+
+    private suspend fun resolveStartupSessions(
+        bootstrap: AndroidChatSessionService.SessionBootstrapPlan,
+        defaultThinkingEnabled: Boolean,
+    ): StartupSessionResolution {
+        if (!bootstrap.shouldCreateInitialSession) {
+            return StartupSessionResolution(
+                sessions = bootstrap.sessions,
+                activeSessionId = bootstrap.activeSessionId,
+            )
+        }
+        return when (val creation = sessionCreationRetrier.createSession()) {
+            is RuntimeSessionCreationResult.Created -> {
+                val sessions = sessionService.createSession(
+                    sessions = emptyList(),
+                    sessionId = creation.sessionId.value,
+                    title = "New chat",
+                    nowEpochMs = System.currentTimeMillis(),
+                ).sessions.map { session ->
+                    session.copy(
+                        completionSettings = CompletionSettings(showThinking = defaultThinkingEnabled),
+                    )
+                }
+                StartupSessionResolution(
+                    sessions = sessions,
+                    activeSessionId = sessions.lastOrNull()?.id,
+                    creationResult = creation,
+                )
+            }
+            is RuntimeSessionCreationResult.Unavailable -> StartupSessionResolution(
+                sessions = bootstrap.sessions,
+                activeSessionId = bootstrap.activeSessionId,
+                creationResult = creation,
+            )
+        }
     }
 
     fun markProbeRunning(state: ChatUiState): ChatUiState {
@@ -289,6 +331,17 @@ private fun coerceSupportedRoutingModeForStartup(mode: RoutingMode): RoutingMode
     }
 }
 
+private fun resolveInitialFirstSessionStage(
+    onboardingCompleted: Boolean,
+    restored: FirstSessionStage,
+): FirstSessionStage {
+    return when {
+        !onboardingCompleted -> FirstSessionStage.ONBOARDING
+        restored == FirstSessionStage.ONBOARDING -> FirstSessionStage.GET_READY
+        else -> restored
+    }
+}
+
 private fun RuntimeUiState.clearRuntimeError(): RuntimeUiState {
     return copy(
         lastErrorCode = null,
@@ -308,6 +361,18 @@ private fun RuntimeUiState.withRuntimeUiError(error: UiError?): RuntimeUiState {
         lastErrorTechnicalDetail = error.technicalDetail,
         lastError = error.technicalDetail ?: error.userMessage,
     )
+}
+
+private fun RuntimeUiState.withSessionCreationFailure(
+    unavailable: RuntimeSessionCreationResult.Unavailable,
+): RuntimeUiState {
+    val error = UiErrorMapper.fromRuntimeSessionUnavailable(unavailable)
+    val runtimeClosed = unavailable.reason == RuntimeSessionUnavailableReason.CLOSED
+    return copy(
+        startupProbeState = if (runtimeClosed) StartupProbeState.BLOCKED else startupProbeState,
+        modelRuntimeStatus = if (runtimeClosed) ModelRuntimeStatus.ERROR else ModelRuntimeStatus.LOADING,
+        modelStatusDetail = unavailable.userMessage,
+    ).withRuntimeUiError(error)
 }
 
 private fun addTelemetryEventIfMissingForStartup(

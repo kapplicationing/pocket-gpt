@@ -260,6 +260,7 @@ class ChatViewModel internal constructor(
         .stateIn(viewModelScope, SharingStarted.Lazily, _uiState.value.streaming)
     internal var gpuProbeRefreshJob: Job? = null
     private val activeSendOperation = AtomicReference<SendOperationLease?>(null)
+    internal val sessionMutationInFlight = AtomicBoolean(false)
     internal val activeSendRequestId: String?
         get() = activeSendOperation.get()?.currentRequestId()
     @Volatile
@@ -293,6 +294,7 @@ class ChatViewModel internal constructor(
         updateState = { transform -> _uiState.update(transform) },
         onPersist = { persistState() },
         onProbeApplied = {
+            ensureRuntimeSessionAfterReadyProbeInternal()
             refreshGpuProbeStatusIfPendingInternal()
             refreshRuntimeDiagnostics()
         },

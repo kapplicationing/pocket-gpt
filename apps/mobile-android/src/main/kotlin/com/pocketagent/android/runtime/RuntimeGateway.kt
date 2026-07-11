@@ -1,6 +1,8 @@
 package com.pocketagent.android.runtime
 
 import android.util.Log
+import com.pocketagent.android.RuntimeFacadeAvailability
+import com.pocketagent.android.RuntimeFacadeUnavailableException
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
@@ -12,6 +14,7 @@ import com.pocketagent.runtime.MvpRuntimeFacade
 import com.pocketagent.runtime.PreparedChatStream
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import com.pocketagent.runtime.RuntimeRecoveryDisposition
 import com.pocketagent.runtime.RuntimeResourceControl
 import com.pocketagent.runtime.RuntimeWarmupSupport
 import com.pocketagent.runtime.StreamChatRequestV2
@@ -59,8 +62,45 @@ interface DeviceGpuOffloadSupport {
     }
 }
 
+enum class RuntimeSessionUnavailableReason {
+    REPLACING,
+    CLOSING,
+    CLOSED,
+    ;
+
+    val isTransient: Boolean
+        get() = this != CLOSED
+}
+
+sealed interface RuntimeSessionCreationResult {
+    data class Created(val sessionId: SessionId) : RuntimeSessionCreationResult
+
+    data class Unavailable(
+        val reason: RuntimeSessionUnavailableReason,
+        val errorCode: String,
+        val userMessage: String,
+        val recoveryDisposition: RuntimeRecoveryDisposition,
+    ) : RuntimeSessionCreationResult
+}
+
+internal class RuntimeSessionUnavailableException(
+    val unavailable: RuntimeSessionCreationResult.Unavailable,
+) : IllegalStateException(unavailable.userMessage) {
+    val errorCode: String get() = unavailable.errorCode
+    val recoveryDisposition: RuntimeRecoveryDisposition get() = unavailable.recoveryDisposition
+}
+
 interface ChatRuntimeService {
+    /** Boundary implementation only. Production callers must use [createRuntimeSession]. */
     fun createSession(): SessionId
+
+    fun createRuntimeSession(): RuntimeSessionCreationResult {
+        return try {
+            RuntimeSessionCreationResult.Created(createSession())
+        } catch (error: RuntimeFacadeUnavailableException) {
+            error.availability.toRuntimeSessionUnavailable()
+        }
+    }
 
     fun prepareChatStream(command: ChatStreamCommand): PreparedChatStream =
         ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L).prepare(command)
@@ -105,6 +145,30 @@ interface ChatRuntimeService {
             status = GpuProbeStatus.FAILED,
             failureReason = GpuProbeFailureReason.UNKNOWN,
             detail = "gpu_offload_unsupported",
+        )
+    }
+}
+
+private fun RuntimeFacadeAvailability.toRuntimeSessionUnavailable(): RuntimeSessionCreationResult.Unavailable {
+    return when (this) {
+        RuntimeFacadeAvailability.READY -> error("Ready runtime cannot reject session creation.")
+        RuntimeFacadeAvailability.REPLACING -> RuntimeSessionCreationResult.Unavailable(
+            reason = RuntimeSessionUnavailableReason.REPLACING,
+            errorCode = "RUNTIME_REPLACEMENT_IN_PROGRESS",
+            userMessage = "Runtime is switching models. Try creating the chat again shortly.",
+            recoveryDisposition = RuntimeRecoveryDisposition.RETRY_REQUEST,
+        )
+        RuntimeFacadeAvailability.CLOSING -> RuntimeSessionCreationResult.Unavailable(
+            reason = RuntimeSessionUnavailableReason.CLOSING,
+            errorCode = "RUNTIME_CLOSE_IN_PROGRESS",
+            userMessage = "Runtime is shutting down. Try creating the chat again shortly.",
+            recoveryDisposition = RuntimeRecoveryDisposition.RETRY_REQUEST,
+        )
+        RuntimeFacadeAvailability.CLOSED -> RuntimeSessionCreationResult.Unavailable(
+            reason = RuntimeSessionUnavailableReason.CLOSED,
+            errorCode = "RUNTIME_CLOSED",
+            userMessage = "Runtime is unavailable. Restart the app before creating another chat.",
+            recoveryDisposition = RuntimeRecoveryDisposition.RESTART_RUNTIME,
         )
     }
 }

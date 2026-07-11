@@ -2,6 +2,8 @@ package com.pocketagent.android.voice
 
 import android.content.Context
 import com.pocketagent.android.runtime.ChatRuntimeService
+import com.pocketagent.android.runtime.RuntimeSessionCreationResult
+import com.pocketagent.android.runtime.RuntimeSessionUnavailableException
 import com.pocketagent.android.runtime.resolveAppForegroundRuntimeServices
 import com.pocketagent.android.ui.controllers.AndroidTelemetryDeviceStateProvider
 import com.pocketagent.core.ChatResponse
@@ -41,7 +43,10 @@ internal class OffscreenRuntimeClient(
         systemPrompt: String,
     ): OffscreenRuntimeTurnResult {
         runtimeGateway.touchKeepAlive()
-        val sessionId = runtimeGateway.createSession()
+        val sessionId = when (val creation = runtimeGateway.createRuntimeSession()) {
+            is RuntimeSessionCreationResult.Created -> creation.sessionId
+            is RuntimeSessionCreationResult.Unavailable -> throw RuntimeSessionUnavailableException(creation)
+        }
         return try {
             val preparedStream = runtimeGateway.prepareChatStream(
                 ChatStreamCommand(

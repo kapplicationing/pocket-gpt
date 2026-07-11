@@ -1,5 +1,15 @@
 package com.pocketagent.android
 
+import com.pocketagent.android.data.chat.StoredChatState
+import com.pocketagent.android.runtime.MvpRuntimeGateway
+import com.pocketagent.android.runtime.RuntimeSessionCreationResult
+import com.pocketagent.android.runtime.RuntimeSessionUnavailableReason
+import com.pocketagent.android.ui.controllers.ChatStartupFlow
+import com.pocketagent.android.ui.controllers.PersistenceBootstrapState
+import com.pocketagent.android.ui.controllers.RuntimeSessionCreationRetrier
+import com.pocketagent.android.ui.controllers.RuntimeSessionRetryDelay
+import com.pocketagent.android.ui.controllers.StartupProbeController
+import com.pocketagent.android.ui.controllers.StartupReadinessCoordinator
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
@@ -51,6 +61,84 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class HotSwappableRuntimeFacadeTest {
+    @Test
+    fun `bootstrap session retry treats closed runtime as terminal`() = runBlocking {
+        val hotSwap = HotSwappableRuntimeFacade(initial = StubFacade())
+        assertTrue(hotSwap.closeRuntime(1_000L).success)
+        var retryDelays = 0
+        val retrier = RuntimeSessionCreationRetrier(
+            runtimeGateway = MvpRuntimeGateway(hotSwap),
+            maxAttempts = 3,
+            retryDelayMs = 0L,
+            retryDelay = RuntimeSessionRetryDelay { retryDelays += 1 },
+        )
+
+        val unavailable = assertIs<RuntimeSessionCreationResult.Unavailable>(retrier.createSession())
+
+        assertEquals(RuntimeSessionUnavailableReason.CLOSED, unavailable.reason)
+        assertEquals("RUNTIME_CLOSED", unavailable.errorCode)
+        assertEquals(0, retryDelays)
+    }
+
+    @Test
+    fun `bootstrap retries one concurrent runtime install without duplicating its session`() = runBlocking {
+        val oldRuntime = BlockingCloseFacade()
+        val newRuntime = StubFacade(sessionId = "session-new")
+        val replacementExecutor = Executors.newSingleThreadExecutor()
+        val replacementDispatcher = replacementExecutor.asCoroutineDispatcher()
+        val hotSwap = HotSwappableRuntimeFacade(
+            initial = oldRuntime,
+            replacementDispatcher = replacementDispatcher,
+        )
+        try {
+            val replacement = async { hotSwap.replace(newRuntime) }
+            withTimeout(2_000L) { oldRuntime.closeStarted.await() }
+            var retryDelays = 0
+            val retrier = RuntimeSessionCreationRetrier(
+                runtimeGateway = MvpRuntimeGateway(hotSwap),
+                maxAttempts = 2,
+                retryDelayMs = 0L,
+                retryDelay = RuntimeSessionRetryDelay {
+                    retryDelays += 1
+                    oldRuntime.releaseClose.countDown()
+                    withTimeout(2_000L) {
+                        while (hotSwap.availability() != RuntimeFacadeAvailability.READY) {
+                            yield()
+                        }
+                    }
+                },
+            )
+            val startupFlow = ChatStartupFlow(
+                runtimeGateway = MvpRuntimeGateway(hotSwap),
+                startupProbeController = StartupProbeController(),
+                startupReadinessCoordinator = StartupReadinessCoordinator(),
+                ioDispatcher = Dispatchers.IO,
+                runtimeStartupProbeTimeoutMs = 1_000L,
+                nativeRuntimeLibraryPackaged = true,
+                sessionCreationRetrier = retrier,
+            )
+
+            val result = startupFlow.bootstrap(
+                PersistenceBootstrapState(
+                    persisted = StoredChatState(),
+                    loadError = null,
+                    shouldRunStartupProbe = false,
+                ),
+            )
+
+            assertTrue(withTimeout(2_000L) { replacement.await() }.success)
+            assertEquals(1, retryDelays)
+            assertEquals(0, oldRuntime.createCalls)
+            assertEquals(1, newRuntime.createCalls)
+            assertEquals(listOf("session-new"), result.state.sessions.map { session -> session.id })
+            assertEquals("session-new", result.state.activeSessionId)
+        } finally {
+            oldRuntime.releaseClose.countDown()
+            replacementDispatcher.close()
+            replacementExecutor.shutdownNow()
+        }
+    }
+
     @Test
     fun `blocking runtime close does not stall the UI dispatcher`() {
         val oldRuntime = BlockingCloseFacade()
@@ -721,8 +809,12 @@ private open class StubFacade(
     var closeCalls: Int = 0
     val closeTimeouts = mutableListOf<Long>()
     var deleteCalls: Int = 0
+    var createCalls: Int = 0
 
-    override fun createSession(): SessionId = SessionId(sessionId)
+    override fun createSession(): SessionId {
+        createCalls += 1
+        return SessionId(sessionId)
+    }
 
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = emptyFlow()
 

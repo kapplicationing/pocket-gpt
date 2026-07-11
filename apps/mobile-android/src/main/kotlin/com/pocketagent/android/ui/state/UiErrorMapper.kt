@@ -2,6 +2,7 @@ package com.pocketagent.android.ui.state
 
 import androidx.compose.runtime.Immutable
 import com.pocketagent.android.runtime.errorCodeName
+import com.pocketagent.android.runtime.RuntimeSessionCreationResult
 import com.pocketagent.runtime.ImageAnalysisResult
 import com.pocketagent.runtime.RuntimeFailureRecoveryPolicy
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
@@ -33,6 +34,50 @@ object UiErrorMapper {
     private const val IMAGE_VALIDATION_CODE = "UI-IMG-VAL-001"
     private const val TOOL_SCHEMA_CODE = "UI-TOOL-SCHEMA-001"
     private const val RUNTIME_CODE = "UI-RUNTIME-001"
+    private const val RUNTIME_SESSION_CODE = "UI-RUNTIME-SESSION-001"
+
+    fun fromRuntimeSessionUnavailable(
+        unavailable: RuntimeSessionCreationResult.Unavailable,
+    ): UiError {
+        return UiError(
+            code = RUNTIME_SESSION_CODE,
+            userMessage = unavailable.userMessage,
+            technicalDetail = "${unavailable.errorCode}: ${unavailable.reason.name}",
+            recoveryAction = unavailable.recoveryDisposition.toRecoveryAction(),
+            sourceCode = unavailable.errorCode,
+        )
+    }
+
+    fun runtimeSessionOperationInProgress(): UiError {
+        return UiError(
+            code = RUNTIME_SESSION_CODE,
+            userMessage = "Another chat change is still in progress. Wait a moment and try again.",
+            technicalDetail = "RUNTIME_SESSION_OPERATION_IN_PROGRESS",
+            sourceCode = "RUNTIME_SESSION_OPERATION_IN_PROGRESS",
+        )
+    }
+
+    fun runtimeSessionCreationFailure(detail: String?): UiError {
+        return UiError(
+            code = RUNTIME_SESSION_CODE,
+            userMessage = "The chat could not be created. Please try again.",
+            technicalDetail = detail,
+            recoveryAction = RecoveryAction.RETRY_LOAD,
+            sourceCode = "RUNTIME_SESSION_CREATE_FAILED",
+        )
+    }
+
+    fun runtimeSessionDeletionFailure(detail: String?): UiError {
+        return UiError(
+            code = RUNTIME_SESSION_CODE,
+            userMessage = "The chat could not be deleted because the runtime is busy. Please try again.",
+            technicalDetail = detail,
+            recoveryAction = RecoveryAction.RETRY_LOAD,
+            sourceCode = "RUNTIME_SESSION_DELETE_REJECTED",
+        )
+    }
+
+    fun isRuntimeSessionError(code: String?): Boolean = code == RUNTIME_SESSION_CODE
 
     // Startup diagnostics stay in one ordered classifier because message precedence
     // is user-visible policy.

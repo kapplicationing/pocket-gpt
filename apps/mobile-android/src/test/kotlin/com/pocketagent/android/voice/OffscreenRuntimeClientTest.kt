@@ -1,6 +1,9 @@
 package com.pocketagent.android.voice
 
+import com.pocketagent.android.RuntimeFacadeAvailability
+import com.pocketagent.android.RuntimeFacadeUnavailableException
 import com.pocketagent.android.runtime.ChatRuntimeService
+import com.pocketagent.android.runtime.RuntimeSessionUnavailableException
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.ChatToolCall
 import com.pocketagent.core.RoutingMode
@@ -14,6 +17,7 @@ import com.pocketagent.runtime.ChatStreamRequestPlanner
 import com.pocketagent.runtime.InteractionContentPart
 import com.pocketagent.runtime.PreparedChatStream
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import com.pocketagent.runtime.RuntimeRecoveryDisposition
 import com.pocketagent.runtime.ToolExecutionResult
 import com.pocketagent.runtime.ToolFailure
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +30,28 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class OffscreenRuntimeClientTest {
+    @Test
+    fun `voice turn preserves typed runtime transition without creating an ephemeral session`() = runTest {
+        val runtimeGateway = RecordingOffscreenRuntimeGateway(
+            streamEvents = emptyList(),
+            createUnavailable = RuntimeFacadeAvailability.REPLACING,
+        )
+        val client = OffscreenRuntimeClient(
+            runtimeGateway = runtimeGateway,
+            loadLastUsedModel = { RuntimeModelLifecycleCommandResult.applied() },
+            deviceStateProvider = { TEST_DEVICE_STATE },
+        )
+
+        val error = assertFailsWith<RuntimeSessionUnavailableException> {
+            client.runVoiceTurn(transcript = "Open Maps", systemPrompt = "voice-system")
+        }
+
+        assertEquals("RUNTIME_REPLACEMENT_IN_PROGRESS", error.errorCode)
+        assertEquals(RuntimeRecoveryDisposition.RETRY_REQUEST, error.recoveryDisposition)
+        assertTrue(runtimeGateway.deletedSessions.isEmpty())
+        assertTrue(runtimeGateway.preparedCommands.isEmpty())
+    }
+
     @Test
     fun `run voice turn uses shared runtime gateway and executes returned tools`() = runTest {
         val runtimeGateway = RecordingOffscreenRuntimeGateway(
@@ -212,13 +238,17 @@ private val TEST_DEVICE_STATE = DeviceState(
 private class RecordingOffscreenRuntimeGateway(
     private val streamEvents: List<ChatStreamEvent>,
     private val toolResults: Map<String, ToolExecutionResult> = emptyMap(),
+    private val createUnavailable: RuntimeFacadeAvailability? = null,
 ) : ChatRuntimeService {
     val preparedCommands = mutableListOf<ChatStreamCommand>()
     val deletedSessions = mutableListOf<SessionId>()
     val toolNames = mutableListOf<String>()
     var touchKeepAliveCalls: Int = 0
 
-    override fun createSession(): SessionId = SessionId("session-1")
+    override fun createSession(): SessionId {
+        createUnavailable?.let { unavailable -> throw RuntimeFacadeUnavailableException(unavailable) }
+        return SessionId("session-1")
+    }
 
     override fun prepareChatStream(command: ChatStreamCommand): PreparedChatStream {
         preparedCommands += command

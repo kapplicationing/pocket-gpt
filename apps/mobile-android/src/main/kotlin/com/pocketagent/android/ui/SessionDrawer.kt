@@ -36,78 +36,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pocketagent.android.R
 import com.pocketagent.android.ui.state.ChatSessionUiModel
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
-import java.util.Calendar
-import java.util.concurrent.TimeUnit
-
-private enum class SessionDateGroup(val labelRes: Int) {
-    TODAY(R.string.ui_session_group_today),
-    YESTERDAY(R.string.ui_session_group_yesterday),
-    THIS_WEEK(R.string.ui_session_group_this_week),
-    LAST_WEEK(R.string.ui_session_group_last_week),
-    THIS_MONTH(R.string.ui_session_group_this_month),
-    OLDER(R.string.ui_session_group_older),
-}
-
-private fun classifyDateGroup(timestampMs: Long, nowMs: Long): SessionDateGroup {
-    val cal = Calendar.getInstance().apply { timeInMillis = nowMs }
-    val todayStart = Calendar.getInstance().apply {
-        timeInMillis = nowMs
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
-    val yesterdayStart = todayStart - TimeUnit.DAYS.toMillis(1)
-    val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
-    val daysFromMonday = if (dayOfWeek == Calendar.SUNDAY) 6 else dayOfWeek - Calendar.MONDAY
-    val thisWeekStart = todayStart - TimeUnit.DAYS.toMillis(daysFromMonday.toLong())
-    val lastWeekStart = thisWeekStart - TimeUnit.DAYS.toMillis(7)
-    val thisMonthStart = Calendar.getInstance().apply {
-        timeInMillis = nowMs
-        set(Calendar.DAY_OF_MONTH, 1)
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
-
-    return when {
-        timestampMs >= todayStart -> SessionDateGroup.TODAY
-        timestampMs >= yesterdayStart -> SessionDateGroup.YESTERDAY
-        timestampMs >= thisWeekStart -> SessionDateGroup.THIS_WEEK
-        timestampMs >= lastWeekStart -> SessionDateGroup.LAST_WEEK
-        timestampMs >= thisMonthStart -> SessionDateGroup.THIS_MONTH
-        else -> SessionDateGroup.OLDER
-    }
-}
-
-private fun groupSessionsByDate(
-    sessions: List<ChatSessionUiModel>,
-): List<Pair<SessionDateGroup, List<ChatSessionUiModel>>> {
-    val nowMs = System.currentTimeMillis()
-    val grouped = sessions
-        .sortedByDescending { it.updatedAtEpochMs }
-        .groupBy { classifyDateGroup(it.updatedAtEpochMs, nowMs) }
-    return SessionDateGroup.entries.mapNotNull { group ->
-        grouped[group]?.let { group to it }
-    }
-}
+import java.time.LocalDate
+import java.time.ZoneId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,47 +66,18 @@ internal fun SessionDrawer(
     hiddenSessionIds: Set<String> = emptySet(),
 ) {
     val haptic = LocalHapticFeedback.current
-    val createSessionDescription = stringResource(id = R.string.a11y_create_session)
     var searchQueryValue by remember { mutableStateOf(TextFieldValue("")) }
     val searchQuery = searchQueryValue.text
-    val visibleSessions = sessions.filterNot { it.id in hiddenSessionIds }
-    val groupedSessions = remember(sessions, searchQuery, hiddenSessionIds) {
-        val filtered = if (searchQuery.isBlank()) {
-            visibleSessions
-        } else {
-            visibleSessions.filter { it.title.contains(searchQuery, ignoreCase = true) }
-        }
-        groupSessionsByDate(filtered)
+    val sessionIndex = rememberSessionDrawerIndex(sessions, hiddenSessionIds, searchQuery)
+    val groupedSessions = remember(sessionIndex, searchQuery) {
+        sessionIndex.groupsForQuery(searchQuery)
     }
 
     LazyColumn(
         modifier = Modifier.navigationBarsPadding(),
     ) {
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = PocketAgentDimensions.sheetHorizontalPadding, vertical = PocketAgentDimensions.screenPadding),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(id = R.string.ui_sessions_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                IconButton(
-                    onClick = {
-                        haptic.tickLight()
-                        onCreateSession()
-                    },
-                    modifier = Modifier.testTag("create_session_button"),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = createSessionDescription)
-                }
-            }
-            HorizontalDivider()
+            SessionDrawerHeader(onCreateSession = onCreateSession)
         }
 
         item {
@@ -170,7 +87,10 @@ internal fun SessionDrawer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("session_search_input")
-                    .padding(horizontal = PocketAgentDimensions.sheetHorizontalPadding, vertical = PocketAgentDimensions.sectionSpacing),
+                    .padding(
+                        horizontal = PocketAgentDimensions.sheetHorizontalPadding,
+                        vertical = PocketAgentDimensions.sectionSpacing,
+                    ),
                 placeholder = { Text(stringResource(id = R.string.ui_session_search_placeholder)) },
                 singleLine = true,
                 leadingIcon = {
@@ -178,18 +98,21 @@ internal fun SessionDrawer(
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-	                        IconButton(onClick = {
-	                            haptic.tickLight()
-	                            searchQueryValue = TextFieldValue("")
-	                        }) {
-                            Icon(Icons.Default.Clear, contentDescription = stringResource(id = R.string.ui_session_search_clear))
+                        IconButton(onClick = {
+                            haptic.tickLight()
+                            searchQueryValue = TextFieldValue("")
+                        }) {
+                            Icon(
+                                Icons.Default.Clear,
+                                contentDescription = stringResource(id = R.string.ui_session_search_clear),
+                            )
                         }
                     }
                 },
             )
         }
 
-        if (visibleSessions.isEmpty()) {
+        if (sessionIndex.visibleSessionCount == 0) {
             item {
                 Text(
                     text = stringResource(id = R.string.ui_no_sessions_yet),
@@ -207,17 +130,20 @@ internal fun SessionDrawer(
             }
         }
 
-        groupedSessions.forEach { (group, sessions) ->
-            item(key = "header-${group.name}") {
+        groupedSessions.forEach { group ->
+            item(key = "header-${group.dateGroup.name}") {
                 Text(
-                    text = stringResource(id = group.labelRes),
+                    text = stringResource(id = group.dateGroup.labelRes),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = PocketAgentDimensions.sheetHorizontalPadding, vertical = PocketAgentDimensions.sectionSpacing),
+                    modifier = Modifier.padding(
+                        horizontal = PocketAgentDimensions.sheetHorizontalPadding,
+                        vertical = PocketAgentDimensions.sectionSpacing,
+                    ),
                 )
             }
-            items(sessions, key = { it.id }) { session ->
+            items(group.sessions, key = { it.id }) { session ->
                 var deleteDispatched by remember(session.id) { mutableStateOf(false) }
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { value ->
@@ -261,6 +187,60 @@ internal fun SessionDrawer(
 }
 
 @Composable
+private fun SessionDrawerHeader(onCreateSession: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val createSessionDescription = stringResource(id = R.string.a11y_create_session)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(
+                horizontal = PocketAgentDimensions.sheetHorizontalPadding,
+                vertical = PocketAgentDimensions.screenPadding,
+            ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(id = R.string.ui_sessions_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        IconButton(
+            onClick = {
+                haptic.tickLight()
+                onCreateSession()
+            },
+            modifier = Modifier.testTag("create_session_button"),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = createSessionDescription)
+        }
+    }
+    HorizontalDivider()
+}
+
+@Composable
+private fun rememberSessionDrawerIndex(
+    sessions: List<ChatSessionUiModel>,
+    hiddenSessionIds: Set<String>,
+    searchQuery: String,
+): SessionDrawerIndex {
+    val groupingZoneId = ZoneId.systemDefault()
+    val groupingEpochDay = remember(searchQuery, groupingZoneId) {
+        LocalDate.now(groupingZoneId).toEpochDay()
+    }
+    // The drawer stays composed while closed. Cache stable derivation until its inputs, local
+    // calendar day, or time zone change; query updates then perform only title filtering.
+    return remember(sessions, hiddenSessionIds, groupingEpochDay, groupingZoneId) {
+        SessionDrawerIndex.create(
+            sessions = sessions,
+            hiddenSessionIds = hiddenSessionIds,
+            zoneId = groupingZoneId,
+        )
+    }
+}
+
+@Composable
 private fun SessionRow(
     session: ChatSessionUiModel,
     isActive: Boolean,
@@ -295,7 +275,13 @@ private fun SessionRow(
                     Modifier
                 },
             )
-            .background(if (isActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)
+            .background(
+                if (isActive) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+            )
             .clickable(
                 onClickLabel = switchSessionDescription,
                 onClick = {
@@ -308,7 +294,10 @@ private fun SessionRow(
                 stateDescription = activeStateDescription
                 contentDescription = switchSessionDescription
             }
-            .padding(horizontal = PocketAgentDimensions.sheetHorizontalPadding, vertical = PocketAgentDimensions.screenPadding),
+            .padding(
+                horizontal = PocketAgentDimensions.sheetHorizontalPadding,
+                vertical = PocketAgentDimensions.screenPadding,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(
@@ -320,7 +309,11 @@ private fun SessionRow(
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (isActive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                color = if (isActive) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
             )
             Text(
                 text = subtitle,

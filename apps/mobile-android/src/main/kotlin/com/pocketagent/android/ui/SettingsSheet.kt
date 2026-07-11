@@ -58,6 +58,7 @@ import com.pocketagent.inference.PresetRoutingResolver
 import com.pocketagent.runtime.RuntimePerformanceProfile
 
 @Composable
+@Suppress("LongParameterList")
 internal fun AdvancedSettingsSheet(
     runtime: RuntimeUiState,
     defaultThinkingEnabled: Boolean,
@@ -769,6 +770,7 @@ private fun AboutTabContent(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod")
 private fun DiagnosticsSection(
     runtime: RuntimeUiState,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,

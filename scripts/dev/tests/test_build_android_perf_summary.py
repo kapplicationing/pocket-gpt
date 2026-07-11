@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from build_android_perf_summary import MetadataError, collect_device_state
+from build_android_perf_summary import MetadataError, collect_device_state, parse_args
 
 
 class BuildAndroidPerfSummaryTest(unittest.TestCase):
@@ -34,9 +34,9 @@ class BuildAndroidPerfSummaryTest(unittest.TestCase):
     def collect(self):
         return collect_device_state(
             self.root,
-            runtime_condition="unloaded",
-            download_condition="idle",
-            voice_condition="inactive",
+            declared_runtime_condition="unloaded",
+            declared_download_condition="idle",
+            declared_voice_condition="inactive",
         )
 
     def test_collects_device_refresh_thermal_compilation_and_declared_conditions(self):
@@ -48,7 +48,9 @@ class BuildAndroidPerfSummaryTest(unittest.TestCase):
         self.assertEqual(state["thermal_status_after"], 1)
         self.assertEqual(state["battery_temperature_c_before"], 31.2)
         self.assertEqual(state["compilation_filter"], "speed-profile")
-        self.assertEqual(state["runtime_condition"], "unloaded")
+        self.assertEqual(state["workload_condition_source"], "operator-declared-not-observed")
+        self.assertEqual(state["declared_runtime_condition"], "unloaded")
+        self.assertNotIn("runtime_condition", state)
 
     def test_fails_closed_when_required_thermal_evidence_is_unparseable(self):
         self.write("thermal-after.txt", "service unavailable\n")
@@ -67,6 +69,39 @@ class BuildAndroidPerfSummaryTest(unittest.TestCase):
         self.assertFalse(state["refresh_rate_evidence_available"])
         self.assertEqual(state["compilation_filter"], "unavailable")
         self.assertFalse(state["compilation_evidence_available"])
+
+    def test_condition_cli_flags_remain_compatible_but_use_declared_destinations(self):
+        args = parse_args(
+            [
+                "--output", str(self.root / "summary.json"),
+                "--artifact-dir", str(self.root),
+                "--scenario", "settings-nav",
+                "--serial", "device-123",
+                "--package", "com.pocketagent.android",
+                "--build-source", "preinstalled-nondebuggable",
+                "--build-variant", "unverified-nondebuggable",
+                "--version-code", "1",
+                "--version-name", "0.1.0",
+                "--last-update-time", "2026-07-11 10:00:00",
+                "--installed-apk-path", "/data/app/base.apk",
+                "--started-at-utc", "2026-07-11T10:00:00Z",
+                "--completed-at-utc", "2026-07-11T10:00:10Z",
+                "--runtime-condition", "unloaded",
+                "--download-condition", "idle",
+                "--voice-condition", "inactive",
+                "--native-runtime-packaged", "null",
+                "--debuggable", "false",
+                "--total-frames", "120",
+                "--janky-pct", "10",
+                "--p50-ms", "10",
+                "--p90-ms", "20",
+                "--p99-ms", "30",
+            ]
+        )
+
+        self.assertEqual(args.declared_runtime_condition, "unloaded")
+        self.assertEqual(args.declared_download_condition, "idle")
+        self.assertEqual(args.declared_voice_condition, "inactive")
 
 
 if __name__ == "__main__":

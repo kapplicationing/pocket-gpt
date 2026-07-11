@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<hierarchy rotation="0">
+  <node class="android.widget.EditText" resource-id="model_search_input_clear" text="wrong-suffix" bounds="[10,20][110,120]" />
+  <node class="android.widget.EditText" resource-id="unrelated_text_field" text="wrong-fallback" bounds="[120,20][220,120]" />
+  <node class="android.widget.EditText" resource-id="com.pocketagent.android:id/model_search_input" text="qwen" bounds="[100,200][300,400]" />
+</hierarchy>

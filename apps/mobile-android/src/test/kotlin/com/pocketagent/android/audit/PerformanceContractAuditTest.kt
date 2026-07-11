@@ -354,6 +354,8 @@ class PerformanceContractAuditTest {
     @Test
     fun `interaction perf evidence records device state and declared workload conditions`() {
         val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
+        val gate = resolveRepoSource("scripts/dev/perf-interaction-gate.sh").readText()
+        val harness = resolveRepoSource("scripts/dev/android_perf_harness.py").readText()
         val evaluator = resolveRepoSource(
             "scripts/benchmarks/evaluate_android_frame_thresholds.py",
         ).readText()
@@ -365,6 +367,10 @@ class PerformanceContractAuditTest {
             "--runtime-state",
             "--download-state",
             "--voice-state",
+            "assert-scenario-final",
+            "assert-package-stable",
+            "window-focus-after.txt",
+            "window-focus-post-gfxinfo.txt",
             "TOTAL_FRAMES",
         )
         val requiredEvaluationFields = listOf(
@@ -372,9 +378,10 @@ class PerformanceContractAuditTest {
             "refresh_rate_hz",
             "thermal_status_before",
             "compilation_filter",
-            "runtime_condition",
-            "download_condition",
-            "voice_condition",
+            "workload_condition_source",
+            "declared_runtime_condition",
+            "declared_download_condition",
+            "declared_voice_condition",
         )
 
         assertTrue(
@@ -384,6 +391,20 @@ class PerformanceContractAuditTest {
         assertTrue(
             requiredEvaluationFields.all { field -> field in evaluator },
             "Frame-threshold evaluation must reject incomplete or mixed device/workload evidence.",
+        )
+        assertTrue(
+            "android.widget.EditText" !in script &&
+                "PACKAGE_QUALIFIED_ID_PATTERN" in harness &&
+                "resource_id == expected" in harness,
+            "Interaction selectors must use exact resource IDs without a generic EditText fallback.",
+        )
+        assertTrue(
+            "perf_lock_acquire" in gate &&
+                "--lock-token" in gate &&
+                "perf_lock_validate" in script &&
+                "trap cleanup EXIT" in gate &&
+                "trap cleanup EXIT" in script,
+            "The three-sample gate must own one device/package lease and each child must validate its token.",
         )
     }
 

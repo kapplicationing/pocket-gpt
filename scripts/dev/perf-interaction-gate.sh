@@ -5,14 +5,35 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HARNESS_HELPER="$SCRIPT_DIR/android_perf_harness.py"
+source "$SCRIPT_DIR/android-perf-lock.sh"
+
+ORIGINAL_COMMAND="$0"
+for original_arg in "$@"; do
+  ORIGINAL_COMMAND+=" $(printf '%q' "$original_arg")"
+done
 
 SERIAL="${ANDROID_SERIAL:-}"
 PACKAGE="com.pocketagent.android"
 SCENARIO=""
 OUT_DIR=""
-RUNTIME_CONDITION=""
-DOWNLOAD_CONDITION=""
-VOICE_CONDITION=""
+DECLARED_RUNTIME_CONDITION=""
+DECLARED_DOWNLOAD_CONDITION=""
+DECLARED_VOICE_CONDITION=""
+
+cleanup() {
+  local exit_code=$?
+  if ! perf_lock_release; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      exit_code=73
+    fi
+  fi
+  trap - EXIT
+  exit "$exit_code"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 usage() {
   cat <<EOF
@@ -20,6 +41,8 @@ Usage: $0 --scenario settings-nav|model-sheet|drawer-search --runtime-state unlo
 
 Builds and installs the native-enabled benchmark APK for sample 1, captures
 three samples on the same installed package, then enforces median thresholds.
+The runtime, download, and voice flags are operator declarations checked for
+consistency; they are not observed application state.
 EOF
 }
 
@@ -38,15 +61,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --runtime-state)
-      RUNTIME_CONDITION="$2"
+      DECLARED_RUNTIME_CONDITION="$2"
       shift 2
       ;;
     --download-state)
-      DOWNLOAD_CONDITION="$2"
+      DECLARED_DOWNLOAD_CONDITION="$2"
       shift 2
       ;;
     --voice-state)
-      VOICE_CONDITION="$2"
+      DECLARED_VOICE_CONDITION="$2"
       shift 2
       ;;
     --out-dir)
@@ -77,24 +100,28 @@ case "$SCENARIO" in
     exit 64
     ;;
 esac
-case "$RUNTIME_CONDITION" in
+case "$DECLARED_RUNTIME_CONDITION" in
   unloaded|loading|loaded-idle) ;;
   *) echo "--runtime-state must be unloaded, loading, or loaded-idle" >&2; exit 64 ;;
 esac
-case "$DOWNLOAD_CONDITION" in
+case "$DECLARED_DOWNLOAD_CONDITION" in
   idle|active) ;;
   *) echo "--download-state must be idle or active" >&2; exit 64 ;;
 esac
-case "$VOICE_CONDITION" in
+case "$DECLARED_VOICE_CONDITION" in
   inactive|active) ;;
   *) echo "--voice-state must be inactive or active" >&2; exit 64 ;;
 esac
 
 if [[ -z "$OUT_DIR" ]]; then
-  OUT_DIR="$REPO_ROOT/tmp/perf-interaction/$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}-gate"
+  RUN_ID="$(python3 "$HARNESS_HELPER" run-id --pid "$$")"
+  OUT_DIR="$REPO_ROOT/tmp/perf-interaction/${RUN_ID}-${SCENARIO}-gate"
 fi
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+
+perf_lock_acquire "$SERIAL" "$PACKAGE" "$$" "$ORIGINAL_COMMAND"
+echo "[perf-interaction-gate] device lease=$PERF_LOCK_DIR"
 
 summary_paths=()
 for sample_number in 1 2 3; do
@@ -104,9 +131,10 @@ for sample_number in 1 2 3; do
     --serial "$SERIAL"
     --package "$PACKAGE"
     --scenario "$SCENARIO"
-    --runtime-state "$RUNTIME_CONDITION"
-    --download-state "$DOWNLOAD_CONDITION"
-    --voice-state "$VOICE_CONDITION"
+    --runtime-state "$DECLARED_RUNTIME_CONDITION"
+    --download-state "$DECLARED_DOWNLOAD_CONDITION"
+    --voice-state "$DECLARED_VOICE_CONDITION"
+    --lock-token "$PERF_LOCK_TOKEN"
     --out-dir "$sample_dir"
   )
   if [[ "$sample_number" -eq 1 ]]; then

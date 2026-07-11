@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build one truthful Android frame-sample summary from raw device artifacts."""
+"""Build one Android frame summary with observed device and declared workload data."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ from typing import Any, Sequence
 
 class MetadataError(ValueError):
     """Raised when required device metadata cannot be recovered."""
+
+
+DECLARED_CONDITION_SOURCE = "operator-declared-not-observed"
 
 
 def _read(artifact_dir: Path, name: str) -> str:
@@ -80,9 +83,9 @@ def _compilation_state(package_source: str) -> tuple[str, str, bool]:
 def collect_device_state(
     artifact_dir: Path,
     *,
-    runtime_condition: str,
-    download_condition: str,
-    voice_condition: str,
+    declared_runtime_condition: str,
+    declared_download_condition: str,
+    declared_voice_condition: str,
 ) -> dict[str, Any]:
     artifact_dir = Path(artifact_dir)
     properties = _read(artifact_dir, "device-properties.txt")
@@ -116,9 +119,10 @@ def collect_device_state(
         "compilation_filter": compilation_filter,
         "compilation_reason": compilation_reason,
         "compilation_evidence_available": compilation_available,
-        "runtime_condition": runtime_condition,
-        "download_condition": download_condition,
-        "voice_condition": voice_condition,
+        "workload_condition_source": DECLARED_CONDITION_SOURCE,
+        "declared_runtime_condition": declared_runtime_condition,
+        "declared_download_condition": declared_download_condition,
+        "declared_voice_condition": declared_voice_condition,
     }
 
 
@@ -138,11 +142,25 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "installed-apk-path",
         "started-at-utc",
         "completed-at-utc",
-        "runtime-condition",
-        "download-condition",
-        "voice-condition",
     ):
         parser.add_argument(f"--{field}", required=True)
+    # Preserve the established shell CLI while naming the resulting evidence
+    # honestly: these values are operator declarations, not app observations.
+    parser.add_argument(
+        "--runtime-condition",
+        dest="declared_runtime_condition",
+        required=True,
+    )
+    parser.add_argument(
+        "--download-condition",
+        dest="declared_download_condition",
+        required=True,
+    )
+    parser.add_argument(
+        "--voice-condition",
+        dest="declared_voice_condition",
+        required=True,
+    )
     parser.add_argument("--native-runtime-packaged", choices=("true", "null"), required=True)
     parser.add_argument("--debuggable", choices=("true", "false"), required=True)
     parser.add_argument("--total-frames", required=True, type=int)
@@ -158,9 +176,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         device_state = collect_device_state(
             args.artifact_dir,
-            runtime_condition=args.runtime_condition,
-            download_condition=args.download_condition,
-            voice_condition=args.voice_condition,
+            declared_runtime_condition=args.declared_runtime_condition,
+            declared_download_condition=args.declared_download_condition,
+            declared_voice_condition=args.declared_voice_condition,
         )
     except (MetadataError, ValueError) as error:
         print(f"Metadata error: {error}", file=sys.stderr)

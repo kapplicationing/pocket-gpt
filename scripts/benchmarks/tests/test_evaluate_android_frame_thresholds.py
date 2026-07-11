@@ -68,9 +68,10 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
             "compilation_filter": "speed-profile",
             "compilation_reason": "bg-dexopt",
             "compilation_evidence_available": True,
-            "runtime_condition": "unloaded",
-            "download_condition": "idle",
-            "voice_condition": "inactive",
+            "workload_condition_source": "operator-declared-not-observed",
+            "declared_runtime_condition": "unloaded",
+            "declared_download_condition": "idle",
+            "declared_voice_condition": "inactive",
         }
 
     def test_passes_with_three_matching_native_benchmark_samples(self):
@@ -169,13 +170,29 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "device_state"):
             evaluate_samples(self.three_samples(device_state=None))
 
-    def test_rejects_mixed_runtime_download_or_voice_conditions(self):
+    def test_rejects_mixed_declared_runtime_download_or_voice_conditions(self):
         mixed = {
             **self.sample_device_state(),
-            "runtime_condition": "loaded-idle",
+            "declared_runtime_condition": "loaded-idle",
         }
-        with self.assertRaisesRegex(ValidationError, "runtime_condition"):
+        with self.assertRaisesRegex(ValidationError, "declared_runtime_condition"):
             evaluate_samples(self.three_samples(device_state=mixed))
+
+    def test_rejects_legacy_condition_fields_as_observed_truth(self):
+        legacy = {
+            key.replace("declared_", ""): value
+            for key, value in self.sample_device_state().items()
+        }
+        with self.assertRaisesRegex(ValidationError, "declared_runtime_condition"):
+            evaluate_samples(self.three_samples(device_state=legacy))
+
+    def test_rejects_conditions_mislabeled_as_observed(self):
+        mislabeled = {
+            **self.sample_device_state(),
+            "workload_condition_source": "observed",
+        }
+        with self.assertRaisesRegex(ValidationError, "operator declarations"):
+            evaluate_samples(self.three_samples(device_state=mislabeled))
 
     def test_rejects_wrong_sample_count(self):
         with self.assertRaisesRegex(ValidationError, "expected exactly 3 summaries"):
@@ -199,6 +216,7 @@ class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2, msg=result.stderr)
         self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "FAIL")
+        self.assertIn("operator-declared-not-observed", result.stdout)
         self.assertIn("Overall: FAIL", result.stdout)
 
 

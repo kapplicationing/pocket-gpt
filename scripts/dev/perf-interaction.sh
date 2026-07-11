@@ -7,6 +7,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HARNESS_HELPER="$SCRIPT_DIR/android_perf_harness.py"
+source "$SCRIPT_DIR/android-perf-lock.sh"
+
+ORIGINAL_COMMAND="$0"
+for original_arg in "$@"; do
+  ORIGINAL_COMMAND+=" $(printf '%q' "$original_arg")"
+done
 
 SERIAL="${ANDROID_SERIAL:-}"
 PACKAGE="com.pocketagent.android"
@@ -14,9 +21,10 @@ SCENARIO=""
 DO_BUILD=0
 ALLOW_DEBUGGABLE=0
 OUT_DIR=""
-RUNTIME_CONDITION=""
-DOWNLOAD_CONDITION=""
-VOICE_CONDITION=""
+DECLARED_RUNTIME_CONDITION=""
+DECLARED_DOWNLOAD_CONDITION=""
+DECLARED_VOICE_CONDITION=""
+PARENT_LOCK_TOKEN=""
 BUILD_SOURCE="preinstalled-nondebuggable"
 BUILD_VARIANT="unverified-nondebuggable"
 NATIVE_RUNTIME_PACKAGED_JSON="null"
@@ -24,7 +32,21 @@ DEBUGGABLE=0
 STARTED_AT_UTC=""
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-interaction.xml"
 LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-interaction.XXXXXX.xml)"
-trap 'rm -f "$LOCAL_UI_XML"' EXIT
+
+cleanup() {
+  local exit_code=$?
+  rm -f "$LOCAL_UI_XML"
+  if ! perf_lock_release; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      exit_code=73
+    fi
+  fi
+  trap - EXIT
+  exit "$exit_code"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 usage() {
   cat <<EOF
@@ -32,7 +54,9 @@ Usage: $0 --scenario settings-nav|model-sheet|drawer-search --runtime-state unlo
 
 Measures PocketGPT non-generation UI frame stats on the benchmark variant.
 For acceptance evidence, use perf-interaction-gate.sh to capture and evaluate
-three samples. This command captures one diagnostic sample.
+three samples. This command captures one diagnostic sample. The runtime,
+download, and voice flags are operator declarations checked for consistency;
+they are not observed application state.
 EOF
 }
 
@@ -51,15 +75,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --runtime-state)
-      RUNTIME_CONDITION="$2"
+      DECLARED_RUNTIME_CONDITION="$2"
       shift 2
       ;;
     --download-state)
-      DOWNLOAD_CONDITION="$2"
+      DECLARED_DOWNLOAD_CONDITION="$2"
       shift 2
       ;;
     --voice-state)
-      VOICE_CONDITION="$2"
+      DECLARED_VOICE_CONDITION="$2"
       shift 2
       ;;
     --build)
@@ -72,6 +96,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --out-dir)
       OUT_DIR="$2"
+      shift 2
+      ;;
+    --lock-token)
+      PARENT_LOCK_TOKEN="$2"
       shift 2
       ;;
     -h|--help)
@@ -98,21 +126,21 @@ case "$SCENARIO" in
     exit 64
     ;;
 esac
-case "$RUNTIME_CONDITION" in
+case "$DECLARED_RUNTIME_CONDITION" in
   unloaded|loading|loaded-idle) ;;
   *)
     echo "--runtime-state must be unloaded, loading, or loaded-idle" >&2
     exit 64
     ;;
 esac
-case "$DOWNLOAD_CONDITION" in
+case "$DECLARED_DOWNLOAD_CONDITION" in
   idle|active) ;;
   *)
     echo "--download-state must be idle or active" >&2
     exit 64
     ;;
 esac
-case "$VOICE_CONDITION" in
+case "$DECLARED_VOICE_CONDITION" in
   inactive|active) ;;
   *)
     echo "--voice-state must be inactive or active" >&2
@@ -121,10 +149,18 @@ case "$VOICE_CONDITION" in
 esac
 
 if [[ -z "$OUT_DIR" ]]; then
-  OUT_DIR="$REPO_ROOT/tmp/perf-interaction/$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}"
+  RUN_ID="$(python3 "$HARNESS_HELPER" run-id --pid "$$")"
+  OUT_DIR="$REPO_ROOT/tmp/perf-interaction/${RUN_ID}-${SCENARIO}"
 fi
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+
+if [[ -n "$PARENT_LOCK_TOKEN" ]]; then
+  perf_lock_validate "$SERIAL" "$PACKAGE" "$PARENT_LOCK_TOKEN"
+else
+  perf_lock_acquire "$SERIAL" "$PACKAGE" "$$" "$ORIGINAL_COMMAND"
+  echo "[perf-interaction] device lease=$PERF_LOCK_DIR"
+fi
 
 adb_shell() {
   adb -s "$SERIAL" shell "$@"
@@ -139,16 +175,18 @@ wake_and_dismiss_keyguard() {
 
 wait_for_app_foreground() {
   local deadline=$((SECONDS + 30))
-  local focus=""
+  local focus_file="$OUT_DIR/window-focus-launch.txt"
   while (( SECONDS < deadline )); do
-    focus="$(adb_shell dumpsys window 2>/dev/null | grep 'mCurrentFocus' || true)"
-    if grep -q "$PACKAGE" <<<"$focus"; then
+    adb_shell dumpsys window >"$focus_file" 2>&1 || true
+    if python3 "$HARNESS_HELPER" assert-foreground \
+      --window "$focus_file" \
+      --package "$PACKAGE" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
   echo "[perf-interaction] $PACKAGE did not become foreground after launch." >&2
-  printf '%s\n' "$focus" >&2
+  cat "$focus_file" >&2 2>/dev/null || true
   exit 71
 }
 
@@ -159,47 +197,9 @@ dump_ui() {
 
 tag_center_from_dump() {
   local tag="$1"
-  python3 - "$LOCAL_UI_XML" "$tag" <<'PY'
-import re
-import sys
-
-path, tag = sys.argv[1], sys.argv[2]
-try:
-    source = open(path, encoding="utf-8", errors="replace").read()
-except OSError:
-    sys.exit(1)
-
-for node in re.findall(r"<node\b[^>]*>", source):
-    if tag not in node:
-        continue
-    match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
-    if not match:
-        continue
-    left, top, right, bottom = map(int, match.groups())
-    if right <= left or bottom <= top:
-        continue
-    print(f"{(left + right) // 2} {(top + bottom) // 2}")
-    sys.exit(0)
-
-if tag in {
-    "composer_input",
-    "completion_system_prompt_input",
-    "model_search_input",
-    "session_search_input",
-}:
-    for node in re.findall(r"<node\b[^>]*>", source):
-        if 'class="android.widget.EditText"' not in node:
-            continue
-        match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
-        if not match:
-            continue
-        left, top, right, bottom = map(int, match.groups())
-        if right <= left or bottom <= top:
-            continue
-        print(f"{(left + right) // 2} {(top + bottom) // 2}")
-        sys.exit(0)
-sys.exit(1)
-PY
+  python3 "$HARNESS_HELPER" center \
+    --xml "$LOCAL_UI_XML" \
+    --resource-id "$tag"
 }
 
 wait_tag() {
@@ -282,6 +282,78 @@ type_text_slowly() {
   done
 }
 
+clear_text_field() {
+  local tag="$1"
+  local text_length=""
+  local cleared_length=""
+  local i=0
+  local keycodes=()
+
+  dump_ui || {
+    echo "[perf-interaction] failed to inspect text field before clearing: $tag" >&2
+    exit 70
+  }
+  text_length="$(python3 "$HARNESS_HELPER" text-length \
+    --xml "$LOCAL_UI_XML" \
+    --resource-id "$tag")"
+  if ! [[ "$text_length" =~ ^[0-9]+$ ]] || (( text_length > 4096 )); then
+    echo "[perf-interaction] invalid text length for $tag: $text_length" >&2
+    exit 70
+  fi
+  if (( text_length == 0 )); then
+    return 0
+  fi
+
+  adb_shell input keyevent KEYCODE_MOVE_END >/dev/null
+  for (( i = 0; i < text_length; i++ )); do
+    keycodes+=(KEYCODE_DEL)
+    if (( ${#keycodes[@]} == 64 || i + 1 == text_length )); then
+      adb_shell input keyevent "${keycodes[@]}" >/dev/null
+      keycodes=()
+    fi
+  done
+  sleep 1
+  dump_ui || {
+    echo "[perf-interaction] failed to inspect text field after clearing: $tag" >&2
+    exit 70
+  }
+  cleared_length="$(python3 "$HARNESS_HELPER" text-length \
+    --xml "$LOCAL_UI_XML" \
+    --resource-id "$tag")"
+  if [[ "$cleared_length" != "0" ]]; then
+    echo "[perf-interaction] $tag did not clear exactly; remaining length=$cleared_length" >&2
+    exit 70
+  fi
+}
+
+prepare_scenario_input() {
+  case "$SCENARIO" in
+    settings-nav)
+      tap_tag "completion_settings_button"
+      ;;
+    model-sheet)
+      tap_tag "open_model_library"
+      ;;
+    drawer-search)
+      tap_tag "session_drawer_button"
+      ;;
+  esac
+  tap_tag "$FINAL_INPUT_TAG"
+  clear_text_field "$FINAL_INPUT_TAG"
+  adb_shell input keyevent KEYCODE_BACK >/dev/null
+  sleep 1
+  adb_shell input keyevent KEYCODE_BACK >/dev/null
+  sleep 1
+
+  # Relaunch after preconditioning so every measured journey starts from the
+  # same chat surface with an empty target, including persisted system prompts.
+  adb_shell am force-stop "$PACKAGE" >/dev/null
+  adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
+  wait_for_app_foreground
+  wait_tag "composer_input"
+  sleep 1
+}
+
 capture_device_state_snapshot() {
   local phase="$1"
   adb_shell dumpsys display >"$OUT_DIR/display-${phase}.txt" 2>&1 || true
@@ -321,12 +393,13 @@ fi
 
 PACKAGE_DUMP="$(adb -s "$SERIAL" shell dumpsys package "$PACKAGE" 2>/dev/null || true)"
 printf '%s\n' "$PACKAGE_DUMP" >"$OUT_DIR/package-dump.txt"
+adb -s "$SERIAL" shell pm path "$PACKAGE" >"$OUT_DIR/package-paths.txt" 2>&1 || true
 INSTALLED_FLAGS="$(awk '/pkgFlags=/ {print; exit}' <<<"$PACKAGE_DUMP")"
 if [[ -z "$INSTALLED_FLAGS" ]]; then
   echo "[perf-interaction] $PACKAGE is not installed on $SERIAL. Re-run with --build or install manually." >&2
   exit 67
 fi
-if echo "$INSTALLED_FLAGS" | grep -q DEBUGGABLE; then
+if echo "$INSTALLED_FLAGS" | grep -Eq '(^|[^[:alnum:]_])DEBUGGABLE([^[:alnum:]_]|$)'; then
   DEBUGGABLE=1
   if [[ "$ALLOW_DEBUGGABLE" -eq 1 ]]; then
     BUILD_SOURCE="debuggable-allowed"
@@ -339,24 +412,34 @@ fi
 VERSION_CODE="$(sed -n 's/.*versionCode=\([^ ]*\).*/\1/p' <<<"$PACKAGE_DUMP" | head -n 1 | tr -d '\r')"
 VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName=//p' <<<"$PACKAGE_DUMP" | head -n 1 | tr -d '\r')"
 LAST_UPDATE_TIME="$(sed -n 's/^[[:space:]]*lastUpdateTime=//p' <<<"$PACKAGE_DUMP" | head -n 1 | tr -d '\r')"
-INSTALLED_APK_PATH="$(adb -s "$SERIAL" shell pm path "$PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1 | tr -d '\r')"
+INSTALLED_APK_PATH="$(sed -n 's/^package://p' "$OUT_DIR/package-paths.txt" | head -n 1 | tr -d '\r')"
 if [[ -z "$VERSION_CODE" || -z "$VERSION_NAME" || -z "$LAST_UPDATE_TIME" || -z "$INSTALLED_APK_PATH" ]]; then
   echo "[perf-interaction] failed to read stable package identity for $PACKAGE on $SERIAL" >&2
   exit 67
 fi
+python3 "$HARNESS_HELPER" assert-package-stable \
+  --before-dump "$OUT_DIR/package-dump.txt" \
+  --before-paths "$OUT_DIR/package-paths.txt" \
+  --after-dump "$OUT_DIR/package-dump.txt" \
+  --after-paths "$OUT_DIR/package-paths.txt" \
+  >"$OUT_DIR/package-identity-before.json"
 
 adb_shell getprop >"$OUT_DIR/device-properties.txt" 2>&1 || true
-printf 'runtime_condition=%s\ndownload_condition=%s\nvoice_condition=%s\n' \
-  "$RUNTIME_CONDITION" "$DOWNLOAD_CONDITION" "$VOICE_CONDITION" \
+printf 'declared_runtime_condition=%s\ndeclared_download_condition=%s\ndeclared_voice_condition=%s\n' \
+  "$DECLARED_RUNTIME_CONDITION" "$DECLARED_DOWNLOAD_CONDITION" "$DECLARED_VOICE_CONDITION" \
   >"$OUT_DIR/declared-conditions.txt"
-STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-capture_device_state_snapshot before
+IFS=$'\t' read -r FINAL_INPUT_TAG FINAL_INPUT_TEXT < <(
+  python3 "$HARNESS_HELPER" scenario-state --scenario "$SCENARIO"
+)
 wake_and_dismiss_keyguard
 adb_shell am force-stop "$PACKAGE" >/dev/null
 adb_shell am start -n "$PACKAGE/.MainActivity" >/dev/null
 wait_for_app_foreground
 wait_tag "composer_input"
 sleep 1
+prepare_scenario_input
+STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+capture_device_state_snapshot before
 adb_shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null
 
 case "$SCENARIO" in
@@ -368,31 +451,75 @@ case "$SCENARIO" in
     adb_shell input keyevent KEYCODE_BACK >/dev/null
     sleep 1
     tap_tag "completion_settings_button"
-    tap_tag "completion_system_prompt_input"
-    type_text_slowly "SmoothSettingsProbe"
+    tap_tag "$FINAL_INPUT_TAG"
+    clear_text_field "$FINAL_INPUT_TAG"
+    type_text_slowly "$FINAL_INPUT_TEXT"
     adb_shell input keyevent KEYCODE_BACK >/dev/null
     ;;
   model-sheet)
     tap_tag "open_model_library"
-    tap_tag "model_search_input"
-    type_text_slowly "qwen"
+    tap_tag "$FINAL_INPUT_TAG"
+    clear_text_field "$FINAL_INPUT_TAG"
+    type_text_slowly "$FINAL_INPUT_TEXT"
     adb_shell input swipe 500 1700 500 650 500 >/dev/null
     ;;
   drawer-search)
     tap_tag "session_drawer_button"
-    tap_tag "session_search_input"
-    type_text_slowly "chat"
+    tap_tag "$FINAL_INPUT_TAG"
+    clear_text_field "$FINAL_INPUT_TAG"
+    type_text_slowly "$FINAL_INPUT_TEXT"
     adb_shell input swipe 500 1700 500 650 500 >/dev/null
     ;;
 esac
 
 sleep 2
 capture_device_state_snapshot after
+dump_ui || {
+  echo "[perf-interaction] failed to capture final UI hierarchy" >&2
+  exit 70
+}
+cp "$LOCAL_UI_XML" "$OUT_DIR/final-ui.xml"
+python3 "$HARNESS_HELPER" assert-scenario-final \
+  --xml "$OUT_DIR/final-ui.xml" \
+  --scenario "$SCENARIO"
+
+adb -s "$SERIAL" shell dumpsys package "$PACKAGE" >"$OUT_DIR/package-dump-after.txt" 2>&1 || true
+adb -s "$SERIAL" shell pm path "$PACKAGE" >"$OUT_DIR/package-paths-after.txt" 2>&1 || true
+python3 "$HARNESS_HELPER" assert-package-stable \
+  --before-dump "$OUT_DIR/package-dump.txt" \
+  --before-paths "$OUT_DIR/package-paths.txt" \
+  --after-dump "$OUT_DIR/package-dump-after.txt" \
+  --after-paths "$OUT_DIR/package-paths-after.txt" \
+  >"$OUT_DIR/package-identity-after.json"
+
+adb_shell dumpsys window >"$OUT_DIR/window-focus-after.txt" 2>&1 || true
+python3 "$HARNESS_HELPER" assert-foreground \
+  --window "$OUT_DIR/window-focus-after.txt" \
+  --package "$PACKAGE" \
+  >"$OUT_DIR/window-focus-after.json"
+
 RAW_DUMP="$OUT_DIR/gfxinfo.txt"
 gfxinfo_dump >"$RAW_DUMP" || {
   echo "[perf-interaction] failed to dump gfxinfo" >&2
   exit 65
 }
+
+# Revalidate again after gfxinfo so an external launcher steal or reinstall
+# during the dump cannot make cached frame data look like an accepted journey.
+adb -s "$SERIAL" shell dumpsys package "$PACKAGE" >"$OUT_DIR/package-dump-post-gfxinfo.txt" 2>&1 || true
+adb -s "$SERIAL" shell pm path "$PACKAGE" >"$OUT_DIR/package-paths-post-gfxinfo.txt" 2>&1 || true
+python3 "$HARNESS_HELPER" assert-package-stable \
+  --before-dump "$OUT_DIR/package-dump.txt" \
+  --before-paths "$OUT_DIR/package-paths.txt" \
+  --after-dump "$OUT_DIR/package-dump-post-gfxinfo.txt" \
+  --after-paths "$OUT_DIR/package-paths-post-gfxinfo.txt" \
+  >"$OUT_DIR/package-identity-post-gfxinfo.json"
+
+adb_shell dumpsys window >"$OUT_DIR/window-focus-post-gfxinfo.txt" 2>&1 || true
+python3 "$HARNESS_HELPER" assert-foreground \
+  --window "$OUT_DIR/window-focus-post-gfxinfo.txt" \
+  --package "$PACKAGE" \
+  >"$OUT_DIR/window-focus-post-gfxinfo.json"
 
 JANKY="$(parse_metric janky "$RAW_DUMP")"
 P50="$(parse_metric p50 "$RAW_DUMP")"
@@ -435,9 +562,9 @@ python3 "$SCRIPT_DIR/build_android_perf_summary.py" \
   --installed-apk-path "$INSTALLED_APK_PATH" \
   --started-at-utc "$STARTED_AT_UTC" \
   --completed-at-utc "$COMPLETED_AT_UTC" \
-  --runtime-condition "$RUNTIME_CONDITION" \
-  --download-condition "$DOWNLOAD_CONDITION" \
-  --voice-condition "$VOICE_CONDITION" \
+  --runtime-condition "$DECLARED_RUNTIME_CONDITION" \
+  --download-condition "$DECLARED_DOWNLOAD_CONDITION" \
+  --voice-condition "$DECLARED_VOICE_CONDITION" \
   --total-frames "$TOTAL_FRAMES" \
   --janky-pct "$JANKY" \
   --p50-ms "$P50" \

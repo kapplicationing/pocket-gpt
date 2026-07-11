@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and evaluate three Android frame-performance samples."""
+"""Validate frame samples and consistency-check declared workload conditions."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from typing import Any, Sequence
 EXPECTED_SAMPLE_COUNT = 3
 MINIMUM_FRAME_COUNT = 20
 DEFAULT_PACKAGE = "com.pocketagent.android"
+DECLARED_CONDITION_SOURCE = "operator-declared-not-observed"
 SUPPORTED_SCENARIOS = {"settings-nav", "model-sheet", "drawer-search"}
 METRIC_THRESHOLDS = {
     "janky_pct": 20.0,
@@ -30,9 +31,9 @@ BUILD_IDENTITY_FIELDS = (
     "installed_apk_path",
 )
 ALLOWED_BUILD_SOURCES = {"assembled-native-benchmark", "preinstalled-nondebuggable"}
-ALLOWED_RUNTIME_CONDITIONS = {"unloaded", "loading", "loaded-idle"}
-ALLOWED_DOWNLOAD_CONDITIONS = {"idle", "active"}
-ALLOWED_VOICE_CONDITIONS = {"inactive", "active"}
+ALLOWED_DECLARED_RUNTIME_CONDITIONS = {"unloaded", "loading", "loaded-idle"}
+ALLOWED_DECLARED_DOWNLOAD_CONDITIONS = {"idle", "active"}
+ALLOWED_DECLARED_VOICE_CONDITIONS = {"inactive", "active"}
 DEVICE_IDENTITY_FIELDS = ("manufacturer", "model", "android_release", "api_level")
 DEVICE_CONDITION_FIELDS = (
     "refresh_rate_hz",
@@ -41,9 +42,10 @@ DEVICE_CONDITION_FIELDS = (
     "compilation_filter",
     "compilation_reason",
     "compilation_evidence_available",
-    "runtime_condition",
-    "download_condition",
-    "voice_condition",
+    "workload_condition_source",
+    "declared_runtime_condition",
+    "declared_download_condition",
+    "declared_voice_condition",
 )
 
 
@@ -165,10 +167,18 @@ def _validate_device_state(state: dict[str, Any], path: Path) -> dict[str, Any]:
     validated["compilation_reason"] = compilation_reason
     validated["compilation_evidence_available"] = compilation_available
 
+    condition_source = _required_text(state, "workload_condition_source", path)
+    if condition_source != DECLARED_CONDITION_SOURCE:
+        raise ValidationError(
+            f"{path}: workload conditions must be labeled as operator declarations, "
+            f"observed {condition_source!r}"
+        )
+    validated["workload_condition_source"] = condition_source
+
     allowed_conditions = {
-        "runtime_condition": ALLOWED_RUNTIME_CONDITIONS,
-        "download_condition": ALLOWED_DOWNLOAD_CONDITIONS,
-        "voice_condition": ALLOWED_VOICE_CONDITIONS,
+        "declared_runtime_condition": ALLOWED_DECLARED_RUNTIME_CONDITIONS,
+        "declared_download_condition": ALLOWED_DECLARED_DOWNLOAD_CONDITIONS,
+        "declared_voice_condition": ALLOWED_DECLARED_VOICE_CONDITIONS,
     }
     for field, allowed in allowed_conditions.items():
         value = _required_text(state, field, path)
@@ -347,6 +357,10 @@ def _print_report(report: dict[str, Any]) -> None:
     print(
         f"scenario={report['scenario']} serial={report['serial']} "
         f"samples={report['sample_count']} build={report['build_variant']}"
+    )
+    print(
+        "workload_conditions="
+        f"{report['device_state']['workload_condition_source']}"
     )
     for check in report["checks"]:
         print(

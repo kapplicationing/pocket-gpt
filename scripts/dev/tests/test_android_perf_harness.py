@@ -30,6 +30,7 @@ from android_perf_harness import (  # noqa: E402
     node_text_length,
     redacted_selector_inventory,
     run_id,
+    translated_node_center,
 )
 
 
@@ -66,6 +67,127 @@ class AndroidPerfHarnessTest(unittest.TestCase):
 
         with self.assertRaisesRegex(HarnessValidationError, "model_search_input"):
             find_node_center(source, "model_search_input")
+
+    def test_translated_center_maps_local_root_through_app_screen_offset(self):
+        source = self.geometry_hierarchy(
+            root_bounds="[0,0][1080,2273]",
+            target_bounds="[900,100][1014,246]",
+        )
+
+        self.assertEqual(
+            translated_node_center(
+                source,
+                self.geometry_window(
+                    "[0,88][1080,2361]",
+                    "[0,88][1080,2361]",
+                ),
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            ),
+            (957, 261),
+        )
+
+    def test_translated_center_preserves_already_absolute_root_coordinates(self):
+        source = self.geometry_hierarchy(
+            root_bounds="[0,88][1080,2361]",
+            target_bounds="[900,188][1014,334]",
+        )
+
+        self.assertEqual(
+            translated_node_center(
+                source,
+                self.geometry_window("[0,88][1080,2361]"),
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            ),
+            (957, 261),
+        )
+
+    def test_translated_center_handles_independent_x_and_y_origins(self):
+        source = self.geometry_hierarchy(
+            root_bounds="[10,20][1010,2020]",
+            target_bounds="[110,220][210,320]",
+        )
+
+        self.assertEqual(
+            translated_node_center(
+                source,
+                self.geometry_window("[100,200][1100,2200]"),
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            ),
+            (250, 450),
+        )
+
+    def test_translated_center_rejects_viewport_dimension_mismatch(self):
+        source = self.geometry_hierarchy(
+            root_bounds="[0,0][100,100]",
+            target_bounds="[10,10][20,20]",
+        )
+
+        with self.assertRaisesRegex(HarnessValidationError, "dimensions do not match"):
+            translated_node_center(
+                source,
+                self.geometry_window("[0,10][100,111]"),
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            )
+
+    def test_translated_center_rejects_missing_or_ambiguous_app_bounds(self):
+        source = self.geometry_hierarchy(
+            root_bounds="[0,0][100,100]",
+            target_bounds="[10,10][20,20]",
+        )
+        foreground = self.geometry_window()
+
+        with self.assertRaisesRegex(HarnessValidationError, "no non-null mAppBounds"):
+            translated_node_center(
+                source,
+                foreground,
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            )
+
+        with self.assertRaisesRegex(HarnessValidationError, "ambiguous mAppBounds"):
+            translated_node_center(
+                source,
+                foreground
+                + "mAppBounds=Rect(0, 0 - 100, 100)\n"
+                + "mAppBounds=Rect(0, 1 - 100, 101)\n",
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            )
+
+    def test_translated_center_keeps_exact_resource_id_semantics(self):
+        source = self.geometry_hierarchy(
+            root_bounds="[0,0][100,100]",
+            target_bounds="[10,20][30,40]",
+            resource_id=(
+                "com.pocketagent.android.benchmark:id/advanced_sheet_button"
+            ),
+            sibling=(
+                '<node resource-id="advanced_sheet_button_extra" '
+                'bounds="[50,50][70,70]" />'
+            ),
+        )
+        window = self.geometry_window("[0,0][100,100]")
+
+        self.assertEqual(
+            translated_node_center(
+                source,
+                window,
+                "com.pocketagent.android.benchmark",
+                "advanced_sheet_button",
+            ),
+            (20, 30),
+        )
+        with self.assertRaisesRegex(HarnessValidationError, "missing_button"):
+            translated_node_center(
+                source,
+                window,
+                "com.pocketagent.android.benchmark",
+                "missing_button",
+            )
 
     def test_scenario_final_state_requires_exact_destination_and_value(self):
         source = self.fixture("ui-selector-similar.xml")
@@ -295,6 +417,33 @@ class AndroidPerfHarnessTest(unittest.TestCase):
         return (
             '<hierarchy><node resource-id="completion_system_prompt_input" '
             f'text="{encoded}" bounds="[0,0][100,100]" /></hierarchy>'
+        )
+
+    @staticmethod
+    def geometry_hierarchy(
+        *,
+        root_bounds: str,
+        target_bounds: str,
+        resource_id: str = "advanced_sheet_button",
+        sibling: str = "",
+    ) -> str:
+        return (
+            f'<hierarchy><node bounds="{root_bounds}">'
+            f'<node resource-id="{resource_id}" bounds="{target_bounds}" />'
+            f"{sibling}</node></hierarchy>"
+        )
+
+    @staticmethod
+    def geometry_window(*app_bounds: str) -> str:
+        package = "com.pocketagent.android.benchmark"
+        bounds = "".join(
+            f"mAppBounds=Rect({value[1:-1].replace('][', ' - ')})\n"
+            for value in app_bounds
+        )
+        return (
+            f"mCurrentFocus=Window{{abc u0 {package}/com.pocketagent.android.MainActivity}}\n"
+            f"mFocusedApp=ActivityRecord{{def u0 {package}/com.pocketagent.android.MainActivity}}\n"
+            f"{bounds}"
         )
 
     @staticmethod

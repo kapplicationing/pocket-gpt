@@ -38,6 +38,7 @@ BENCHMARK_INSTALLED_BY_THIS_RUN=0
 STARTED_AT_UTC=""
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-interaction.xml"
 LOCAL_UI_XML=""
+TAP_GEOMETRY_WINDOW=""
 SETTINGS_PROMPT_BEFORE_XML=""
 SETTINGS_PROMPT_RESTORED_XML=""
 
@@ -55,6 +56,7 @@ cleanup() {
   fi
   for temp_path in \
     "$LOCAL_UI_XML" \
+    "$TAP_GEOMETRY_WINDOW" \
     "$SETTINGS_PROMPT_BEFORE_XML" \
     "$SETTINGS_PROMPT_RESTORED_XML"; do
     [[ -z "$temp_path" ]] || rm -f "$temp_path"
@@ -79,6 +81,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-interaction.XXXXXX.xml)"
+TAP_GEOMETRY_WINDOW="$(mktemp -t pocketgpt-perf-tap-geometry.XXXXXX.txt)"
 SETTINGS_PROMPT_BEFORE_XML="$(mktemp -t pocketgpt-settings-prompt-before.XXXXXX.xml)"
 SETTINGS_PROMPT_RESTORED_XML="$(mktemp -t pocketgpt-settings-prompt-restored.XXXXXX.xml)"
 
@@ -226,6 +229,7 @@ wait_for_app_foreground() {
     if python3 "$HARNESS_HELPER" assert-foreground \
       --window "$focus_file" \
       --package "$PACKAGE" >"$proof_file" 2>/dev/null; then
+      cp "$focus_file" "$TAP_GEOMETRY_WINDOW"
       return 0
     fi
     sleep 1
@@ -255,6 +259,16 @@ tag_center_from_dump() {
     --resource-id "$tag"
 }
 
+translated_tag_center_from_dump() {
+  local tag="$1"
+  adb_shell dumpsys window >"$TAP_GEOMETRY_WINDOW" 2>&1 || return 1
+  python3 "$HARNESS_HELPER" translated-center \
+    --xml "$LOCAL_UI_XML" \
+    --window "$TAP_GEOMETRY_WINDOW" \
+    --package "$PACKAGE" \
+    --resource-id "$tag"
+}
+
 wait_tag() {
   local tag="$1"
   local deadline=$((SECONDS + 30))
@@ -279,7 +293,7 @@ tap_tag() {
   local coords=""
   while (( SECONDS < deadline )); do
     if dump_ui; then
-      coords="$(tag_center_from_dump "$tag" || true)"
+      coords="$(translated_tag_center_from_dump "$tag" || true)"
       if [[ -n "$coords" ]]; then
         read -r x y <<<"$coords"
         adb_shell input tap "$x" "$y" >/dev/null
@@ -424,7 +438,7 @@ prepare_fresh_install_state() {
         adb_shell am force-stop "$PACKAGE" >/dev/null
         return 0
       fi
-      coords="$(tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
+      coords="$(translated_tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
       if [[ -n "$coords" ]]; then
         read -r x y <<<"$coords"
         adb_shell input tap "$x" "$y" >/dev/null

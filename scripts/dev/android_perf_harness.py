@@ -20,7 +20,11 @@ SCENARIO_FINAL_STATES = {
     "model-sheet": ("model_search_input", "qwen"),
     "drawer-search": ("session_search_input", "chat"),
 }
-BOUNDS_PATTERN = re.compile(r"^\[(\d+),(\d+)]\[(\d+),(\d+)]$")
+BOUNDS_PATTERN = re.compile(r"^\[(-?\d+),(-?\d+)]\[(-?\d+),(-?\d+)]$")
+APP_BOUNDS_PATTERN = re.compile(
+    r"mAppBounds=Rect\(\s*(-?\d+)\s*,\s*(-?\d+)\s*-\s*"
+    r"(-?\d+)\s*,\s*(-?\d+)\s*\)"
+)
 PACKAGE_QUALIFIED_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*:id/(.+)$")
 COMPONENT_PATTERN = re.compile(
     r"(?:^|\s)([A-Za-z][A-Za-z0-9_.]*)/([A-Za-z0-9_.$]+)(?:\s|}|$)"
@@ -47,6 +51,27 @@ class DexoptState:
     abi: str
     status: str
     reason: str
+
+
+@dataclass(frozen=True)
+class ScreenRect:
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+    @property
+    def width(self) -> int:
+        return self.right - self.left
+
+    @property
+    def height(self) -> int:
+        return self.bottom - self.top
+
+    def require_positive(self, label: str) -> ScreenRect:
+        if self.width <= 0 or self.height <= 0:
+            raise HarnessValidationError(f"{label} has non-positive bounds: {self!r}")
+        return self
 
 
 def _parse_ui(source: str) -> ElementTree.Element:
@@ -78,15 +103,84 @@ def _find_exact_node(source: str, resource_id: str) -> ElementTree.Element:
     return matches[0]
 
 
-def find_node_center(source: str, resource_id: str) -> tuple[int, int]:
-    node = _find_exact_node(source, resource_id)
-    match = BOUNDS_PATTERN.fullmatch(node.attrib.get("bounds", ""))
+def _parse_bounds(raw_bounds: str, label: str) -> ScreenRect:
+    match = BOUNDS_PATTERN.fullmatch(raw_bounds)
     if not match:
-        raise HarnessValidationError(f"exact resource-id {resource_id!r} has invalid bounds")
-    left, top, right, bottom = map(int, match.groups())
-    if right <= left or bottom <= top:
-        raise HarnessValidationError(f"exact resource-id {resource_id!r} has empty bounds")
-    return (left + right) // 2, (top + bottom) // 2
+        raise HarnessValidationError(f"{label} has invalid bounds")
+    return ScreenRect(*map(int, match.groups())).require_positive(label)
+
+
+def _node_bounds(source: str, resource_id: str) -> ScreenRect:
+    node = _find_exact_node(source, resource_id)
+    return _parse_bounds(
+        node.attrib.get("bounds", ""),
+        f"exact resource-id {resource_id!r}",
+    )
+
+
+def find_node_center(source: str, resource_id: str) -> tuple[int, int]:
+    bounds = _node_bounds(source, resource_id)
+    return (bounds.left + bounds.right) // 2, (bounds.top + bounds.bottom) // 2
+
+
+def _ui_root_bounds(source: str) -> ScreenRect:
+    root_nodes = list(_parse_ui(source).findall("./node"))
+    if len(root_nodes) != 1:
+        raise HarnessValidationError(
+            f"expected exactly one UI root node, found {len(root_nodes)}"
+        )
+    return _parse_bounds(root_nodes[0].attrib.get("bounds", ""), "UI root")
+
+
+def _app_bounds(source: str) -> ScreenRect:
+    candidates = {
+        ScreenRect(*map(int, match)).require_positive("app viewport")
+        for match in APP_BOUNDS_PATTERN.findall(source)
+    }
+    if not candidates:
+        raise HarnessValidationError("current window dump has no non-null mAppBounds")
+    if len(candidates) != 1:
+        raise HarnessValidationError(
+            f"current window dump has ambiguous mAppBounds: {sorted(candidates, key=repr)!r}"
+        )
+    return next(iter(candidates))
+
+
+def translated_node_center(
+    ui_source: str,
+    window_source: str,
+    package: str,
+    resource_id: str,
+) -> tuple[int, int]:
+    """Translate a UI-hierarchy-local node center into adb screen coordinates."""
+    assert_foreground(window_source, package)
+    root = _ui_root_bounds(ui_source)
+    app = _app_bounds(window_source)
+    if (root.width, root.height) != (app.width, app.height):
+        raise HarnessValidationError(
+            "UI root and app viewport dimensions do not match: "
+            f"root={root.width}x{root.height}, app={app.width}x{app.height}"
+        )
+
+    target = _node_bounds(ui_source, resource_id)
+    if (
+        target.left < root.left
+        or target.top < root.top
+        or target.right > root.right
+        or target.bottom > root.bottom
+    ):
+        raise HarnessValidationError(
+            f"exact resource-id {resource_id!r} lies outside the UI root viewport"
+        )
+    local_x = (target.left + target.right) // 2 - root.left
+    local_y = (target.top + target.bottom) // 2 - root.top
+    screen_x = local_x + app.left
+    screen_y = local_y + app.top
+    if not (app.left <= screen_x < app.right and app.top <= screen_y < app.bottom):
+        raise HarnessValidationError(
+            f"translated center for exact resource-id {resource_id!r} is outside app bounds"
+        )
+    return screen_x, screen_y
 
 
 def node_text_length(source: str, resource_id: str) -> int:
@@ -407,6 +501,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     center.add_argument("--xml", required=True, type=Path)
     center.add_argument("--resource-id", required=True)
 
+    translated_center = subparsers.add_parser("translated-center")
+    translated_center.add_argument("--xml", required=True, type=Path)
+    translated_center.add_argument("--window", required=True, type=Path)
+    translated_center.add_argument("--package", required=True)
+    translated_center.add_argument("--resource-id", required=True)
+
     text_length = subparsers.add_parser("text-length")
     text_length.add_argument("--xml", required=True, type=Path)
     text_length.add_argument("--resource-id", required=True)
@@ -469,6 +569,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "center":
             x, y = find_node_center(_read(args.xml), args.resource_id)
+            print(f"{x} {y}")
+        elif args.command == "translated-center":
+            x, y = translated_node_center(
+                _read(args.xml),
+                _read(args.window),
+                args.package,
+                args.resource_id,
+            )
             print(f"{x} {y}")
         elif args.command == "text-length":
             print(node_text_length(_read(args.xml), args.resource_id))

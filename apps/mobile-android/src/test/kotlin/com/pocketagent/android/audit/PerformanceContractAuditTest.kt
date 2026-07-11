@@ -458,6 +458,28 @@ class PerformanceContractAuditTest {
     }
 
     @Test
+    fun rawBenchmarkTapsTranslateThroughCurrentAppViewport() {
+        val interaction = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
+        val typing = resolveRepoSource("scripts/dev/perf-baseline.sh").readText()
+        val harness = resolveRepoSource("scripts/dev/android_perf_harness.py").readText()
+
+        assertTrue(
+            "translated-center" in interaction &&
+                "--window \"\$TAP_GEOMETRY_WINDOW\"" in interaction &&
+                "--package \"\$PACKAGE\"" in interaction &&
+                "translated-center" in typing &&
+                "--window \"\$TAP_GEOMETRY_WINDOW\"" in typing &&
+                "--package \"\$PACKAGE\"" in typing &&
+                "assert_foreground(window_source, package)" in harness &&
+                "mAppBounds=Rect" in harness &&
+                "root.width, root.height" in harness &&
+                "target.left < root.left" in harness &&
+                "composer_center_from_dump" !in typing,
+            "Raw benchmark taps must translate exact UI-root coordinates through a current, exact-package app viewport and reject mismatched geometry.",
+        )
+    }
+
+    @Test
     fun `native benchmark CI proves application id native library and baseline profile`() {
         val workflow = resolveRepoSource(".github/workflows/ci.yml").readText()
         val filters = workflow.substringAfter("filters: |")

@@ -25,8 +25,9 @@ internal sealed interface RuntimeInstallPreflight {
 /**
  * Serializes production runtime installation on an already-background caller.
  *
- * The candidate and installed fingerprint are both read after ownership is acquired. Therefore a
- * waiter coalesces with the completed owner instead of building a second facade from a stale read.
+ * The candidate and installed fingerprint are both read after ownership is acquired. Preflight
+ * cleanup runs before fingerprint coalescence so returning to an installed fingerprint cannot
+ * strand a delegate retained by a failed intervening replacement.
  */
 internal class RuntimeInstallSingleFlight {
     private val owner = ReentrantLock()
@@ -48,15 +49,15 @@ internal class RuntimeInstallSingleFlight {
                 return@withLock RuntimeInstallOutcome.Skipped
             }
             val candidate = readCandidate()
-            if (candidate.fingerprint == readInstalledFingerprint()) {
-                onCoalesced(candidate.payload)
-                return@withLock RuntimeInstallOutcome.Coalesced
-            }
             when (val readiness = preflight(candidate.payload)) {
                 RuntimeInstallPreflight.Ready -> Unit
                 is RuntimeInstallPreflight.Deferred -> {
                     return@withLock RuntimeInstallOutcome.Deferred(readiness.detail)
                 }
+            }
+            if (candidate.fingerprint == readInstalledFingerprint()) {
+                onCoalesced(candidate.payload)
+                return@withLock RuntimeInstallOutcome.Coalesced
             }
             val delegate = build(candidate.payload)
             val replacement = replace(candidate.payload, delegate)

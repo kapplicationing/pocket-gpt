@@ -3,6 +3,7 @@ package com.pocketagent.android
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
@@ -82,6 +83,77 @@ class RuntimeInstallSingleFlightTest {
             releaseBuild.countDown()
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun `returning to installed fingerprint retries retained cleanup before coalescing`() {
+        val coordinator = RuntimeInstallSingleFlight()
+        val installedFingerprint = AtomicReference<String?>("fingerprint-f")
+        val candidateFingerprint = AtomicReference("fingerprint-g")
+        val retainedCleanupPending = AtomicBoolean(false)
+        val allowRetainedCleanup = AtomicBoolean(false)
+        val cleanupAttempts = AtomicInteger(0)
+        val builds = AtomicInteger(0)
+        val replacements = AtomicInteger(0)
+        val coalesced = AtomicInteger(0)
+
+        fun install(): RuntimeInstallOutcome {
+            return coordinator.install(
+                shouldInstall = { true },
+                readCandidate = {
+                    RuntimeInstallCandidate(
+                        fingerprint = candidateFingerprint.get(),
+                        payload = "graph",
+                    )
+                },
+                readInstalledFingerprint = installedFingerprint::get,
+                preflight = {
+                    if (!retainedCleanupPending.get()) {
+                        RuntimeInstallPreflight.Ready
+                    } else {
+                        cleanupAttempts.incrementAndGet()
+                        if (allowRetainedCleanup.get()) {
+                            retainedCleanupPending.set(false)
+                            RuntimeInstallPreflight.Ready
+                        } else {
+                            RuntimeInstallPreflight.Deferred("retained-g-cleanup-pending")
+                        }
+                    }
+                },
+                build = {
+                    builds.incrementAndGet()
+                    "delegate-${candidateFingerprint.get()}"
+                },
+                replace = { _, _ ->
+                    replacements.incrementAndGet()
+                    retainedCleanupPending.set(true)
+                    RuntimeReplacementResult.rejected("G_CLOSE_REJECTED")
+                },
+                finalizePublished = { _, _ -> error("rejected G must not finalize") },
+                commitFingerprint = installedFingerprint::set,
+                onCoalesced = { coalesced.incrementAndGet() },
+            )
+        }
+
+        assertIs<RuntimeInstallOutcome.Rejected>(install())
+        assertEquals("fingerprint-f", installedFingerprint.get())
+        assertEquals(1, builds.get())
+        assertEquals(1, replacements.get())
+
+        candidateFingerprint.set("fingerprint-f")
+        val deferredF = assertIs<RuntimeInstallOutcome.Deferred>(install())
+        assertEquals("retained-g-cleanup-pending", deferredF.detail)
+        assertEquals(1, cleanupAttempts.get())
+        assertEquals(0, coalesced.get())
+        assertEquals(1, builds.get(), "cleanup deferral must not build another delegate")
+
+        allowRetainedCleanup.set(true)
+        assertIs<RuntimeInstallOutcome.Coalesced>(install())
+        assertEquals(2, cleanupAttempts.get())
+        assertFalse(retainedCleanupPending.get())
+        assertEquals(1, coalesced.get())
+        assertEquals(1, builds.get(), "cleanup retry followed by coalescence must not rebuild F")
+        assertEquals(1, replacements.get())
     }
 
     @Test

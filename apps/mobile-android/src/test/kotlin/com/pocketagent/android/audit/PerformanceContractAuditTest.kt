@@ -458,11 +458,16 @@ class PerformanceContractAuditTest {
     @Test
     fun `native benchmark CI proves application id native library and baseline profile`() {
         val workflow = resolveRepoSource(".github/workflows/ci.yml").readText()
+        val filters = workflow.substringAfter("filters: |")
+            .substringBefore("lifecycle-risk:")
+        val androidRuntimeFilter = filters.substringAfter("android_runtime:")
+            .substringBefore("android_instrumented:")
         val job = workflow.substringAfter("native-build-package-check:")
             .substringBefore("android-instrumented-smoke:")
 
         assertTrue(
-            "assembleBenchmark" in job &&
+            "apps/mobile-android-baselineprofile/**" in androidRuntimeFilter &&
+                "assembleBenchmark" in job &&
                 job.split("assembleBenchmark").size == 2 &&
                 "lib/arm64-v8a/libpocket_llama.so" in job &&
                 "assert-application-id" in job &&
@@ -470,7 +475,7 @@ class PerformanceContractAuditTest {
                 "verify_android_baseline_profile.py" in job &&
                 "compileBenchmarkArtProfile/baseline-prof.txt" in job &&
                 "baseline-profile.sh verify" !in job,
-            "The existing native benchmark build must be verified in place for isolation, native packaging, and merged Baseline Profile rules.",
+            "Baseline Profile producer changes must trigger the existing native benchmark build, which is verified in place for isolation, native packaging, and merged profile rules.",
         )
     }
 

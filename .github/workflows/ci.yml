@@ -54,6 +54,7 @@ jobs:
               - ".github/workflows/ci.yml"
             android_runtime:
               - "apps/mobile-android/**"
+              - "apps/mobile-android-baselineprofile/**"
               - "packages/**"
               - "tools/devctl/**"
               - "scripts/android/**"

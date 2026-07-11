@@ -402,6 +402,8 @@ class PerformanceContractAuditTest {
             "settings-prompt-append-proof.json",
             "settings-prompt-restoration-proof.json",
             "final-ui-selectors.json",
+            "window-focus-\${phase}.txt",
+            "window-focus-\${phase}.json",
             "window-focus-after.txt",
             "window-focus-post-gfxinfo.txt",
             "TOTAL_FRAMES",
@@ -482,6 +484,11 @@ class PerformanceContractAuditTest {
     @Test
     fun `settings performance probe is reversible fail closed and redacted`() {
         val script = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
+        val chatApp = chatAppSourceFile().readText()
+        val baselineProfileGenerator = resolveRepoSource(
+            "apps/mobile-android-baselineprofile/src/main/kotlin/" +
+                "com/pocketagent/android/baselineprofile/BaselineProfileGenerator.kt",
+        ).readText()
         val cleanupContract = script.substringAfter("cleanup() {")
             .substringBefore("trap cleanup EXIT")
         val settingsJourney = script.substringAfter("adb_shell dumpsys gfxinfo \"\$PACKAGE\" reset")
@@ -489,6 +496,16 @@ class PerformanceContractAuditTest {
             .substringBefore("model-sheet)")
         val measuredCloseout = script.substringAfter("RAW_DUMP=\"\$OUT_DIR/gfxinfo.txt\"")
             .substringBefore("JANKY=\"")
+        val transitionHandshakes = listOf(
+            "tap_tag \"advanced_sheet_button\"",
+            "wait_tag \"advanced_settings_sheet\"",
+            "adb_shell input swipe",
+            "adb_shell input keyevent KEYCODE_BACK",
+            "wait_for_app_foreground \"settings-after-advanced-back\"",
+            "wait_tag \"completion_settings_button\"",
+            "tap_tag \"completion_settings_button\"",
+        )
+        val handshakeOffsets = transitionHandshakes.map(settingsJourney::indexOf)
 
         val cleanupEvidence = listOf(
             "SETTINGS_PROMPT_MUTATION_PENDING",
@@ -515,6 +532,20 @@ class PerformanceContractAuditTest {
                 settingsJourney.indexOf("SETTINGS_PROMPT_MUTATION_PENDING=1") <
                 settingsJourney.indexOf("type_text_slowly"),
             "Settings measurement must append only after capturing the original and arming fail-closed cleanup.",
+        )
+        assertTrue(
+            "modifier = Modifier.testTag(\"advanced_settings_sheet\")" in chatApp &&
+                "openAndCloseSurface(\"advanced_sheet_button\", \"advanced_settings_sheet\")" in
+                baselineProfileGenerator &&
+                "By.text(" !in baselineProfileGenerator,
+            "Advanced settings automation must wait on a locale-neutral modal resource, not visible text.",
+        )
+        assertTrue(
+            handshakeOffsets.all { offset -> offset >= 0 } &&
+                handshakeOffsets.zipWithNext().all { (current, next) -> current < next } &&
+                "window-focus-\${phase}.txt" in script &&
+                "window-focus-\${phase}.json" in script,
+            "The settings probe must prove modal open, app foreground after dismissal, and the next target before tapping it.",
         )
         assertTrue(
             measuredCloseout.indexOf("gfxinfo_dump") < measuredCloseout.indexOf("restore_settings_prompt"),

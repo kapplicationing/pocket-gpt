@@ -27,7 +27,7 @@ class BaselineProfileGenerator {
         baselineProfileRule.collect(packageName = TARGET_PACKAGE) {
             startCriticalShell()
             openAndCloseSurface("session_drawer_button", "session_search_input")
-            openAndCloseSurface("advanced_sheet_button", text = "General")
+            openAndCloseSurface("advanced_sheet_button", "advanced_settings_sheet")
             openAndCloseSurface("completion_settings_button", "completion_system_prompt_input")
             openAndCloseSurface("open_model_library", "unified_model_sheet")
         }
@@ -50,16 +50,10 @@ class BaselineProfileGenerator {
     private fun openAndCloseSurface(
         triggerResource: String,
         visibleResource: String? = null,
-        text: String? = null,
     ) {
         requireResource(triggerResource).click()
-        when {
-            visibleResource != null -> requireResource(visibleResource)
-            text != null -> {
-                checkNotNull(device.wait(Until.findObject(By.text(text)), UI_TIMEOUT_MS)) {
-                    "Timed out waiting for text '$text' after tapping $triggerResource"
-                }
-            }
+        if (visibleResource != null) {
+            requireResource(visibleResource)
         }
         device.pressBack()
         requireResource(triggerResource)

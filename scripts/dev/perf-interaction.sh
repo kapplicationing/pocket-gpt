@@ -210,18 +210,27 @@ wake_and_dismiss_keyguard() {
 }
 
 wait_for_app_foreground() {
+  local phase="${1:-launch}"
+  case "$phase" in
+    launch|fresh-install|precondition-relaunch|settings-after-advanced-back) ;;
+    *)
+      echo "[perf-interaction] invalid foreground proof phase: $phase" >&2
+      exit 64
+      ;;
+  esac
   local deadline=$((SECONDS + 30))
-  local focus_file="$OUT_DIR/window-focus-launch.txt"
+  local focus_file="$OUT_DIR/window-focus-${phase}.txt"
+  local proof_file="$OUT_DIR/window-focus-${phase}.json"
   while (( SECONDS < deadline )); do
     adb_shell dumpsys window >"$focus_file" 2>&1 || true
     if python3 "$HARNESS_HELPER" assert-foreground \
       --window "$focus_file" \
-      --package "$PACKAGE" >/dev/null 2>&1; then
+      --package "$PACKAGE" >"$proof_file" 2>/dev/null; then
       return 0
     fi
     sleep 1
   done
-  echo "[perf-interaction] $PACKAGE did not become foreground after launch." >&2
+  echo "[perf-interaction] $PACKAGE did not become foreground during phase '$phase'." >&2
   cat "$focus_file" >&2 2>/dev/null || true
   exit 71
 }
@@ -392,7 +401,7 @@ prepare_scenario_input() {
   # Relaunch after preconditioning so each search journey starts empty.
   adb_shell am force-stop "$PACKAGE" >/dev/null
   adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
-  wait_for_app_foreground
+  wait_for_app_foreground "precondition-relaunch"
   wait_tag "composer_input"
   sleep 1
 }
@@ -405,7 +414,7 @@ prepare_fresh_install_state() {
   wake_and_dismiss_keyguard
   adb_shell am force-stop "$PACKAGE" >/dev/null
   adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
-  wait_for_app_foreground
+  wait_for_app_foreground "fresh-install"
   while (( SECONDS < deadline )); do
     if dump_ui; then
       coords="$(tag_center_from_dump "session_drawer_button" 2>/dev/null || true)"
@@ -559,11 +568,13 @@ adb_shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null
 case "$SCENARIO" in
   settings-nav)
     tap_tag "advanced_sheet_button"
+    wait_tag "advanced_settings_sheet"
     sleep 1
     adb_shell input swipe 500 1700 500 650 500 >/dev/null
     sleep 1
     adb_shell input keyevent KEYCODE_BACK >/dev/null
-    sleep 1
+    wait_for_app_foreground "settings-after-advanced-back"
+    wait_tag "completion_settings_button"
     tap_tag "completion_settings_button"
     tap_tag "$FINAL_INPUT_TAG"
     dump_ui || {

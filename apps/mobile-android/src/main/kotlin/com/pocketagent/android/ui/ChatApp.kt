@@ -788,6 +788,7 @@ private fun AdvancedSettingsModalHost(
         title = stringResource(id = R.string.ui_advanced_controls_title),
         sheetState = sheetState,
         onDismiss = onDismissSurface,
+        modifier = Modifier.testTag("advanced_settings_sheet"),
     ) {
         AdvancedSettingsSheet(
             runtime = runtime,

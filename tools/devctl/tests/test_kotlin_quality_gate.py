@@ -9,6 +9,7 @@ from unittest import mock
 
 from tools.devctl.kotlin_quality_gate import (
     Finding,
+    _git_changed_files,
     _gradle_subprocess_env,
     _find_supported_jdk_home,
     _parse_java_major_version,
@@ -19,6 +20,58 @@ from tools.devctl.kotlin_quality_gate import (
 
 
 class KotlinQualityGateTest(unittest.TestCase):
+    def test_git_changed_files_prefers_worktree_over_previous_commit(self) -> None:
+        def fake_run(command: list[str], **_: object) -> CompletedProcess[str]:
+            output = {
+                ("git", "diff", "--name-only", "HEAD"): "apps/mobile-android/src/main/A.kt\n",
+                (
+                    "git",
+                    "ls-files",
+                    "--modified",
+                    "--others",
+                    "--exclude-standard",
+                ): "apps/mobile-android/src/main/A.kt\ndocs/note.md\n",
+            }.get(tuple(command), "packages/app-runtime/src/main/Previous.kt\n")
+            return CompletedProcess(command, 0, stdout=output, stderr="")
+
+        with mock.patch("tools.devctl.kotlin_quality_gate.subprocess.run", side_effect=fake_run) as run:
+            changed = _git_changed_files(Path("/repo"))
+
+        self.assertEqual([Path("apps/mobile-android/src/main/A.kt")], changed)
+        self.assertNotIn(
+            ["git", "diff", "--name-only", "HEAD~1...HEAD"],
+            [call.args[0] for call in run.call_args_list],
+        )
+
+    def test_git_changed_files_uses_previous_commit_only_when_worktree_is_clean(self) -> None:
+        outputs = iter(("", "", "packages/app-runtime/src/main/Previous.kt\n"))
+
+        with mock.patch(
+            "tools.devctl.kotlin_quality_gate.subprocess.run",
+            side_effect=lambda command, **_: CompletedProcess(command, 0, stdout=next(outputs), stderr=""),
+        ):
+            changed = _git_changed_files(Path("/repo"))
+
+        self.assertEqual([Path("packages/app-runtime/src/main/Previous.kt")], changed)
+
+    def test_git_changed_files_uses_explicit_ci_base(self) -> None:
+        with mock.patch.dict(os.environ, {"GITHUB_BASE_REF": "main"}, clear=True), mock.patch(
+            "tools.devctl.kotlin_quality_gate.subprocess.run",
+            return_value=CompletedProcess(
+                ["git"],
+                0,
+                stdout="packages/native-bridge/src/main/Native.kt\n",
+                stderr="",
+            ),
+        ) as run:
+            changed = _git_changed_files(Path("/repo"))
+
+        self.assertEqual([Path("packages/native-bridge/src/main/Native.kt")], changed)
+        self.assertEqual(
+            ["git", "diff", "--name-only", "origin/main...HEAD"],
+            run.call_args.args[0],
+        )
+
     def test_collect_findings_parses_detekt_and_ktlint_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

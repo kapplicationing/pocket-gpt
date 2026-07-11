@@ -1,5 +1,6 @@
 package com.pocketagent.android.runtime
 
+import com.pocketagent.android.BuildConfig
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
@@ -11,10 +12,14 @@ class MainThreadGuardTest {
     }
 
     @Test
-    fun `debug guard throws when operation runs on main thread`() {
+    fun `guard enforcement matches build type on main thread`() {
         MainThreadGuard.overrideIsMainThreadForTests { true }
 
-        assertFailsWith<IllegalStateException> {
+        if (BuildConfig.DEBUG) {
+            assertFailsWith<IllegalStateException> {
+                MainThreadGuard.assertNotMainThread("test operation")
+            }
+        } else {
             MainThreadGuard.assertNotMainThread("test operation")
         }
     }

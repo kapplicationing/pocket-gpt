@@ -48,6 +48,11 @@ internal fun rememberChatAppLaunchers(
         snackbarHostState = snackbarHostState,
         onAttachImage = viewModel::addAttachedImage,
     )
+    val launchModelImportPicker = rememberModelImportLauncher(
+        context = context,
+        appViewModel = appViewModel,
+        provisioningViewModel = provisioningViewModel,
+    )
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -91,43 +96,6 @@ internal fun rememberChatAppLaunchers(
         ActivityResultContracts.StartActivityForResult(),
     ) {
         voiceController.refresh()
-    }
-    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val modelId = appViewModel.selectedModelIdForImport.value ?: return@rememberLauncherForActivityResult
-        if (uri == null) {
-            provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_import_cancelled))
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_import_in_progress))
-            provisioningViewModel.importModelFromUri(
-                modelId = modelId,
-                sourceUri = uri,
-            ).onSuccess { result ->
-                val statusMessage = if (result.isActive) {
-                    context.getString(
-                        R.string.ui_model_import_success_active,
-                        result.modelId,
-                        result.version,
-                    )
-                } else {
-                    context.getString(
-                        R.string.ui_model_import_success_inactive,
-                        result.modelId,
-                        result.version,
-                    )
-                }
-                viewModel.refreshRuntimeReadiness(statusDetailOverride = statusMessage)
-                provisioningViewModel.setStatusMessage(statusMessage)
-            }.onFailure { error ->
-                provisioningViewModel.setStatusMessage(
-                    context.getString(
-                        R.string.ui_model_import_failure,
-                        error.message ?: "Unknown import error",
-                    ),
-                )
-            }
-        }
     }
     val launchDownloadFlow: (ModelDistributionVersion) -> Unit = { version ->
         scope.launch {
@@ -188,7 +156,7 @@ internal fun rememberChatAppLaunchers(
     }
     return ChatAppLaunchers(
         launchImageAttachmentPicker = launchImageAttachmentPicker,
-        launchModelImportPicker = { modelPicker.launch(arrayOf("*/*")) },
+        launchModelImportPicker = launchModelImportPicker,
         launchDownloadFlow = launchDownloadFlow,
         toggleVoiceActivation = toggleVoiceActivation,
         requestAssistantRole = requestAssistantRole,

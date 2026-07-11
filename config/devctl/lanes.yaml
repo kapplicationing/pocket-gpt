@@ -13,6 +13,16 @@ lanes:
           - discover
           - -s
           - tools/devctl/tests
+      - name: benchmark_python_unit_tests
+        argv:
+          - python3
+          - -m
+          - unittest
+          - discover
+          - -s
+          - scripts/benchmarks/tests
+          - -p
+          - test_*.py
       - name: kotlin_quality_gate
         argv:
           - python3

@@ -66,6 +66,8 @@ data class ModelDescriptor(
     val includeAutoRoutingMode: Boolean = false,
     val explicitRoutingModes: Set<RoutingMode> = emptySet(),
     val mmProjFileName: String? = null,
+    val ggufArchitectures: Set<String> = emptySet(),
+    val expectedEmbeddingSize: Int? = null,
 )
 
 data class ModelLoadValidation(
@@ -121,6 +123,8 @@ object ModelCatalog : ModelSpecProvider {
             interactionFeatures = setOf("TOOL_CALL_XML", "THINKING_TAGS"),
             includeAutoRoutingMode = true,
             explicitRoutingModes = setOf(RoutingMode.QWEN3_0_6B),
+            ggufArchitectures = setOf("qwen3"),
+            expectedEmbeddingSize = 1024,
         ),
         ModelDescriptor(
             modelId = QWEN3_1_7B_Q4_K_M,
@@ -144,6 +148,8 @@ object ModelCatalog : ModelSpecProvider {
             interactionFeatures = setOf("TOOL_CALL_XML", "THINKING_TAGS"),
             includeAutoRoutingMode = true,
             explicitRoutingModes = setOf(RoutingMode.QWEN3_1_7B),
+            ggufArchitectures = setOf("qwen3"),
+            expectedEmbeddingSize = 2048,
         ),
         ModelDescriptor(
             modelId = LLAMA_3_2_1B_Q4_K_M,
@@ -166,6 +172,8 @@ object ModelCatalog : ModelSpecProvider {
             envKeyToken = "LLAMA_3_2_1B_Q4_K_M",
             templateFamily = PromptTemplateFamily.LLAMA3,
             explicitRoutingModes = setOf(RoutingMode.LLAMA_3_2_1B),
+            ggufArchitectures = setOf("llama"),
+            expectedEmbeddingSize = 2048,
         ),
         ModelDescriptor(
             modelId = QWEN_3_5_0_8B_Q4,
@@ -191,10 +199,13 @@ object ModelCatalog : ModelSpecProvider {
             includeAutoRoutingMode = true,
             explicitRoutingModes = setOf(RoutingMode.QWEN_0_8B),
             mmProjFileName = "mmproj-F16.gguf",
+            ggufArchitectures = setOf("qwen35"),
+            expectedEmbeddingSize = 1024,
         ),
     )
 
-    private val descriptorsByModelId: Map<String, ModelDescriptor> = descriptors.associateBy { descriptor -> descriptor.modelId }
+    private val descriptorsByModelId: Map<String, ModelDescriptor> =
+        descriptors.associateBy { descriptor -> descriptor.modelId }
     private val descriptorsByEnvKeyToken: Map<String, ModelDescriptor> =
         descriptors.associateBy { descriptor -> descriptor.envKeyToken }
     private val normalizedSpecsByModelId: Map<String, NormalizedModelSpec> =
@@ -269,6 +280,8 @@ object ModelCatalog : ModelSpecProvider {
             .map { descriptor -> descriptor.modelId }
     }
 
+    // Preserve the query-style public API used alongside startupCandidateModels and startupRequiredModels.
+    @Suppress("FunctionOnlyReturningConstant")
     fun startupMinimumReadyCount(): Int = 1
 
     fun defaultGetReadyModelId(profile: ModelRuntimeProfile): String? {
@@ -400,7 +413,9 @@ private fun ModelDescriptor.toNormalizedModelSpec(): NormalizedModelSpec {
             tier = tier.toNormalizedTier(),
             startupCandidate = startupCandidate,
             startupRequired = startupRequired,
-            defaultForGetReadyProfiles = defaultGetReadyProfiles.mapTo(linkedSetOf()) { profile -> profile.toNormalizedProfile() },
+            defaultForGetReadyProfiles = defaultGetReadyProfiles.mapTo(linkedSetOf()) { profile ->
+                profile.toNormalizedProfile()
+            },
             autoRoutingEligible = autoRoutingEnabled,
             routingModes = ModelCatalog.routingModesForModel(descriptorModelId),
             qualityRank = qualityRank,

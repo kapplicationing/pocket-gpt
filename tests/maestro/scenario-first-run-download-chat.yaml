@@ -20,5 +20,13 @@ tags:
 - extendedWaitUntil:
     notVisible: "Cancel"
     timeout: 600000
+- extendedWaitUntil:
+    visible:
+      id: "message_bubble_assistant_complete"
+    timeout: 600000
+- assertNotVisible:
+    id: "message_bubble_assistant_pending"
+- assertNotVisible:
+    id: "message_bubble_assistant_streaming"
 - assertNotVisible: "UI-RUNTIME-001"
 - takeScreenshot: "first-run-download-chat-smoke"

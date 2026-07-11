@@ -2,6 +2,7 @@ package com.pocketagent.runtime
 
 import com.pocketagent.inference.ArtifactDistributionChannel
 import com.pocketagent.inference.ArtifactVerificationResult
+import com.pocketagent.inference.ArtifactVerificationStatus
 import com.pocketagent.inference.ModelArtifact
 import com.pocketagent.inference.ModelArtifactManager
 import com.pocketagent.nativebridge.RuntimeModelRegistryPort
@@ -60,8 +61,11 @@ class ArtifactVerifier(
 
     fun verifyArtifactOrThrow(modelId: String) {
         val result = verifyArtifactForModel(modelId)
-        check(result.passed) {
-            artifactVerificationFailureMessage(result)
+        if (!result.passed) {
+            throw RuntimeArtifactVerificationException(
+                result = result,
+                message = artifactVerificationFailureMessage(result),
+            )
         }
     }
 
@@ -196,4 +200,12 @@ class ArtifactVerifier(
     companion object {
         private const val DEFAULT_SHA_BUFFER_SIZE: Int = 1024 * 1024
     }
+}
+
+class RuntimeArtifactVerificationException(
+    val result: ArtifactVerificationResult,
+    message: String,
+) : IllegalStateException(message) {
+    val verificationStatus: ArtifactVerificationStatus = result.status
+    val errorCode: String = verificationStatus.name.lowercase()
 }

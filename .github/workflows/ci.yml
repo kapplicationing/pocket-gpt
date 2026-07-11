@@ -59,6 +59,7 @@ jobs:
               - "scripts/android/**"
               - "scripts/ci/**"
               - "scripts/benchmarks/**"
+              - "scripts/dev/perf-interaction*.sh"
               - "config/devctl/**"
               - "third_party/llama.cpp/**"
               - ".gitmodules"
@@ -294,19 +295,20 @@ jobs:
       - name: Install native Android SDK components
         run: bash scripts/ci/install_android_sdk_components.sh "ndk;27.0.12077973" "cmake;3.22.1"
 
-      - name: Assemble debug APK with native build enabled
-        run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleDebug
+      - name: Assemble benchmark APK with native build enabled
+        run: ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleBenchmark
 
-      - name: Verify packaged native library
+      - name: Verify benchmark APK packages native library
         run: |
           set -euo pipefail
-          apk_path="$(find apps/mobile-android/build/outputs/apk/debug -type f -name '*.apk' | sort | head -n 1)"
-          if [[ -z "${apk_path}" ]]; then
-            echo "No debug APK produced under apps/mobile-android/build/outputs/apk/debug" >&2
+          apk_path="apps/mobile-android/build/outputs/apk/benchmark/mobile-android-benchmark.apk"
+          if [[ ! -f "${apk_path}" ]]; then
+            echo "No benchmark APK produced at ${apk_path}" >&2
             exit 1
           fi
           echo "Inspecting APK: ${apk_path}"
-          if ! unzip -l "${apk_path}" | grep -q 'lib/arm64-v8a/libpocket_llama.so'; then
+          unzip -Z1 "${apk_path}" > benchmark-apk-entries.txt
+          if ! grep -Fxq 'lib/arm64-v8a/libpocket_llama.so' benchmark-apk-entries.txt; then
             echo "Missing lib/arm64-v8a/libpocket_llama.so in ${apk_path}" >&2
             exit 1
           fi

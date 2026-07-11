@@ -1,16 +1,24 @@
+@file:Suppress("InvalidPackageDeclaration")
+
+// This Android source-set test intentionally exercises the shared runtime package API in place.
 package com.pocketagent.runtime
 
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.core.SessionId
 import com.pocketagent.core.Turn
+import com.pocketagent.inference.ArtifactVerificationStatus
 import com.pocketagent.inference.DeviceState
+import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.runtime.ChatStreamDelta
 import com.pocketagent.runtime.ModelResidencyPolicy
 import com.pocketagent.runtime.PerformanceRuntimeConfig
 import com.pocketagent.runtime.InteractionContentPart
 import com.pocketagent.runtime.InteractionMessage
 import com.pocketagent.runtime.InteractionRole
+import com.pocketagent.runtime.RuntimePerformanceProfile
+import com.pocketagent.runtime.RuntimeRequestContext
+import com.pocketagent.runtime.SamplingOverrides
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -45,6 +53,105 @@ class DefaultMvpRuntimeFacadeTest {
         assertTrue(phases.contains(ChatStreamPhase.CHAT_END))
         assertEquals("hello", container.lastUserText)
         assertEquals(64, container.lastMaxTokens)
+    }
+
+    @Test
+    fun `stream chat preserves complete typed request context`() = runTest {
+        val container = FakeRuntimeContainer()
+        val facade = DefaultMvpRuntimeFacade(container)
+        val performanceConfig = PerformanceRuntimeConfig.forProfile(
+            profile = RuntimePerformanceProfile.FAST,
+            availableCpuThreads = 6,
+            gpuEnabled = true,
+            gpuLayers = 3,
+        )
+        val residencyPolicy = ModelResidencyPolicy(
+            keepLoadedWhileAppForeground = false,
+            idleUnloadTtlMs = 12_345L,
+            warmupOnStartup = false,
+            adaptiveIdleTtl = false,
+        )
+        val samplingOverrides = SamplingOverrides(
+            temperature = 0.4f,
+            topP = 0.8f,
+            topK = 17,
+            maxTokens = 321,
+            systemPrompt = "Keep the answer compact.",
+            showThinking = true,
+        )
+        val request = requestV2(requestId = "req-context").copy(
+            deviceState = DeviceState(batteryPercent = 31, thermalLevel = 6, ramClassGb = 12),
+            maxTokens = 321,
+            requestTimeoutMs = 98_765L,
+            previousResponseId = "response-previous",
+            performanceConfig = performanceConfig,
+            residencyPolicy = residencyPolicy,
+            samplingOverrides = samplingOverrides,
+        )
+
+        facade.streamChat(request).toList()
+
+        assertEquals(
+            RuntimeRequestContext(
+                deviceState = request.deviceState,
+                maxTokens = request.maxTokens,
+                keepModelLoaded = true,
+                requestTimeoutMs = request.requestTimeoutMs,
+                requestId = request.requestId,
+                previousResponseId = request.previousResponseId,
+                performanceConfig = performanceConfig,
+                residencyPolicy = residencyPolicy,
+                samplingOverrides = samplingOverrides,
+            ),
+            container.lastContext,
+        )
+        assertEquals(true, container.lastContext?.samplingOverrides?.showThinking)
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun `legacy scalar overload delegates into typed request context`() {
+        val container = FakeRuntimeContainer()
+        val performanceConfig = PerformanceRuntimeConfig.default()
+        val residencyPolicy = ModelResidencyPolicy(idleUnloadTtlMs = 4_321L)
+
+        container.sendChatMessages(
+            sessionId = SessionId("legacy-session"),
+            messages = emptyList(),
+            taskType = "legacy-task",
+            deviceState = DeviceState(batteryPercent = 44, thermalLevel = 2, ramClassGb = 6),
+            maxTokens = 77,
+            keepModelLoaded = true,
+            onToken = {},
+            requestTimeoutMs = 55_000L,
+            requestId = "legacy-request",
+            previousResponseId = "legacy-response",
+            performanceConfig = performanceConfig,
+            residencyPolicy = residencyPolicy,
+        )
+
+        assertEquals("legacy-request", container.lastContext?.requestId)
+        assertEquals("legacy-response", container.lastContext?.previousResponseId)
+        assertEquals(performanceConfig, container.lastContext?.performanceConfig)
+        assertEquals(residencyPolicy, container.lastContext?.residencyPolicy)
+
+        container.sendUserMessage(
+            sessionId = SessionId("legacy-session"),
+            userText = "legacy user message",
+            taskType = "legacy-task",
+            deviceState = DeviceState(batteryPercent = 55, thermalLevel = 1, ramClassGb = 8),
+            maxTokens = 88,
+            keepModelLoaded = false,
+            onToken = {},
+            requestTimeoutMs = 66_000L,
+            requestId = "legacy-user-request",
+            performanceConfig = performanceConfig,
+            residencyPolicy = residencyPolicy,
+        )
+
+        assertEquals("legacy-user-request", container.lastContext?.requestId)
+        assertEquals(88, container.lastContext?.maxTokens)
+        assertEquals("legacy user message", container.lastUserText)
     }
 
     @Test
@@ -101,6 +208,47 @@ class DefaultMvpRuntimeFacadeTest {
     }
 
     @Test
+    fun `stream chat maps real checksum verification failure to reprovision recovery`() = runTest {
+        val modelId = ModelCatalog.QWEN3_0_6B_Q4_K_M
+        val verifier = ArtifactVerifier(
+            RuntimeConfig(
+                artifactPayloadByModelId = mapOf(modelId to "actual-model-payload".encodeToByteArray()),
+                artifactFilePathByModelId = emptyMap(),
+                artifactSha256ByModelId = mapOf(modelId to "0".repeat(64)),
+                artifactProvenanceIssuerByModelId = mapOf(modelId to "internal-release"),
+                artifactProvenanceSignatureByModelId = mapOf(modelId to "test-signature"),
+                runtimeCompatibilityTag = "android-arm64-v8a",
+                requireNativeRuntimeForStartupChecks = false,
+                prefixCacheEnabled = false,
+                prefixCacheStrict = false,
+                responseCacheTtlSec = 0L,
+                responseCacheMaxEntries = 0,
+            ),
+        )
+        var verificationFailure: RuntimeArtifactVerificationException? = null
+        val container = FakeRuntimeContainer().apply {
+            beforeSend = {
+                try {
+                    verifier.verifyArtifactOrThrow(modelId)
+                } catch (error: RuntimeArtifactVerificationException) {
+                    verificationFailure = error
+                    throw error
+                }
+            }
+        }
+        val facade = DefaultMvpRuntimeFacade(container)
+
+        val events = facade.streamChat(requestV2(requestId = "req-checksum-mismatch")).toList()
+        val failed = events.filterIsInstance<ChatStreamEvent.Failed>().single()
+
+        assertEquals(ArtifactVerificationStatus.CHECKSUM_MISMATCH, verificationFailure?.verificationStatus)
+        assertEquals("checksum_mismatch", verificationFailure?.errorCode)
+        assertEquals("checksum_mismatch", failed.errorCode)
+        assertEquals(RuntimeRecoveryDisposition.REPROVISION_MODEL, failed.recoveryDisposition)
+        assertTrue(failed.message.contains("CHECKSUM_MISMATCH"))
+    }
+
+    @Test
     fun `terminal failure does not trigger duplicate cancel from awaitClose`() = runTest {
         val container = FakeRuntimeContainer().apply {
             sendError = RuntimeGenerationFailureException(
@@ -145,8 +293,10 @@ private class FakeRuntimeContainer : RuntimeContainer {
     var restoreCalls: Int = 0
     var deleteCalls: Int = 0
     var sendError: Throwable? = null
+    var beforeSend: (() -> Unit)? = null
     var cancelByRequestCalls: Int = 0
     var cancelBySessionCalls: Int = 0
+    var lastContext: RuntimeRequestContext? = null
 
     override fun createSession(): SessionId = SessionId("session-1")
 
@@ -154,24 +304,19 @@ private class FakeRuntimeContainer : RuntimeContainer {
         sessionId: SessionId,
         messages: List<InteractionMessage>,
         taskType: String,
-        deviceState: DeviceState,
-        maxTokens: Int,
-        keepModelLoaded: Boolean,
+        context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit,
-        requestTimeoutMs: Long,
-        requestId: String,
-        previousResponseId: String?,
-        performanceConfig: PerformanceRuntimeConfig,
-        residencyPolicy: ModelResidencyPolicy,
     ): ChatResponse {
+        beforeSend?.invoke()
         sendError?.let { throw it }
+        lastContext = context
         lastUserText = messages.lastOrNull { it.role == InteractionRole.USER }
             ?.parts
             ?.filterIsInstance<InteractionContentPart.Text>()
             ?.joinToString(separator = "\n") { it.text }
             .orEmpty()
-        lastMaxTokens = maxTokens
+        lastMaxTokens = context.maxTokens
         onToken("hello ")
         onToken("world ")
         return ChatResponse(
@@ -180,6 +325,29 @@ private class FakeRuntimeContainer : RuntimeContainer {
             text = "response",
             firstTokenLatencyMs = 42,
             totalLatencyMs = 75,
+        )
+    }
+
+    override fun sendUserMessage(
+        sessionId: SessionId,
+        userText: String,
+        taskType: String,
+        context: RuntimeRequestContext,
+        onToken: (String) -> Unit,
+        onThinkingStateChanged: (Boolean) -> Unit,
+    ): ChatResponse {
+        return sendChatMessages(
+            sessionId = sessionId,
+            messages = listOf(
+                InteractionMessage(
+                    role = InteractionRole.USER,
+                    parts = listOf(InteractionContentPart.Text(userText)),
+                ),
+            ),
+            taskType = taskType,
+            context = context,
+            onToken = onToken,
+            onThinkingStateChanged = onThinkingStateChanged,
         )
     }
 

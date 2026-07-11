@@ -1,0 +1,148 @@
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from evaluate_android_frame_thresholds import ValidationError, evaluate_samples
+
+
+class EvaluateAndroidFrameThresholdsTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def write_sample(self, index, **overrides):
+        artifact_dir = self.root / f"sample-{index}"
+        artifact_dir.mkdir()
+        payload = {
+            "scenario": "settings-nav",
+            "serial": "device-123",
+            "package": "com.pocketagent.android",
+            "build_source": "assembled-native-benchmark" if index == 1 else "preinstalled-nondebuggable",
+            "build_variant": "benchmark" if index == 1 else "unverified-nondebuggable",
+            "native_runtime_packaged": True if index == 1 else None,
+            "debuggable": False,
+            "version_code": "1",
+            "version_name": "0.1.0",
+            "last_update_time": "2026-07-11 10:00:00",
+            "installed_apk_path": "/data/app/example/base.apk",
+            "started_at_utc": f"2026-07-11T03:00:0{index}Z",
+            "janky_pct": [10.0, 12.0, 14.0][index - 1],
+            "p50_ms": [10.0, 11.0, 12.0][index - 1],
+            "p90_ms": [20.0, 21.0, 22.0][index - 1],
+            "p99_ms": [28.0, 29.0, 30.0][index - 1],
+            "artifact_dir": str(artifact_dir),
+        }
+        payload.update(overrides)
+        path = artifact_dir / "summary.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def three_samples(self, **third_overrides):
+        return [self.write_sample(1), self.write_sample(2), self.write_sample(3, **third_overrides)]
+
+    def test_passes_with_three_matching_native_benchmark_samples(self):
+        report = evaluate_samples(self.three_samples(), expected_scenario="settings-nav")
+
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["sample_count"], 3)
+        self.assertEqual(report["medians"]["janky_pct"], 12.0)
+        self.assertEqual(report["build_variant"], "benchmark")
+        self.assertTrue(report["native_runtime_packaged"])
+
+    def test_fails_when_a_metric_median_exceeds_threshold(self):
+        paths = [
+            self.write_sample(1, janky_pct=19.0),
+            self.write_sample(2, janky_pct=21.0),
+            self.write_sample(3, janky_pct=40.0),
+        ]
+
+        report = evaluate_samples(paths)
+
+        self.assertEqual(report["status"], "FAIL")
+        self.assertEqual(report["medians"]["janky_pct"], 21.0)
+
+    def test_rejects_mixed_scenarios(self):
+        with self.assertRaisesRegex(ValidationError, "mixed scenario"):
+            evaluate_samples(self.three_samples(scenario="model-sheet"))
+
+    def test_rejects_unknown_scenario(self):
+        paths = [
+            self.write_sample(1, scenario="unknown"),
+            self.write_sample(2, scenario="unknown"),
+            self.write_sample(3, scenario="unknown"),
+        ]
+        with self.assertRaisesRegex(ValidationError, "unsupported scenario"):
+            evaluate_samples(paths)
+
+    def test_rejects_mixed_devices(self):
+        with self.assertRaisesRegex(ValidationError, "mixed serial"):
+            evaluate_samples(self.three_samples(serial="device-456"))
+
+    def test_rejects_mixed_build_identity(self):
+        with self.assertRaisesRegex(ValidationError, "mixed last_update_time"):
+            evaluate_samples(self.three_samples(last_update_time="2026-07-11 10:01:00"))
+
+    def test_rejects_reinstalled_package_path(self):
+        with self.assertRaisesRegex(ValidationError, "mixed installed_apk_path"):
+            evaluate_samples(self.three_samples(installed_apk_path="/data/app/reinstalled/base.apk"))
+
+    def test_rejects_debuggable_sample(self):
+        with self.assertRaisesRegex(ValidationError, "debuggable must be exactly false"):
+            evaluate_samples(self.three_samples(debuggable=True))
+
+    def test_rejects_run_group_without_native_benchmark_anchor(self):
+        first = self.write_sample(
+            1,
+            build_source="preinstalled-nondebuggable",
+            build_variant="unverified-nondebuggable",
+            native_runtime_packaged=None,
+        )
+        paths = [first, self.write_sample(2), self.write_sample(3)]
+
+        with self.assertRaisesRegex(ValidationError, "exactly one assembled native benchmark"):
+            evaluate_samples(paths)
+
+    def test_rejects_invalid_percentile_order(self):
+        with self.assertRaisesRegex(ValidationError, "p50 <= p90 <= p99"):
+            evaluate_samples(self.three_samples(p50_ms=30.0, p90_ms=20.0))
+
+    def test_rejects_non_numeric_metric(self):
+        with self.assertRaisesRegex(ValidationError, "p90_ms must be a number"):
+            evaluate_samples(self.three_samples(p90_ms="fast"))
+
+    def test_rejects_wrong_sample_count(self):
+        with self.assertRaisesRegex(ValidationError, "expected exactly 3 summaries"):
+            evaluate_samples([self.write_sample(1), self.write_sample(2)])
+
+    def test_cli_writes_report_and_returns_two_for_threshold_failure(self):
+        paths = [
+            self.write_sample(1, p99_ms=33.0),
+            self.write_sample(2, p99_ms=34.0),
+            self.write_sample(3, p99_ms=35.0),
+        ]
+        output = self.root / "evaluation.json"
+        script = Path(__file__).resolve().parents[1] / "evaluate_android_frame_thresholds.py"
+
+        result = subprocess.run(
+            [sys.executable, str(script), "--output", str(output), *map(str, paths)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 2, msg=result.stderr)
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "FAIL")
+        self.assertIn("Overall: FAIL", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

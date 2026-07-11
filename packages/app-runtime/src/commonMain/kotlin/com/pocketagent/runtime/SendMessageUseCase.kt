@@ -34,9 +34,11 @@ internal class SendMessageUseCase(
     private val cancelByRequest: (String) -> Boolean,
     private val cancelBySession: (SessionId) -> Boolean,
     private val runtimeInferencePorts: RuntimeInferencePorts = inferenceModule.runtimeInferencePorts(),
-    private val generationTimeoutGuardFactory: (timeoutMs: Long, onTimeout: () -> Unit) -> GenerationTimeoutGuardHandle = { timeoutMs, onTimeout ->
-        GenerationTimeoutGuard(timeoutMs = timeoutMs, onTimeout = onTimeout)
-    },
+    private val generationTimeoutGuardFactory:
+        (timeoutMs: Long, onTimeout: () -> Unit) -> GenerationTimeoutGuardHandle =
+        { timeoutMs, onTimeout ->
+            GenerationTimeoutGuard(timeoutMs = timeoutMs, onTimeout = onTimeout)
+        },
 ) {
     private val sessionMemorySnippetsBySessionId: MutableMap<String, List<String>> = mutableMapOf()
 
@@ -52,6 +54,26 @@ internal class SendMessageUseCase(
     )
 
     fun execute(request: Request): ChatResponse {
+        val executionContext = request.executionContext
+        val generationLease = inferenceExecutor.acquireGenerationLease(
+            requestId = executionContext.requestId,
+            sessionId = request.sessionId.value,
+        )
+        return try {
+            executeAdmitted(request = request, generationLease = generationLease)
+        } finally {
+            generationLease.close()
+        }
+    }
+
+    // The admitted send pipeline is cohesive: prompt, load, stream, residency, metrics, and persistence.
+    @Suppress(
+        "LongMethod",
+        "CyclomaticComplexMethod",
+        "ThrowsCount",
+        "TooGenericExceptionCaught",
+    )
+    private fun executeAdmitted(request: Request, generationLease: GenerationLease): ChatResponse {
         val executionContext = request.executionContext
         val latestUserText = request.messages.latestUserMessageText().ifBlank { request.userText }
         requirePolicyEvent(
@@ -129,7 +151,6 @@ internal class SendMessageUseCase(
             showThinking = showThinking,
         )
         val isMultimodalRequest = multimodalRequest && multimodalEnabled
-        // Debug: MULTIMODAL_DECISION images=${userImagePaths.size} mmEnabled=$multimodalEnabled routing=$isMultimodalRequest
         val prompt = if (isMultimodalRequest) {
             injectImageMarkers(renderedPrompt.prompt, userImagePaths.size)
         } else {
@@ -240,6 +261,7 @@ internal class SendMessageUseCase(
                     maxTokens = executionContext.maxTokens,
                     stopSequences = renderedPrompt.stopSequences,
                     onToken = tokenHandler,
+                    generationLease = generationLease,
                 )
             } else {
                 inferenceExecutor.execute(
@@ -250,6 +272,7 @@ internal class SendMessageUseCase(
                     cachePolicy = cachePolicy,
                     stopSequences = renderedPrompt.stopSequences,
                     onToken = tokenHandler,
+                    generationLease = generationLease,
                 )
             }
             finishReason = executionResult.finishReason
@@ -330,7 +353,10 @@ internal class SendMessageUseCase(
         observabilityModule.recordLatencyMetric("inference.decode_ms", decodeMs.toDouble())
         observabilityModule.recordLatencyMetric("inference.tokens_per_sec", tokensPerSec)
         peakRssMb?.let { observabilityModule.recordLatencyMetric("inference.peak_rss_mb", it) }
-        observabilityModule.recordLatencyMetric("inference.profile", effectivePerformanceConfig.profile.ordinal.toDouble())
+        observabilityModule.recordLatencyMetric(
+            "inference.profile",
+            effectivePerformanceConfig.profile.ordinal.toDouble(),
+        )
         observabilityModule.recordLatencyMetric(
             "inference.gpu_mode",
             if (effectivePerformanceConfig.gpuEnabled && effectivePerformanceConfig.gpuLayers > 0) 1.0 else 0.0,
@@ -410,6 +436,7 @@ internal class SendMessageUseCase(
             reasoningContent = reasoningContent,
         )
     }
+
     private fun buildPrefixCacheKey(slotId: String): String = slotId
 
     private fun resolveMemorySnippets(

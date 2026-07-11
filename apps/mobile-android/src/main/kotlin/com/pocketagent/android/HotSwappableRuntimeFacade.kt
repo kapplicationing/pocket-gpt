@@ -16,37 +16,78 @@ import com.pocketagent.runtime.ToolExecutionResult
 import com.pocketagent.runtime.WarmupResult
 import com.pocketagent.nativebridge.ModelLifecycleErrorCode
 import com.pocketagent.nativebridge.ModelLifecycleEvent
+import com.pocketagent.nativebridge.RuntimeCloseResult
+import com.pocketagent.nativebridge.RuntimeLifetimePort
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 
 internal class HotSwappableRuntimeFacade(
     initial: MvpRuntimeFacade,
-) : MvpRuntimeFacade, RuntimeWarmupSupport, RuntimeResourceControl {
+) : MvpRuntimeFacade, RuntimeWarmupSupport, RuntimeResourceControl, RuntimeLifetimePort {
     private val lock = ReentrantReadWriteLock()
     private var delegate: MvpRuntimeFacade = initial
     private var replacementCounter: Long = 0L
 
-    fun replace(newDelegate: MvpRuntimeFacade) {
-        lock.write {
+    fun replace(newDelegate: MvpRuntimeFacade): RuntimeReplacementResult {
+        return lock.write {
+            val newLifetime = newDelegate as? RuntimeLifetimePort
+                ?: return@write RuntimeReplacementResult.rejected("NEW_RUNTIME_LIFETIME_UNSUPPORTED")
+            val oldLifetime = delegate as? RuntimeLifetimePort
+                ?: run {
+                    newLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS)
+                    return@write RuntimeReplacementResult.rejected("OLD_RUNTIME_LIFETIME_UNSUPPORTED")
+            }
+            val oldClose = runCatching { oldLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS) }
+                .getOrElse { error ->
+                    // The old runtime's state is unknowable after an exception. Fail closed by
+                    // publishing the fresh graph instead of retaining a potentially torn-down one.
+                    RuntimeCloseResult.terminated(
+                        code = "OLD_RUNTIME_CLOSE_EXCEPTION",
+                        detail = error.message ?: error::class.simpleName,
+                    )
+                }
+            if (!oldClose.success && oldClose.runtimeReusable) {
+                runCatching { newLifetime.closeRuntime(REPLACEMENT_CLOSE_TIMEOUT_MS) }
+                return@write RuntimeReplacementResult.rejected(
+                    code = oldClose.code ?: "OLD_RUNTIME_CLOSE_FAILED",
+                    detail = oldClose.detail,
+                )
+            }
             val previousRoutingMode = runCatching { delegate.getRoutingMode() }.getOrDefault(RoutingMode.AUTO)
             delegate = newDelegate
             runCatching { newDelegate.setRoutingMode(previousRoutingMode) }
             replacementCounter += 1L
             safeLogInfo("RUNTIME_SWAP|phase=replaced|counter=$replacementCounter|routingMode=$previousRoutingMode")
+            RuntimeReplacementResult.replaced(
+                code = oldClose.code,
+                detail = oldClose.detail,
+            )
         }
     }
 
     override fun createSession(): SessionId = withDelegate { it.createSession() }
 
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> {
-        return withDelegate { it.streamChat(request) }
+        return flow {
+            // Capture one delegate for the whole collection. Once close succeeds, replacement is
+            // irreversible; a slow collector may finish terminal delivery through this reference
+            // without keeping the closed runtime published for new work.
+            val selected = withDelegate { it }
+            emitAll(selected.streamChat(request))
+        }
     }
 
-    override fun cancelGeneration(sessionId: SessionId): Boolean = withDelegate { it.cancelGeneration(sessionId) }
+    override fun cancelGeneration(sessionId: SessionId): Boolean {
+        return withDelegate { it.cancelGeneration(sessionId) }
+    }
 
-    override fun cancelGenerationByRequest(requestId: String): Boolean = withDelegate { it.cancelGenerationByRequest(requestId) }
+    override fun cancelGenerationByRequest(requestId: String): Boolean {
+        return withDelegate { it.cancelGenerationByRequest(requestId) }
+    }
 
     override fun runTool(toolName: String, jsonArgs: String): String = withDelegate { it.runTool(toolName, jsonArgs) }
 
@@ -54,7 +95,9 @@ internal class HotSwappableRuntimeFacade(
         return withDelegate { it.runToolDetailed(toolName = toolName, jsonArgs = jsonArgs) }
     }
 
-    override fun analyzeImage(imagePath: String, prompt: String): String = withDelegate { it.analyzeImage(imagePath, prompt) }
+    override fun analyzeImage(imagePath: String, prompt: String): String {
+        return withDelegate { it.analyzeImage(imagePath, prompt) }
+    }
 
     override fun analyzeImageDetailed(imagePath: String, prompt: String): ImageAnalysisResult {
         return withDelegate { it.analyzeImageDetailed(imagePath = imagePath, prompt = prompt) }
@@ -185,6 +228,13 @@ internal class HotSwappableRuntimeFacade(
         }
     }
 
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        return lock.write {
+            (delegate as? RuntimeLifetimePort)?.closeRuntime(timeoutMs)
+                ?: RuntimeCloseResult.rejected("RUNTIME_LIFETIME_UNSUPPORTED")
+        }
+    }
+
     private inline fun <T> withDelegate(block: (MvpRuntimeFacade) -> T): T {
         return lock.read {
             block(delegate)
@@ -193,5 +243,24 @@ internal class HotSwappableRuntimeFacade(
 
     private fun safeLogInfo(message: String) {
         runCatching { Log.i("AppRuntimeDeps", message) }
+    }
+
+    private companion object {
+        const val REPLACEMENT_CLOSE_TIMEOUT_MS = 5_000L
+    }
+}
+
+internal data class RuntimeReplacementResult(
+    val success: Boolean,
+    val code: String? = null,
+    val detail: String? = null,
+) {
+    companion object {
+        fun replaced(code: String? = null, detail: String? = null): RuntimeReplacementResult {
+            return RuntimeReplacementResult(success = true, code = code, detail = detail)
+        }
+        fun rejected(code: String, detail: String? = null): RuntimeReplacementResult {
+            return RuntimeReplacementResult(success = false, code = code, detail = detail)
+        }
     }
 }

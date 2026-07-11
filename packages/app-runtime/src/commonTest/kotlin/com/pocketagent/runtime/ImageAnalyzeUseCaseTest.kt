@@ -12,11 +12,77 @@ import com.pocketagent.inference.InferenceRequest
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.RoutingModule
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ImageAnalyzeUseCaseTest {
+    @Test
+    fun `image analysis rejects before load while chat owns runtime`() {
+        val operations = RuntimeOperationCoordinator()
+        val chatLease = when (
+            val admission = operations.tryAcquireGeneration("chat-request", "chat-session")
+        ) {
+            is GenerationAdmissionResult.Acquired -> admission.lease
+            is GenerationAdmissionResult.Rejected -> error("Expected chat admission")
+        }
+        val inference = ImageRecordingInferenceModule()
+        val useCase = buildUseCase(
+            inference = inference,
+            policy = ALL_EVENTS_POLICY,
+            imageInput = StaticImageInputModule(ImageInputResult.Success("unused")),
+            operationCoordinator = operations,
+        )
+
+        try {
+            val result = useCase.execute("/tmp/img.jpg", "describe", DEVICE_STATE)
+
+            val failure = (result as ImageAnalysisResult.Failure).failure as ImageFailure.Runtime
+            assertEquals(RUNTIME_BUSY_GENERATION_CODE.lowercase(), failure.code)
+            assertEquals(0, inference.loadCalls)
+        } finally {
+            chatLease.close()
+        }
+    }
+
+    @Test
+    fun `lifecycle drain rejects while image lease remains active`() {
+        val operations = RuntimeOperationCoordinator()
+        val imageInput = BlockingImageInputModule()
+        val useCase = buildUseCase(
+            inference = ImageRecordingInferenceModule(),
+            policy = ALL_EVENTS_POLICY,
+            imageInput = imageInput,
+            operationCoordinator = operations,
+        )
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val imageResult = executor.submit<ImageAnalysisResult> {
+                useCase.execute("/tmp/img.jpg", "describe", DEVICE_STATE)
+            }
+            assertTrue(imageInput.started.await(2, TimeUnit.SECONDS))
+
+            val lifecycle = operations.acquireLifecycle(timeoutMs = 100L) { requestId ->
+                CancellationResult(
+                    cancelled = false,
+                    code = "CANCEL_REJECTED",
+                    detail = "requestId=$requestId",
+                )
+            }
+
+            assertTrue(lifecycle is LifecycleAdmissionResult.Rejected)
+            assertEquals("CANCEL_REJECTED", (lifecycle as LifecycleAdmissionResult.Rejected).code)
+            imageInput.release.countDown()
+            assertTrue(imageResult.get(2, TimeUnit.SECONDS) is ImageAnalysisResult.Success)
+        } finally {
+            imageInput.release.countDown()
+            executor.shutdownNow()
+        }
+    }
+
     @Test
     fun `returns policy denied failure before model selection when routing event is blocked`() {
         val inference = ImageRecordingInferenceModule()
@@ -110,7 +176,7 @@ class ImageAnalyzeUseCaseTest {
     }
 
     @Test
-    fun `unloads when image model differs from resident chat model`() {
+    fun `restores resident chat model when image model differs`() {
         val inference = ImageRecordingInferenceModule()
         val useCase = buildUseCase(
             inference = inference,
@@ -122,8 +188,32 @@ class ImageAnalyzeUseCaseTest {
         val result = useCase.execute("/tmp/img.jpg", "describe", DEVICE_STATE)
 
         assertTrue(result is ImageAnalysisResult.Success)
-        assertEquals(1, inference.loadCalls)
+        assertEquals(2, inference.loadCalls)
         assertEquals(1, inference.unloadCalls)
+        assertEquals(ModelCatalog.QWEN3_1_7B_Q4_K_M, inference.loadedModelId)
+    }
+
+    @Test
+    fun `clears residency when resident chat model cannot be restored`() {
+        val inference = ImageRecordingInferenceModule(
+            failingModelIds = setOf(ModelCatalog.QWEN3_1_7B_Q4_K_M),
+        )
+        var clearReason: String? = null
+        val useCase = buildUseCase(
+            inference = inference,
+            policy = ALL_EVENTS_POLICY,
+            imageInput = StaticImageInputModule(ImageInputResult.Success("ok")),
+            residentModelIdProvider = { ModelCatalog.QWEN3_1_7B_Q4_K_M },
+            clearResidentModel = { reason -> clearReason = reason },
+        )
+
+        val result = useCase.execute("/tmp/img.jpg", "describe", DEVICE_STATE)
+
+        assertTrue(result is ImageAnalysisResult.Failure)
+        val failure = (result as ImageAnalysisResult.Failure).failure as ImageFailure.Runtime
+        assertEquals("resident_restore_failed", failure.code)
+        assertEquals("image_restore_failed", clearReason)
+        assertEquals(null, inference.loadedModelId)
     }
 
     @Test
@@ -171,13 +261,15 @@ private val ALL_EVENTS_POLICY = ImageEventPolicyModule(
     ),
 )
 
-    private fun buildUseCase(
+private fun buildUseCase(
     inference: ImageRecordingInferenceModule,
     policy: ImageEventPolicyModule,
     imageInput: ImageInputModule,
     observability: RecordingObservabilityModule = RecordingObservabilityModule(),
     residentModelIdProvider: () -> String? = { null },
     availableCpuCoresProvider: () -> Int = { 8 },
+    operationCoordinator: RuntimeOperationCoordinator = RuntimeOperationCoordinator(),
+    clearResidentModel: (String) -> Unit = {},
 ): ImageAnalyzeUseCase {
     val runtimeConfig = imageRuntimeConfig()
     val modelLifecycleCoordinator = ModelLifecycleCoordinator(
@@ -195,6 +287,8 @@ private val ALL_EVENTS_POLICY = ImageEventPolicyModule(
         routingModeProvider = { RoutingMode.AUTO },
         residentModelIdProvider = residentModelIdProvider,
         availableCpuCoresProvider = availableCpuCoresProvider,
+        operationCoordinator = operationCoordinator,
+        clearResidentModel = clearResidentModel,
     )
 }
 
@@ -206,9 +300,25 @@ private class StaticImageInputModule(
     override fun analyzeImageResult(request: ImageRequest): ImageInputResult = result
 }
 
-private class ImageRecordingInferenceModule : InferenceModule {
+private class BlockingImageInputModule : ImageInputModule {
+    val started = CountDownLatch(1)
+    val release = CountDownLatch(1)
+
+    override fun analyzeImage(request: ImageRequest): String = "legacy"
+
+    override fun analyzeImageResult(request: ImageRequest): ImageInputResult {
+        started.countDown()
+        release.await(2, TimeUnit.SECONDS)
+        return ImageInputResult.Success("ok")
+    }
+}
+
+private class ImageRecordingInferenceModule(
+    private val failingModelIds: Set<String> = emptySet(),
+) : InferenceModule {
     var loadCalls: Int = 0
     var unloadCalls: Int = 0
+    var loadedModelId: String? = null
 
     override fun listAvailableModels(): List<String> {
         return listOf(ModelCatalog.QWEN_3_5_0_8B_Q4, ModelCatalog.QWEN3_1_7B_Q4_K_M)
@@ -216,6 +326,8 @@ private class ImageRecordingInferenceModule : InferenceModule {
 
     override fun loadModel(modelId: String): Boolean {
         loadCalls += 1
+        if (modelId in failingModelIds) return false
+        loadedModelId = modelId
         return true
     }
 
@@ -225,6 +337,7 @@ private class ImageRecordingInferenceModule : InferenceModule {
 
     override fun unloadModel() {
         unloadCalls += 1
+        loadedModelId = null
     }
 }
 

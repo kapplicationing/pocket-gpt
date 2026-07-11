@@ -51,8 +51,10 @@ import com.pocketagent.nativebridge.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -148,6 +150,189 @@ class ModelProvisioningViewModelTest {
     }
 
     @Test
+    fun `import cancellation propagates and clears importing state`() = runTest(dispatcher) {
+        val cancellation = CancellationException("import cancelled")
+        val gateway = FakeProvisioningGateway().apply {
+            importFailure = cancellation
+        }
+        val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        val thrown = assertFailsWith<CancellationException> {
+            viewModel.importModelFromUri(
+                modelId = "qwen3.5-0.8b-q4",
+                sourceUri = fakeUri(),
+            )
+        }
+
+        assertEquals(cancellation.message, thrown.message)
+        assertFalse(viewModel.uiState.value.isImporting)
+
+        gateway.importFailure = null
+        val retry = viewModel.importModelFromUri(
+            modelId = "qwen3.5-0.8b-q4",
+            sourceUri = fakeUri(),
+        )
+        assertTrue(retry.isSuccess)
+        assertEquals(2, gateway.importCalls)
+    }
+
+    @Test
+    fun `import admission is single flight and busy state follows the owner`() = runTest(dispatcher) {
+        val importGate = CompletableDeferred<Unit>()
+        val gateway = FakeProvisioningGateway().apply {
+            this.importGate = importGate
+        }
+        val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        val firstImport = async {
+            viewModel.importModelFromUri(
+                modelId = "qwen3.5-0.8b-q4",
+                sourceUri = fakeUri(),
+            )
+        }
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.isImporting)
+        assertEquals(1, gateway.importCalls)
+
+        val rejectedImport = viewModel.importModelFromUri(
+            modelId = "qwen3-0.6b-q4_k_m",
+            sourceUri = fakeUri(),
+        )
+
+        assertTrue(rejectedImport.isFailure)
+        assertEquals(
+            "Another model import is already in progress.",
+            rejectedImport.exceptionOrNull()?.message,
+        )
+        assertTrue(viewModel.uiState.value.isImporting)
+        assertEquals(1, gateway.importCalls)
+
+        importGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertTrue(firstImport.await().isSuccess)
+        assertFalse(viewModel.uiState.value.isImporting)
+    }
+
+    @Test
+    fun `view model owned import survives ui collector cancellation and retains terminal result`() =
+        runTest(dispatcher) {
+        val importGate = CompletableDeferred<Unit>()
+        val gateway = FakeProvisioningGateway().apply {
+            this.importGate = importGate
+        }
+        val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        assertTrue(
+            viewModel.startModelImport(
+                operationId = 41L,
+                modelId = "qwen3.5-0.8b-q4",
+                sourceUri = fakeUri(),
+                documentDescription = "model.gguf",
+            ),
+        )
+        val cancelledUiCollector = launch { viewModel.modelImportOperation.collect {} }
+        advanceUntilIdle()
+
+        assertTrue(viewModel.modelImportOperation.value is ModelImportOperationState.Running)
+        assertTrue(viewModel.uiState.value.isImporting)
+        cancelledUiCollector.cancel()
+        importGate.complete(Unit)
+        advanceUntilIdle()
+
+        val terminal = viewModel.modelImportOperation.value
+        assertTrue(terminal is ModelImportOperationState.Succeeded)
+        assertEquals(41L, (terminal as ModelImportOperationState.Succeeded).operationId)
+        assertFalse(viewModel.uiState.value.isImporting)
+        assertFalse(
+            viewModel.startModelImport(
+                operationId = 42L,
+                modelId = "qwen3-0.6b-q4_k_m",
+                sourceUri = fakeUri(),
+                documentDescription = null,
+            ),
+        )
+        assertFalse(viewModel.acknowledgeModelImportTerminal(999L))
+        assertTrue(viewModel.acknowledgeModelImportTerminal(41L))
+        assertEquals(ModelImportOperationState.Idle, viewModel.modelImportOperation.value)
+    }
+
+    @Test
+    fun `view model owned cancellation is retained and acknowledgement admits retry`() = runTest(dispatcher) {
+        val gateway = FakeProvisioningGateway().apply {
+            importFailure = CancellationException("cancelled")
+        }
+        val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        assertTrue(
+            viewModel.startModelImport(
+                operationId = 51L,
+                modelId = "qwen3.5-0.8b-q4",
+                sourceUri = fakeUri(),
+                documentDescription = null,
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(ModelImportOperationState.Cancelled(51L), viewModel.modelImportOperation.value)
+        assertFalse(viewModel.uiState.value.isImporting)
+        assertTrue(viewModel.acknowledgeModelImportTerminal(51L))
+
+        gateway.importFailure = null
+        assertTrue(
+            viewModel.startModelImport(
+                operationId = 52L,
+                modelId = "qwen3.5-0.8b-q4",
+                sourceUri = fakeUri(),
+                documentDescription = null,
+            ),
+        )
+        advanceUntilIdle()
+        assertTrue(viewModel.modelImportOperation.value is ModelImportOperationState.Succeeded)
+    }
+
+    @Test
+    fun `view model owned failure retains mapped message until matching acknowledgement`() = runTest(dispatcher) {
+        val gateway = FakeProvisioningGateway().apply {
+            importFailure = RuntimeDomainException(
+                RuntimeDomainError(
+                    code = RuntimeErrorCodes.PROVISIONING_IMPORT_SOURCE_UNREADABLE,
+                    userMessage = "Selected model file is unreadable.",
+                ),
+            )
+        }
+        val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        assertTrue(
+            viewModel.startModelImport(
+                operationId = 61L,
+                modelId = "qwen3.5-0.8b-q4",
+                sourceUri = fakeUri(),
+                documentDescription = "broken.gguf",
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            ModelImportOperationState.Failed(
+                operationId = 61L,
+                userMessage = "Selected model file is unreadable.",
+            ),
+            viewModel.modelImportOperation.value,
+        )
+        assertFalse(viewModel.acknowledgeModelImportTerminal(62L))
+        assertTrue(viewModel.modelImportOperation.value is ModelImportOperationState.Failed)
+        assertTrue(viewModel.acknowledgeModelImportTerminal(61L))
+        assertEquals(ModelImportOperationState.Idle, viewModel.modelImportOperation.value)
+    }
+
+    @Test
     fun `metered download warning check has async UI-facing path`() = runTest(dispatcher) {
         val version = sampleDownloadVersion()
         val gateway = FakeProvisioningGateway().apply {
@@ -162,8 +347,6 @@ class ModelProvisioningViewModelTest {
         assertTrue(shouldWarn)
         assertEquals(version, gateway.lastWarnVersion)
     }
-
-
     @Test
     fun `manifest and version actions delegate through gateway`() = runTest(dispatcher) {
         val gateway = FakeProvisioningGateway()
@@ -174,9 +357,9 @@ class ModelProvisioningViewModelTest {
         advanceUntilIdle()
         assertEquals(1, viewModel.uiState.value.manifest.models.size)
 
-        assertTrue(viewModel.setActiveVersion("qwen3.5-0.8b-q4", "1").changed)
-        assertTrue(viewModel.removeVersion("qwen3.5-0.8b-q4", "1").changed)
-        viewModel.cancelDownload("task-1")
+        assertTrue(viewModel.setActiveVersionAsync("qwen3.5-0.8b-q4", "1").changed)
+        assertTrue(viewModel.removeVersionAsync("qwen3.5-0.8b-q4", "1").changed)
+        viewModel.cancelDownloadAsync("task-1")
         assertEquals(1, gateway.setActiveCalls)
         assertEquals(1, gateway.removeCalls)
         assertEquals(1, gateway.cancelCalls)
@@ -188,7 +371,7 @@ class ModelProvisioningViewModelTest {
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
 
-        assertTrue(viewModel.clearActiveVersion("qwen3.5-0.8b-q4").changed)
+        assertTrue(viewModel.clearActiveVersionAsync("qwen3.5-0.8b-q4").changed)
         advanceUntilIdle()
 
         assertEquals(1, gateway.clearActiveCalls)
@@ -204,11 +387,11 @@ class ModelProvisioningViewModelTest {
         val viewModel = ModelProvisioningViewModel(gateway, ioDispatcher = dispatcher)
         advanceUntilIdle()
 
-        assertTrue(viewModel.shouldWarnForMeteredLargeDownload(version))
+        assertTrue(viewModel.shouldWarnForMeteredLargeDownloadAsync(version))
         assertEquals(version, gateway.lastWarnVersion)
 
-        viewModel.setDownloadWifiOnlyEnabled(true)
-        viewModel.acknowledgeLargeDownloadCellularWarning()
+        viewModel.setDownloadWifiOnlyEnabledAsync(true)
+        viewModel.acknowledgeLargeDownloadCellularWarningAsync()
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.downloadPreferences.wifiOnlyEnabled)
@@ -846,6 +1029,7 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     var removeCalls: Int = 0
     var cancelCalls: Int = 0
     var importFailure: Throwable? = null
+    var importGate: CompletableDeferred<Unit>? = null
     var lastEnqueuedVersion: ModelDistributionVersion? = null
     var lastEnqueuedOptions: DownloadRequestOptions? = null
     var enqueueFailure: Throwable? = null
@@ -873,8 +1057,9 @@ private class FakeProvisioningGateway : ProvisioningGateway {
     }
 
     override suspend fun importModelFromUri(modelId: String, sourceUri: Uri): RuntimeModelImportResult {
-        importFailure?.let { throw it }
         importCalls += 1
+        importGate?.await()
+        importFailure?.let { throw it }
         snapshotResult = sampleSnapshot(activeVersion = "2", installedVersion = "2")
         syncAggregateState()
         return RuntimeModelImportResult(

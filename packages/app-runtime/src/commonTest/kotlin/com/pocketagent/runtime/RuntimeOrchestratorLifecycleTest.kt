@@ -12,11 +12,14 @@ import com.pocketagent.nativebridge.ManagedRuntimePort
 import com.pocketagent.nativebridge.ModelLifecycleEvent
 import com.pocketagent.nativebridge.ModelLifecycleState
 import com.pocketagent.nativebridge.ModelLoadingStage
+import com.pocketagent.nativebridge.ModelLoadOptions
 import com.pocketagent.nativebridge.ModelRuntimeMetadata
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import com.pocketagent.nativebridge.RuntimeBackend
 import com.pocketagent.nativebridge.RuntimeInferencePortProvider
 import com.pocketagent.nativebridge.RuntimeInferencePorts
+import com.pocketagent.nativebridge.RuntimeLifetimePort
+import com.pocketagent.nativebridge.RuntimeCloseResult
 import com.pocketagent.nativebridge.RuntimeModelRegistryPort
 import com.pocketagent.nativebridge.RuntimeResidencyPort
 import com.pocketagent.nativebridge.RuntimeResidencyState
@@ -27,9 +30,135 @@ import java.io.File
 import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class RuntimeOrchestratorLifecycleTest {
+    @Test
+    fun `close releases runtime and joins lifecycle dispatcher`() {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val modelFile = File.createTempFile("runtime-orchestrator-close", ".gguf").apply {
+            writeText("fake-gguf-payload")
+            deleteOnExit()
+        }
+        val bridge = RecordingLifecycleBridge(modelId = modelId)
+        val module = RecordingLifecycleInferenceModule(bridge)
+        module.registerModelPath(modelId, modelFile.absolutePath)
+        val orchestrator = RuntimeOrchestrator(
+            inferenceModule = module,
+            runtimeConfig = lifecycleRuntimeConfig(modelId = modelId, file = modelFile),
+        )
+        try {
+            assertTrue(orchestrator.isLifecycleDispatcherAliveForTests())
+
+            val result = orchestrator.closeRuntime(timeoutMs = 1_000L)
+
+            assertTrue(result.success)
+            assertEquals(1, module.closeCalls)
+            assertEquals(false, orchestrator.isLifecycleDispatcherAliveForTests())
+        } finally {
+            modelFile.delete()
+        }
+    }
+
+    @Test
+    fun `native close rejection rolls back generation admission`() {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val modelFile = File.createTempFile("runtime-orchestrator-close-reject", ".gguf").apply {
+            writeText("fake-gguf-payload")
+            deleteOnExit()
+        }
+        val module = RecordingLifecycleInferenceModule(RecordingLifecycleBridge(modelId))
+        module.closeResult = RuntimeCloseResult.rejected("NATIVE_CLOSE_REJECTED")
+        val operations = RuntimeOperationCoordinator()
+        val orchestrator = RuntimeOrchestrator(
+            inferenceModule = module,
+            runtimeConfig = lifecycleRuntimeConfig(modelId = modelId, file = modelFile),
+            operationCoordinator = operations,
+        )
+        try {
+            val close = orchestrator.closeRuntime(timeoutMs = 1_000L)
+
+            assertEquals(false, close.success)
+            assertTrue(close.runtimeReusable)
+            val admitted = assertIs<GenerationAdmissionResult.Acquired>(
+                operations.tryAcquireGeneration("request-after-rejection", "session-a"),
+            )
+            admitted.lease.close()
+        } finally {
+            modelFile.delete()
+        }
+    }
+
+    @Test
+    fun `load fails closed when active generation rejects cancellation`() {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val modelFile = File.createTempFile("runtime-orchestrator-busy-load", ".gguf").apply {
+            writeText("fake-gguf-payload")
+            deleteOnExit()
+        }
+        val bridge = RecordingLifecycleBridge(modelId = modelId)
+        val module = RecordingLifecycleInferenceModule(bridge)
+        module.registerModelPath(modelId, modelFile.absolutePath)
+        val operations = RuntimeOperationCoordinator()
+        val active = assertIs<GenerationAdmissionResult.Acquired>(
+            operations.tryAcquireGeneration(requestId = "request-a", sessionId = "session-a"),
+        ).lease
+        val orchestrator = RuntimeOrchestrator(
+            inferenceModule = module,
+            runtimeConfig = lifecycleRuntimeConfig(modelId = modelId, file = modelFile),
+            operationCoordinator = operations,
+        )
+
+        try {
+            val result = orchestrator.loadModel(modelId = modelId)
+
+            assertEquals(false, result.success)
+            assertEquals(ModelLifecycleErrorCode.BUSY_GENERATION, result.errorCode)
+            assertEquals(0, bridge.loadCalls)
+            assertEquals(null, orchestrator.loadedModel())
+        } finally {
+            active.close()
+            modelFile.delete()
+        }
+    }
+
+    @Test
+    fun `offload fails closed and preserves resident model when cancellation is rejected`() {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val modelFile = File.createTempFile("runtime-orchestrator-busy-offload", ".gguf").apply {
+            writeText("fake-gguf-payload")
+            deleteOnExit()
+        }
+        val bridge = RecordingLifecycleBridge(modelId = modelId)
+        val module = RecordingLifecycleInferenceModule(bridge)
+        module.registerModelPath(modelId, modelFile.absolutePath)
+        val operations = RuntimeOperationCoordinator()
+        val orchestrator = RuntimeOrchestrator(
+            inferenceModule = module,
+            runtimeConfig = lifecycleRuntimeConfig(modelId = modelId, file = modelFile),
+            operationCoordinator = operations,
+        )
+
+        try {
+            assertTrue(orchestrator.loadModel(modelId = modelId).success)
+            val active = assertIs<GenerationAdmissionResult.Acquired>(
+                operations.tryAcquireGeneration(requestId = "request-a", sessionId = "session-a"),
+            ).lease
+            try {
+                val result = orchestrator.offloadModel(reason = "manual")
+
+                assertEquals(false, result.success)
+                assertEquals(ModelLifecycleErrorCode.BUSY_GENERATION, result.errorCode)
+                assertEquals(modelId, orchestrator.loadedModel()?.modelId)
+            } finally {
+                active.close()
+            }
+        } finally {
+            modelFile.delete()
+        }
+    }
+
     @Test
     fun `loadedModel preserves explicitly loaded model version`() {
         val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
@@ -147,12 +276,15 @@ private class RecordingLifecycleInferenceModule(
     CacheAwareGenerationPort,
     RuntimeModelRegistryPort,
     RuntimeResidencyPort,
-    RuntimeSessionCachePort {
+    RuntimeSessionCachePort,
+    RuntimeLifetimePort {
     private var activeModelId: String? = null
     private val modelPathById = mutableMapOf<String, String>()
     private val modelMetadataById = mutableMapOf<String, ModelRuntimeMetadata>()
     private var runtimeGenerationConfig: RuntimeGenerationConfig = RuntimeGenerationConfig.default()
     private var runtimeResidencyState: RuntimeResidencyState = RuntimeResidencyState()
+    var closeCalls: Int = 0
+    var closeResult: RuntimeCloseResult = RuntimeCloseResult.closed()
 
     override fun runtimeInferencePorts(): RuntimeInferencePorts {
         return RuntimeInferencePorts(
@@ -161,27 +293,35 @@ private class RecordingLifecycleInferenceModule(
             modelRegistry = this,
             residency = this,
             sessionCache = this,
+            lifetime = this,
         )
     }
 
     override fun listAvailableModels(): List<String> = bridge.listAvailableModels()
 
     override fun loadModel(modelId: String): Boolean {
-        return loadModel(modelId = modelId, modelVersion = null, strictGpuOffload = runtimeGenerationConfig.strictGpuOffload)
+        return loadModel(
+            modelId = modelId,
+            modelVersion = null,
+            strictGpuOffload = runtimeGenerationConfig.strictGpuOffload,
+        )
     }
 
     override fun loadModel(modelId: String, modelVersion: String?, strictGpuOffload: Boolean): Boolean {
         val loaded = bridge.loadModel(
             modelId = modelId,
             modelPath = modelPathById[modelId],
-            options = com.pocketagent.nativebridge.ModelLoadOptions(
+            options = ModelLoadOptions(
                 modelVersion = modelVersion,
                 strictGpuOffload = strictGpuOffload,
             ),
         )
         if (loaded) {
             activeModelId = modelId
-            runtimeResidencyState = runtimeResidencyState.copy(resident = true, lastAccessAtEpochMs = System.currentTimeMillis())
+            runtimeResidencyState = runtimeResidencyState.copy(
+                resident = true,
+                lastAccessAtEpochMs = System.currentTimeMillis(),
+            )
         }
         return loaded
     }
@@ -216,7 +356,10 @@ private class RecordingLifecycleInferenceModule(
     override fun unloadModel() {
         bridge.offloadModel(reason = "explicit_unload")
         activeModelId = null
-        runtimeResidencyState = runtimeResidencyState.copy(resident = false, lastAccessAtEpochMs = System.currentTimeMillis())
+        runtimeResidencyState = runtimeResidencyState.copy(
+            resident = false,
+            lastAccessAtEpochMs = System.currentTimeMillis(),
+        )
     }
 
     override fun setRuntimeGenerationConfig(config: RuntimeGenerationConfig) {
@@ -288,6 +431,12 @@ private class RecordingLifecycleInferenceModule(
     override fun loadSessionCache(filePath: String): Boolean {
         return if (activeModelId != null) bridge.loadSessionCache(filePath) else false
     }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        closeCalls += 1
+        if (closeResult.success) bridge.unloadModel()
+        return closeResult
+    }
 }
 
 private class RecordingLifecycleBridge(
@@ -298,6 +447,7 @@ private class RecordingLifecycleBridge(
     private var loadedModel: LoadedModelInfo? = null
     private var currentEvent: ModelLifecycleEvent = ModelLifecycleEvent(state = ModelLifecycleState.UNLOADED)
     var failNextLoad: Boolean = false
+    var loadCalls: Int = 0
     val savedSessionPaths = mutableListOf<String>()
     val restoredSessionPaths = mutableListOf<String>()
 
@@ -306,10 +456,15 @@ private class RecordingLifecycleBridge(
     override fun listAvailableModels(): List<String> = listOf(modelId)
 
     override fun loadModel(modelId: String, modelPath: String?): Boolean {
-        return loadModel(modelId, modelPath, com.pocketagent.nativebridge.ModelLoadOptions())
+        return loadModel(modelId, modelPath, ModelLoadOptions())
     }
 
-    override fun loadModel(modelId: String, modelPath: String?, options: com.pocketagent.nativebridge.ModelLoadOptions): Boolean {
+    override fun loadModel(
+        modelId: String,
+        modelPath: String?,
+        options: ModelLoadOptions,
+    ): Boolean {
+        loadCalls += 1
         emit(
             ModelLifecycleEvent(
                 state = ModelLifecycleState.LOADING,

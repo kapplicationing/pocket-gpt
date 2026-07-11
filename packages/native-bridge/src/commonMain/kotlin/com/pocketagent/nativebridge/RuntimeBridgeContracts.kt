@@ -284,7 +284,7 @@ internal fun resolveActiveBackendIdentity(diagnosticsPayload: String?): String? 
         ?.takeIf { backend -> backend != "auto" }
 }
 
-interface LlamaCppRuntimeBridge {
+interface LlamaCppRuntimeBridge : RuntimeLifetimePort {
     fun isReady(): Boolean
     fun listAvailableModels(): List<String>
     fun loadModel(modelId: String): Boolean = loadModel(modelId, null, ModelLoadOptions())
@@ -325,6 +325,14 @@ interface LlamaCppRuntimeBridge {
     fun offloadModel(reason: String): Boolean {
         unloadModel()
         return true
+    }
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        freeMultimodal()
+        return if (offloadModel("runtime_close")) {
+            RuntimeCloseResult.closed()
+        } else {
+            RuntimeCloseResult.rejected("RUNTIME_CLOSE_UNLOAD_FAILED")
+        }
     }
     fun getLoadedModel(): LoadedModelInfo? = null
     fun currentModelLifecycleState(): ModelLifecycleEvent {

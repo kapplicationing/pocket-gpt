@@ -57,22 +57,7 @@ class StreamStateReducer(
                     isThinking = event.active,
                 )
             }
-            is ChatStreamEvent.Delta -> {
-                when (val delta = event.delta) {
-                    is ChatStreamDelta.TextDelta -> {
-                        val firstToken = if (state.firstTokenMs == null && delta.text.isNotEmpty()) {
-                            elapsedMs.coerceAtLeast(0L)
-                        } else {
-                            state.firstTokenMs
-                        }
-                        state.copy(
-                            accumulatedText = event.accumulatedText,
-                            isThinking = state.isThinking,
-                            firstTokenMs = firstToken,
-                        )
-                    }
-                }
-            }
+            is ChatStreamEvent.Delta -> reduceDelta(state, event, elapsedMs)
             is ChatStreamEvent.Completed -> {
                 state.copy(
                     accumulatedText = event.response.text,
@@ -117,12 +102,37 @@ class StreamStateReducer(
                         requestId = event.requestId,
                         finishReason = "failed:${event.errorCode}",
                         terminalEventSeen = event.terminalEventSeen,
-                        uiError = UiErrorMapper.runtimeFailure(event.message),
+                        uiError = UiErrorMapper.runtimeFailure(
+                            errorCode = event.errorCode,
+                            detail = event.message,
+                            recoveryDisposition = event.recoveryDisposition,
+                        ),
                         responseText = state.accumulatedText,
                         completionMs = event.completionMs,
                         firstTokenMs = state.firstTokenMs ?: event.firstTokenMs,
                         errorCode = event.errorCode,
                     ),
+                )
+            }
+        }
+    }
+
+    private fun reduceDelta(
+        state: StreamReducerState,
+        event: ChatStreamEvent.Delta,
+        elapsedMs: Long,
+    ): StreamReducerState {
+        return when (val delta = event.delta) {
+            is ChatStreamDelta.TextDelta -> {
+                val firstToken = if (state.firstTokenMs == null && delta.text.isNotEmpty()) {
+                    elapsedMs.coerceAtLeast(0L)
+                } else {
+                    state.firstTokenMs
+                }
+                state.copy(
+                    accumulatedText = event.accumulatedText,
+                    isThinking = state.isThinking,
+                    firstTokenMs = firstToken,
                 )
             }
         }

@@ -1,6 +1,6 @@
 # Privacy and Security Model
 
-Last updated: 2026-03-08
+Last updated: 2026-07-11
 
 ## Privacy Promise
 
@@ -21,6 +21,7 @@ PocketAgent is local-first by default:
 1. Sensitive user content stays local unless user explicitly opts into an external action.
 2. Tool calls execute through a local sandbox with schema validation.
 3. Any network-capable action must pass `PolicyModule` checks.
+4. Android platform backup is disabled so conversations, model/runtime files, caches, and diagnostics are not copied through OS backup or device-transfer backup channels.
 
 ## Threat Model
 
@@ -73,6 +74,7 @@ Do not publish these as available controls until implementation and validation a
 | Tool safety | strict schema validation + allowlist | Implemented (schema validation + deterministic rejection contracts) |
 | Diagnostics privacy | no raw prompt/response by default | Implemented (redaction checks in runtime tests and UI export path) |
 | Network gating | explicit policy checks per action | Implemented (policy wiring integrated with Android platform enforcement checks) |
+| Platform backup boundary | no OS backup of local conversations or runtime artifacts | Implemented (`android:allowBackup="false"`, enforced by manifest regression test) |
 | End-user retention controls | user can tune retention/reset in app UI | Not implemented |
 | Voice privacy (future STT/TTS) | equivalent controls to text/image paths | Planned (post-MVP) |
 

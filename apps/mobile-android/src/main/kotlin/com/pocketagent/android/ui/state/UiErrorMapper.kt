@@ -3,7 +3,9 @@ package com.pocketagent.android.ui.state
 import androidx.compose.runtime.Immutable
 import com.pocketagent.android.runtime.errorCodeName
 import com.pocketagent.runtime.ImageAnalysisResult
+import com.pocketagent.runtime.RuntimeFailureRecoveryPolicy
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
+import com.pocketagent.runtime.RuntimeRecoveryDisposition
 import com.pocketagent.runtime.ToolExecutionResult
 
 enum class RecoveryAction {
@@ -21,6 +23,7 @@ data class UiError(
     val userMessage: String,
     val technicalDetail: String? = null,
     val recoveryAction: RecoveryAction = RecoveryAction.NONE,
+    val sourceCode: String? = null,
 ) {
     val recoverable: Boolean get() = recoveryAction != RecoveryAction.NONE
 }
@@ -31,6 +34,9 @@ object UiErrorMapper {
     private const val TOOL_SCHEMA_CODE = "UI-TOOL-SCHEMA-001"
     private const val RUNTIME_CODE = "UI-RUNTIME-001"
 
+    // Startup diagnostics stay in one ordered classifier because message precedence
+    // is user-visible policy.
+    @Suppress("CyclomaticComplexMethod")
     fun startupFailure(startupChecks: List<String>): UiError? {
         if (startupChecks.isEmpty()) {
             return null
@@ -40,30 +46,42 @@ object UiErrorMapper {
         val (userMessage, recovery) = when {
             normalized.contains("runtime_incompatible_model_format")
             ->
-                "This model format is not compatible with the current runtime. Choose a different model." to RecoveryAction.CHANGE_MODEL
+                "This model format is not compatible with the current runtime. Choose a different model." to
+                    RecoveryAction.CHANGE_MODEL
             normalized.contains("missing runtime model") ->
-                "Runtime setup is incomplete. Download or import required models, then refresh checks." to RecoveryAction.REDOWNLOAD_MODEL
+                "Runtime setup is incomplete. Download or import required models, then refresh checks." to
+                    RecoveryAction.REDOWNLOAD_MODEL
             normalized.contains("model_artifact_config_missing") ->
-                "Runtime artifact metadata is missing. Reinstall or re-provision models, then refresh checks." to RecoveryAction.REDOWNLOAD_MODEL
+                "Runtime artifact metadata is missing. Reinstall or re-provision models, then refresh checks." to
+                    RecoveryAction.REDOWNLOAD_MODEL
             normalized.contains("checksum_mismatch") || normalized.contains("checksum mismatch") ->
-                "Model verification failed (checksum mismatch). Re-download or re-import the model." to RecoveryAction.REDOWNLOAD_MODEL
+                "Model verification failed (checksum mismatch). Re-download or re-import the model." to
+                    RecoveryAction.REDOWNLOAD_MODEL
             normalized.contains("provenance_issuer_mismatch") ||
                 normalized.contains("provenance_signature_mismatch") ||
                 normalized.contains("provenance") ->
-                "Model verification failed (provenance mismatch). Use a trusted model source and retry." to RecoveryAction.REDOWNLOAD_MODEL
+                "Model verification failed (provenance mismatch). Use a trusted model source and retry." to
+                    RecoveryAction.REDOWNLOAD_MODEL
             normalized.contains("runtime_incompatible") || normalized.contains("runtime compatibility") ->
-                "Model runtime compatibility failed. Import a compatible model build and refresh checks." to RecoveryAction.CHANGE_MODEL
+                "Model runtime compatibility failed. Import a compatible model build and refresh checks." to
+                    RecoveryAction.CHANGE_MODEL
             normalized.contains("build is missing native runtime library") ||
                 normalized.contains("libpocket_llama.so") ->
-                "This app build is missing the native runtime. Install a full build and retry." to RecoveryAction.RESTART_APP
-            normalized.contains("runtime backend is adb_fallback") || normalized.contains("runtime backend is unavailable") ->
-                "Native runtime backend is unavailable. Confirm device/runtime setup and retry." to RecoveryAction.RESTART_APP
+                "This app build is missing the native runtime. Install a full build and retry." to
+                    RecoveryAction.RESTART_APP
+            normalized.contains("runtime backend is adb_fallback") ||
+                normalized.contains("runtime backend is unavailable") ->
+                "Native runtime backend is unavailable. Confirm device/runtime setup and retry." to
+                    RecoveryAction.RESTART_APP
             normalized.contains("template_unavailable") || normalized.contains("model profile missing") ->
-                "Model interaction template is unavailable. Reinstall or update the model library entry, then refresh checks." to RecoveryAction.CHANGE_MODEL
+                "Model interaction template is unavailable. Reinstall or update the model library entry, " +
+                    "then refresh checks." to RecoveryAction.CHANGE_MODEL
             normalized.contains("startup checks timed out") || normalized.contains("timed out") ->
-                "Runtime checks timed out. Refresh runtime checks before sending a message." to RecoveryAction.REFRESH_CHECKS
+                "Runtime checks timed out. Refresh runtime checks before sending a message." to
+                    RecoveryAction.REFRESH_CHECKS
             else ->
-                "Runtime setup is incomplete. Open the model library, refresh checks, and retry." to RecoveryAction.REFRESH_CHECKS
+                "Runtime setup is incomplete. Open the model library, refresh checks, and retry." to
+                    RecoveryAction.REFRESH_CHECKS
         }
         return UiError(
             code = STARTUP_CODE,
@@ -92,11 +110,18 @@ object UiErrorMapper {
                     code = IMAGE_VALIDATION_CODE,
                     userMessage = result.failure.userMessage,
                     technicalDetail = result.failure.technicalDetail,
+                    sourceCode = result.failure.code,
                 )
-                else -> UiError(
+                is com.pocketagent.runtime.ImageFailure.Runtime -> runtimeFailure(
+                    errorCode = result.failure.code,
+                    detail = result.failure.technicalDetail,
+                )
+                is com.pocketagent.runtime.ImageFailure.PolicyDenied -> UiError(
                     code = RUNTIME_CODE,
                     userMessage = result.failure.userMessage,
                     technicalDetail = result.failure.technicalDetail,
+                    recoveryAction = RecoveryAction.NONE,
+                    sourceCode = result.failure.code,
                 )
             }
         }
@@ -131,11 +156,18 @@ object UiErrorMapper {
                     code = TOOL_SCHEMA_CODE,
                     userMessage = result.failure.userMessage,
                     technicalDetail = result.failure.technicalDetail,
+                    sourceCode = result.failure.code,
                 )
-                else -> UiError(
+                is com.pocketagent.runtime.ToolFailure.Execution -> runtimeFailure(
+                    errorCode = result.failure.code,
+                    detail = result.failure.technicalDetail,
+                )
+                is com.pocketagent.runtime.ToolFailure.PolicyDenied -> UiError(
                     code = RUNTIME_CODE,
                     userMessage = result.failure.userMessage,
                     technicalDetail = result.failure.technicalDetail,
+                    recoveryAction = RecoveryAction.NONE,
+                    sourceCode = result.failure.code,
                 )
             }
         }
@@ -143,23 +175,60 @@ object UiErrorMapper {
 
     fun runtimeFailure(detail: String?): UiError {
         val normalized = detail?.lowercase().orEmpty()
-        if (normalized.contains("image_attachments_unsupported") ||
+        val recoveryDisposition = if (
+            normalized.contains("image_attachments_unsupported") ||
             normalized.contains("does not support image attachments") ||
             normalized.contains("cannot process image attachments")
         ) {
-            // TODO: migrate to string resource for localization
-            return UiError(
-                code = RUNTIME_CODE,
-                userMessage = "This model cannot use image attachments. Switch to a vision-capable model and retry.",
-                technicalDetail = detail,
-                recoveryAction = RecoveryAction.CHANGE_MODEL,
-            )
+            RuntimeRecoveryDisposition.SELECT_DIFFERENT_MODEL
+        } else {
+            RuntimeRecoveryDisposition.RETRY_REQUEST
+        }
+        return runtimeFailure(
+            errorCode = null,
+            detail = detail,
+            recoveryDisposition = recoveryDisposition,
+        )
+    }
+
+    fun runtimeFailure(
+        errorCode: String?,
+        detail: String?,
+        recoveryDisposition: RuntimeRecoveryDisposition =
+            RuntimeFailureRecoveryPolicy.forErrorCode(errorCode),
+    ): UiError {
+        val sourceCode = errorCode?.trim()?.ifBlank { null }
+        val normalizedCode = sourceCode?.lowercase().orEmpty()
+        val normalizedDetail = detail?.lowercase().orEmpty()
+        val userMessage = when (recoveryDisposition) {
+            RuntimeRecoveryDisposition.RETRY_REQUEST -> "Request failed. Please try again."
+            RuntimeRecoveryDisposition.REPROVISION_MODEL ->
+                "Model files are unavailable or invalid. Re-download or re-import the model."
+            RuntimeRecoveryDisposition.SELECT_DIFFERENT_MODEL -> when {
+                normalizedCode == "image_attachments_unsupported" ||
+                    normalizedDetail.contains("image_attachments_unsupported") ||
+                    normalizedDetail.contains("image attachments") ->
+                    "This model cannot use image attachments. Switch to a vision-capable model and retry."
+                normalizedCode == "template_unavailable" ->
+                    "The model interaction template is unavailable. Choose a different model."
+                normalizedCode == "out_of_memory" || normalizedCode == "memory_budget_exceeded" ->
+                    "The model could not fit in available memory. Choose a smaller model or lower the context size."
+                else ->
+                    "This model is not compatible with the current runtime. Choose a different model."
+            }
+            RuntimeRecoveryDisposition.RESTART_RUNTIME ->
+                "The runtime failed to initialize. Restart the app and try again."
+            RuntimeRecoveryDisposition.REFRESH_RUNTIME_CHECKS ->
+                "The runtime is not ready. Refresh runtime checks and try again."
+            RuntimeRecoveryDisposition.NONE ->
+                "The request stopped because a newer request took priority."
         }
         return UiError(
             code = RUNTIME_CODE,
-            userMessage = "Request failed. Please try again.",
+            userMessage = userMessage,
             technicalDetail = detail,
-            recoveryAction = RecoveryAction.RETRY_LOAD,
+            recoveryAction = recoveryDisposition.toRecoveryAction(),
+            sourceCode = sourceCode,
         )
     }
 
@@ -195,12 +264,15 @@ object UiErrorMapper {
                 if (
                     normalizedDetail.contains("runtime_incompatible_model_format")
                 ) {
-                    "This model format is not compatible with the current runtime. Choose a different model." to RecoveryAction.CHANGE_MODEL
+                    "This model format is not compatible with the current runtime. Choose a different model." to
+                        RecoveryAction.CHANGE_MODEL
                 } else {
-                    "Model is not compatible with this runtime. Choose a different model." to RecoveryAction.CHANGE_MODEL
+                    "Model is not compatible with this runtime. Choose a different model." to
+                        RecoveryAction.CHANGE_MODEL
                 }
             "OUT_OF_MEMORY" ->
-                "Model could not fit in available memory. Try a smaller model, lower context, or offload the current model first." to RecoveryAction.CHANGE_MODEL
+                "Model could not fit in available memory. Try a smaller model, lower context, " +
+                    "or offload the current model first." to RecoveryAction.CHANGE_MODEL
             "BACKEND_INIT_FAILED" ->
                 "Runtime backend failed to initialize. Restart the app and try again." to RecoveryAction.RESTART_APP
             "BUSY_GENERATION" ->
@@ -217,6 +289,18 @@ object UiErrorMapper {
             userMessage = userMessage,
             technicalDetail = result.detail,
             recoveryAction = recovery,
+            sourceCode = errorCode,
         )
+    }
+}
+
+private fun RuntimeRecoveryDisposition.toRecoveryAction(): RecoveryAction {
+    return when (this) {
+        RuntimeRecoveryDisposition.RETRY_REQUEST -> RecoveryAction.RETRY_LOAD
+        RuntimeRecoveryDisposition.REPROVISION_MODEL -> RecoveryAction.REDOWNLOAD_MODEL
+        RuntimeRecoveryDisposition.SELECT_DIFFERENT_MODEL -> RecoveryAction.CHANGE_MODEL
+        RuntimeRecoveryDisposition.RESTART_RUNTIME -> RecoveryAction.RESTART_APP
+        RuntimeRecoveryDisposition.REFRESH_RUNTIME_CHECKS -> RecoveryAction.REFRESH_CHECKS
+        RuntimeRecoveryDisposition.NONE -> RecoveryAction.NONE
     }
 }

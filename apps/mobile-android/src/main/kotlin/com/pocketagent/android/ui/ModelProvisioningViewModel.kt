@@ -42,6 +42,7 @@ import com.pocketagent.runtime.ModelLifecycleErrorCode
 import com.pocketagent.runtime.RuntimeLoadedModel
 import com.pocketagent.runtime.RuntimeModelLifecycleCommandResult
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -51,6 +52,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
@@ -121,6 +123,35 @@ data class RuntimeModelUiState(
     val statusMessage: String?,
 )
 
+@Immutable
+internal sealed interface ModelImportOperationState {
+    data object Idle : ModelImportOperationState
+
+    data class Running(
+        val operationId: Long,
+        val modelId: String,
+        val documentDescription: String?,
+    ) : ModelImportOperationState
+
+    sealed interface Terminal : ModelImportOperationState {
+        val operationId: Long
+    }
+
+    data class Succeeded(
+        override val operationId: Long,
+        val result: RuntimeModelImportResult,
+    ) : Terminal
+
+    data class Failed(
+        override val operationId: Long,
+        val userMessage: String,
+    ) : Terminal
+
+    data class Cancelled(
+        override val operationId: Long,
+    ) : Terminal
+}
+
 private data class ModelProvisioningLocalUiState(
     val isImporting: Boolean = false,
     val statusMessage: String? = null,
@@ -177,6 +208,9 @@ class ModelProvisioningViewModel internal constructor(
     private val localUiState = MutableStateFlow(ModelProvisioningLocalUiState())
     private val _modelLoadingState = MutableStateFlow(aggregateState.value.lifecycle.toModelLoadingState())
     private val huggingFaceResolveGeneration = AtomicLong(0L)
+    private val modelImportMutex = Mutex()
+    private val modelImportOperationLock = Any()
+    private val _modelImportOperation = MutableStateFlow<ModelImportOperationState>(ModelImportOperationState.Idle)
     private val _uiState = MutableStateFlow(
         aggregateState.value.toModelProvisioningUiState(
             local = localUiState.value,
@@ -185,6 +219,7 @@ class ModelProvisioningViewModel internal constructor(
     )
     val uiState = _uiState.asStateFlow()
     val modelLoadingState = _modelLoadingState.asStateFlow()
+    internal val modelImportOperation = _modelImportOperation.asStateFlow()
     val provisioningSnapshotFlow = _uiState
         .map { it.snapshot }
         .distinctUntilChanged()
@@ -343,21 +378,97 @@ class ModelProvisioningViewModel internal constructor(
         refreshRecentHuggingFaceModels()
     }
 
+    // Convert every non-cancellation gateway failure into the stable user-facing import result contract.
+    @Suppress("TooGenericExceptionCaught")
     suspend fun importModelFromUri(modelId: String, sourceUri: Uri): Result<RuntimeModelImportResult> {
-        updateLocalUiState { state -> state.copy(isImporting = true) }
-        val result = runCatching {
-            withContext(ioDispatcher) {
-                gateway.importModelFromUri(modelId = modelId, sourceUri = sourceUri)
-            }
-        }.recoverCatching { error ->
-            throw ProvisioningUserFacingException(
-                message = userMessageFor(error),
-                code = (error as? RuntimeDomainException)?.domainError?.code,
-                cause = error,
+        if (!modelImportMutex.tryLock()) {
+            return Result.failure(
+                ProvisioningUserFacingException(
+                    message = MODEL_IMPORT_ALREADY_IN_PROGRESS_MESSAGE,
+                    code = null,
+                ),
             )
         }
-        updateLocalUiState { state -> state.copy(isImporting = false) }
-        return result
+        return try {
+            updateLocalUiState { state -> state.copy(isImporting = true) }
+            Result.success(
+                withContext(ioDispatcher) {
+                    gateway.importModelFromUri(modelId = modelId, sourceUri = sourceUri)
+                },
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            Result.failure(
+                ProvisioningUserFacingException(
+                    message = userMessageFor(error),
+                    code = (error as? RuntimeDomainException)?.domainError?.code,
+                    cause = error,
+                ),
+            )
+        } finally {
+            try {
+                updateLocalUiState { state -> state.copy(isImporting = false) }
+            } finally {
+                modelImportMutex.unlock()
+            }
+        }
+    }
+
+    internal fun startModelImport(
+        operationId: Long,
+        modelId: String,
+        sourceUri: Uri,
+        documentDescription: String?,
+    ): Boolean {
+        synchronized(modelImportOperationLock) {
+            if (_modelImportOperation.value !is ModelImportOperationState.Idle) {
+                return false
+            }
+            _modelImportOperation.value = ModelImportOperationState.Running(
+                operationId = operationId,
+                modelId = modelId,
+                documentDescription = documentDescription,
+            )
+        }
+        viewModelScope.launch {
+            val terminal = try {
+                importModelFromUri(modelId = modelId, sourceUri = sourceUri).fold(
+                    onSuccess = { result ->
+                        ModelImportOperationState.Succeeded(
+                            operationId = operationId,
+                            result = result,
+                        )
+                    },
+                    onFailure = { error ->
+                        ModelImportOperationState.Failed(
+                            operationId = operationId,
+                            userMessage = error.message ?: "Unknown import error",
+                        )
+                    },
+                )
+            } catch (_: CancellationException) {
+                ModelImportOperationState.Cancelled(operationId = operationId)
+            }
+            synchronized(modelImportOperationLock) {
+                val current = _modelImportOperation.value
+                if (current is ModelImportOperationState.Running && current.operationId == operationId) {
+                    _modelImportOperation.value = terminal
+                }
+            }
+        }
+        return true
+    }
+
+    internal fun acknowledgeModelImportTerminal(operationId: Long): Boolean {
+        return synchronized(modelImportOperationLock) {
+            val current = _modelImportOperation.value
+            if (current !is ModelImportOperationState.Terminal || current.operationId != operationId) {
+                return@synchronized false
+            }
+            _modelImportOperation.value = ModelImportOperationState.Idle
+            true
+        }
     }
 
     @Deprecated("UI paths must use listInstalledVersionsAsync so disk-backed reads stay on the IO dispatcher.")
@@ -751,6 +862,9 @@ class ProvisioningUserFacingException(
     val code: String?,
     cause: Throwable? = null,
 ) : IllegalStateException(message, cause)
+
+private const val MODEL_IMPORT_ALREADY_IN_PROGRESS_MESSAGE =
+    "Another model import is already in progress."
 
 class ModelProvisioningViewModelFactory internal constructor(
     private val gateway: ProvisioningGateway,

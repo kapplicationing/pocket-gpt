@@ -2,6 +2,10 @@ package com.pocketagent.nativebridge
 
 import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.nativebridge.ModelLoadOptions
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -9,6 +13,48 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class NativeJniLlamaCppBridgeTest {
+    @Test
+    fun `blank request id is rejected before native generation`() {
+        val nativeApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "unused")
+        val bridge = NativeJniLlamaCppBridge(
+            nativeApi = nativeApi,
+            libraryLoader = { _ -> },
+            fallbackBridge = FakeFallbackBridge(),
+            fallbackEnabled = false,
+        )
+
+        val result = bridge.generate(
+            requestId = " ",
+            prompt = "hello",
+            maxTokens = 8,
+            cacheKey = null,
+            cachePolicy = CachePolicy.OFF,
+        ) { }
+
+        assertFalse(result.success)
+        assertEquals("REQUEST_ID_REQUIRED", result.errorCode)
+        assertFalse(nativeApi.generateCalled)
+    }
+
+    @Test
+    fun `close unloads runtime and joins lifecycle dispatcher`() {
+        val nativeApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "ok")
+        val bridge = NativeJniLlamaCppBridge(
+            nativeApi = nativeApi,
+            libraryLoader = { _ -> },
+            fallbackBridge = FakeFallbackBridge(),
+            fallbackEnabled = false,
+        )
+        assertTrue(bridge.isReady())
+        assertTrue(bridge.isLifecycleDispatcherAliveForTests())
+
+        val result = bridge.closeRuntime(timeoutMs = 1_000L)
+
+        assertTrue(result.success)
+        assertTrue(nativeApi.unloadCalled)
+        assertFalse(bridge.isLifecycleDispatcherAliveForTests())
+    }
+
     @Test
     fun `auto native library selection uses conservative baseline first`() {
         val attemptedLibraries = mutableListOf<String>()
@@ -61,7 +107,12 @@ class NativeJniLlamaCppBridgeTest {
 
     @Test
     fun `uses native runtime when library is available`() {
-        val nativeApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "native hello", peakRssMb = 1536.0)
+        val nativeApi = FakeNativeApi(
+            initializeOk = true,
+            loadOk = true,
+            generatedText = "native hello",
+            peakRssMb = 1536.0,
+        )
         val fallback = FakeFallbackBridge()
         val bridge = NativeJniLlamaCppBridge(
             nativeApi = nativeApi,
@@ -276,7 +327,7 @@ class NativeJniLlamaCppBridgeTest {
     }
 
     @Test
-    fun `cancel generation delegates to active backend`() {
+    fun `cancel without an active native request does not set a global cancel flag`() {
         val nativeApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "native hello")
         val nativeBridge = NativeJniLlamaCppBridge(
             nativeApi = nativeApi,
@@ -284,8 +335,8 @@ class NativeJniLlamaCppBridgeTest {
             fallbackBridge = FakeFallbackBridge(),
         )
         assertTrue(nativeBridge.isReady())
-        assertTrue(nativeBridge.cancelGeneration())
-        assertTrue(nativeApi.cancelCalled)
+        assertFalse(nativeBridge.cancelGeneration())
+        assertFalse(nativeApi.cancelCalled)
 
         val fallback = FakeFallbackBridge()
         val fallbackBridge = NativeJniLlamaCppBridge(
@@ -297,6 +348,152 @@ class NativeJniLlamaCppBridgeTest {
         assertTrue(fallbackBridge.isReady())
         assertTrue(fallbackBridge.cancelGeneration())
         assertTrue(fallback.cancelCalled)
+    }
+
+    @Test
+    fun `text generation is process global request aware and compare clears after cancel`() {
+        val enteredA = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        lateinit var nativeApiA: FakeNativeApi
+        nativeApiA = FakeNativeApi(
+            initializeOk = true,
+            loadOk = true,
+            generatedText = "request a",
+            streamHandler = { requestId ->
+                enteredA.countDown()
+                releaseA.await(2, TimeUnit.SECONDS)
+                if (requestId in nativeApiA.cancelRequestIds) {
+                    NativeJniLlamaCppBridge.NativeApi.StreamStatus(GenerationFinishReason.CANCELLED, "JNI_CANCELLED")
+                } else {
+                    NativeJniLlamaCppBridge.NativeApi.StreamStatus(GenerationFinishReason.COMPLETED)
+                }
+            },
+            cancelHandler = { requestId ->
+                if (requestId == "request-A") {
+                    releaseA.countDown()
+                    true
+                } else {
+                    false
+                }
+            },
+        )
+        val nativeApiB = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "request b")
+        val bridgeA = nativeBridge(nativeApiA)
+        val bridgeB = nativeBridge(nativeApiB)
+        val resultA = AtomicReference<GenerationResult?>()
+        val workerA = thread(start = true, name = "native-request-A") {
+            resultA.set(bridgeA.generate("request-A", "prompt A", 8, null, CachePolicy.OFF) {})
+        }
+
+        try {
+            assertTrue(enteredA.await(2, TimeUnit.SECONDS), "request A did not enter the native API")
+
+            val busyB = bridgeB.generate("request-B", "prompt B", 8, null, CachePolicy.OFF) {}
+            assertEquals("BUSY_GENERATION", busyB.errorCode)
+            assertEquals(0, nativeApiB.generateCallCount)
+            assertFalse(bridgeA.cancelGeneration())
+            assertFalse(bridgeB.cancelGeneration("request-B"))
+            assertFalse(bridgeA.cancelGeneration("wrong-request"))
+            assertTrue(bridgeA.cancelGeneration("request-A"))
+
+            workerA.join(2_000L)
+            assertFalse(workerA.isAlive, "request A did not exit after exact cancellation")
+            assertEquals(GenerationFinishReason.CANCELLED, resultA.get()?.finishReason)
+            assertEquals(listOf("request-A"), nativeApiA.cancelRequestIds)
+
+            val completedB = bridgeB.generate("request-B", "prompt B", 8, null, CachePolicy.OFF) {}
+            assertTrue(completedB.success)
+            assertEquals(1, nativeApiB.generateCallCount)
+        } finally {
+            releaseA.countDown()
+            workerA.join(2_000L)
+        }
+    }
+
+    @Test
+    fun `image generation shares text ownership and releases it after exact cancel`() {
+        val enteredImage = CountDownLatch(1)
+        val releaseImage = CountDownLatch(1)
+        lateinit var imageApi: FakeNativeApi
+        imageApi = FakeNativeApi(
+            initializeOk = true,
+            loadOk = true,
+            generatedText = "image response",
+            imageStreamHandler = { requestId ->
+                enteredImage.countDown()
+                releaseImage.await(2, TimeUnit.SECONDS)
+                if (requestId in imageApi.cancelRequestIds) {
+                    NativeJniLlamaCppBridge.NativeApi.StreamStatus(GenerationFinishReason.CANCELLED, "JNI_CANCELLED")
+                } else {
+                    NativeJniLlamaCppBridge.NativeApi.StreamStatus(GenerationFinishReason.COMPLETED)
+                }
+            },
+            cancelHandler = { requestId ->
+                if (requestId == "image-A") {
+                    releaseImage.countDown()
+                    true
+                } else {
+                    false
+                }
+            },
+        )
+        val textApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "text response")
+        val imageBridge = nativeBridge(imageApi)
+        val textBridge = nativeBridge(textApi)
+        val imageResult = AtomicReference<GenerationResult?>()
+        val imageWorker = thread(start = true, name = "native-image-A") {
+            imageResult.set(
+                imageBridge.generateWithImages(
+                    requestId = "image-A",
+                    prompt = "describe <__media__>",
+                    imagePaths = listOf("/tmp/image.png"),
+                    maxTokens = 8,
+                    onToken = {},
+                ),
+            )
+        }
+
+        try {
+            assertTrue(enteredImage.await(2, TimeUnit.SECONDS), "image request did not enter the native API")
+
+            val busyText = textBridge.generate("text-B", "prompt B", 8, null, CachePolicy.OFF) {}
+            assertEquals("BUSY_GENERATION", busyText.errorCode)
+            assertEquals(0, textApi.generateCallCount)
+            assertFalse(imageBridge.cancelGeneration("text-B"))
+            assertTrue(imageBridge.cancelGeneration("image-A"))
+
+            imageWorker.join(2_000L)
+            assertFalse(imageWorker.isAlive, "image request did not exit after exact cancellation")
+            assertEquals(GenerationFinishReason.CANCELLED, imageResult.get()?.finishReason)
+
+            val completedText = textBridge.generate("text-B", "prompt B", 8, null, CachePolicy.OFF) {}
+            assertTrue(completedText.success)
+            assertEquals(1, textApi.generateCallCount)
+        } finally {
+            releaseImage.countDown()
+            imageWorker.join(2_000L)
+        }
+    }
+
+    @Test
+    fun `native generation exception releases process owner`() {
+        val failingBridge = nativeBridge(
+            FakeNativeApi(
+                initializeOk = true,
+                loadOk = true,
+                generatedText = "unused",
+                streamHandler = { error("simulated native stream failure") },
+            ),
+        )
+        val succeedingApi = FakeNativeApi(initializeOk = true, loadOk = true, generatedText = "recovered")
+        val succeedingBridge = nativeBridge(succeedingApi)
+
+        val failed = failingBridge.generate("request-fail", "prompt", 8, null, CachePolicy.OFF) {}
+        val recovered = succeedingBridge.generate("request-after-fail", "prompt", 8, null, CachePolicy.OFF) {}
+
+        assertEquals("JNI_GENERATE_EXCEPTION", failed.errorCode)
+        assertTrue(recovered.success)
+        assertEquals(1, succeedingApi.generateCallCount)
     }
 
     @Test
@@ -716,7 +913,13 @@ class NativeJniLlamaCppBridgeTest {
             loadOk = true,
             generatedText = "native hello",
             supportsGpuOffload = true,
-            backendDiagnosticsJson = """{"compiled_backend":"hexagon,opencl","hexagon_device_count":1,"opencl_device_count":1}""",
+            backendDiagnosticsJson = """
+                {
+                  "compiled_backend": "hexagon,opencl",
+                  "hexagon_device_count": 1,
+                  "opencl_device_count": 1
+                }
+            """.trimIndent(),
         )
         val bridge = NativeJniLlamaCppBridge(
             nativeApi = nativeApi,
@@ -882,8 +1085,8 @@ class NativeJniLlamaCppBridgeTest {
         )
         val observedProgress = mutableListOf<Float>()
         val subscription = bridge.observeModelLifecycleState { event ->
-            if (event.state == ModelLifecycleState.LOADING && event.loadingProgress != null) {
-                observedProgress += event.loadingProgress
+            if (event.state == ModelLifecycleState.LOADING) {
+                event.loadingProgress?.let(observedProgress::add)
             }
         }
 
@@ -920,7 +1123,10 @@ class NativeJniLlamaCppBridgeTest {
         )
 
         assertFalse(bridge.loadModel(ModelCatalog.QWEN_3_5_0_8B_Q4, "/tmp/qwen-0.8b.gguf"))
-        assertEquals(ModelLifecycleErrorCode.CANCELLED_BY_NEWER_REQUEST, bridge.currentModelLifecycleState().error?.code)
+        assertEquals(
+            ModelLifecycleErrorCode.CANCELLED_BY_NEWER_REQUEST,
+            bridge.currentModelLifecycleState().error?.code,
+        )
     }
 
     @Test
@@ -961,6 +1167,15 @@ private fun waitForLifecycleStates(
     }
 }
 
+private fun nativeBridge(nativeApi: NativeJniLlamaCppBridge.NativeApi): NativeJniLlamaCppBridge {
+    return NativeJniLlamaCppBridge(
+        nativeApi = nativeApi,
+        libraryLoader = { _ -> },
+        fallbackBridge = FakeFallbackBridge(),
+        fallbackEnabled = false,
+    ).also { bridge -> assertTrue(bridge.isReady()) }
+}
+
 private class FakeNativeApi(
     private val initializeOk: Boolean,
     private val loadOk: Boolean,
@@ -976,11 +1191,17 @@ private class FakeNativeApi(
     private val prefixCacheDiagnosticsLine: String? = null,
     private val loadProgressSteps: List<Float> = emptyList(),
     private val onProgress: ((Float, NativeJniLlamaCppBridge.NativeApi.ProgressCallback?) -> Unit)? = null,
+    private val streamHandler: ((String) -> NativeJniLlamaCppBridge.NativeApi.StreamStatus)? = null,
+    private val imageStreamHandler: ((String) -> NativeJniLlamaCppBridge.NativeApi.StreamStatus)? = null,
+    private val cancelHandler: ((String) -> Boolean)? = null,
 ) : NativeJniLlamaCppBridge.NativeApi {
     var loadCalled = false
     var generateCalled = false
     var unloadCalled = false
     var cancelCalled = false
+    var generateCallCount = 0
+    var imageGenerateCallCount = 0
+    val cancelRequestIds = mutableListOf<String>()
     var lastCacheKey: String? = null
     var lastCachePolicyCode: Int? = null
     var samplingConfigCalls: Int = 0
@@ -1121,8 +1342,10 @@ private class FakeNativeApi(
         onToken: NativeJniLlamaCppBridge.NativeApi.TokenCallback,
     ): NativeJniLlamaCppBridge.NativeApi.StreamStatus {
         generateCalled = true
+        generateCallCount += 1
         lastCacheKey = cacheKey
         lastCachePolicyCode = cachePolicyCode
+        streamHandler?.let { handler -> return handler(requestId) }
         generatedText
             .split(Regex("\\s+"))
             .filter { it.isNotBlank() }
@@ -1130,8 +1353,15 @@ private class FakeNativeApi(
         return NativeJniLlamaCppBridge.NativeApi.StreamStatus(GenerationFinishReason.COMPLETED)
     }
 
-    override fun generate(prompt: String, maxTokens: Int, cacheKey: String?, cachePolicyCode: Int): String {
+    override fun generate(
+        requestId: String,
+        prompt: String,
+        maxTokens: Int,
+        cacheKey: String?,
+        cachePolicyCode: Int,
+    ): String {
         generateCalled = true
+        generateCallCount += 1
         lastCacheKey = cacheKey
         lastCachePolicyCode = cachePolicyCode
         return generatedText
@@ -1141,9 +1371,22 @@ private class FakeNativeApi(
         unloadCalled = true
     }
 
-    override fun cancelGeneration(): Boolean {
+    override fun cancelGeneration(requestId: String): Boolean {
         cancelCalled = true
-        return true
+        cancelRequestIds += requestId
+        return cancelHandler?.invoke(requestId) ?: true
+    }
+
+    override fun generateStreamWithImages(
+        requestId: String,
+        prompt: String,
+        imagePaths: Array<String>,
+        maxTokens: Int,
+        onToken: NativeJniLlamaCppBridge.NativeApi.TokenCallback,
+    ): NativeJniLlamaCppBridge.NativeApi.StreamStatus {
+        imageGenerateCallCount += 1
+        return imageStreamHandler?.invoke(requestId)
+            ?: NativeJniLlamaCppBridge.NativeApi.StreamStatus(GenerationFinishReason.COMPLETED)
     }
 
     override fun supportsGpuOffload(): Boolean = supportsGpuOffload

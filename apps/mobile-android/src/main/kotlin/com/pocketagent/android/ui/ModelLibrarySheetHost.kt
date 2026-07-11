@@ -38,6 +38,7 @@ internal fun ModelLibrarySheetHost(
     routingMode: RoutingMode,
     presetBackingStore: PresetBackingStore,
     modelRemoveUndoState: ModelRemoveUndoState,
+    modelImportRequestActive: Boolean,
     actions: ModelLibraryActions,
     debugModelLibraryReadyTagEnabled: Boolean = false,
     debugModelLibraryStatus: String? = null,
@@ -95,6 +96,7 @@ internal fun ModelLibrarySheetHost(
             modelLoadingState = modelLoadingState,
             routingMode = routingMode,
             presetBackingStore = presetBackingStore,
+            modelImportRequestActive = modelImportRequestActive,
             hiddenVersionKeys = modelRemoveUndoState.hiddenVersionKeys,
             onEvent = { event ->
                 when (event) {

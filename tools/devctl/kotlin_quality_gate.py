@@ -251,27 +251,40 @@ def _git_changed_files(repo_root: Path, base_ref: str | None = None) -> list[Pat
                 else f"origin/{github_base_ref}"
             )
 
-    commands: list[list[str]] = []
-    if resolved_base_ref:
-        commands.append(["git", "diff", "--name-only", f"{resolved_base_ref}...HEAD"])
-    commands.append(["git", "diff", "--name-only", "HEAD~1...HEAD"])
-    commands.append(["git", "diff", "--name-only", "HEAD"])
-    commands.append(["git", "ls-files", "--modified", "--others", "--exclude-standard"])
-
-    for command in commands:
+    def query(command: list[str]) -> list[str] | None:
         result = subprocess.run(command, cwd=repo_root, check=False, capture_output=True, text=True)
         if result.returncode != 0:
-            continue
-        entries = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-        if not entries:
-            continue
-        paths = [Path(entry) for entry in entries]
+            return None
+        return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+    def kotlin_paths(entries: list[str]) -> list[Path]:
         return [
             path
-            for path in paths
+            for entry in entries
+            for path in (Path(entry),)
             if path.suffix in {".kt", ".kts"} and (path.as_posix().startswith("apps/") or path.as_posix().startswith("packages/"))
         ]
-    return []
+
+    if resolved_base_ref:
+        base_entries = query(["git", "diff", "--name-only", f"{resolved_base_ref}...HEAD"])
+        if base_entries is not None:
+            return kotlin_paths(base_entries)
+
+    worktree_entries: set[str] = set()
+    worktree_query_succeeded = False
+    for command in (
+        ["git", "diff", "--name-only", "HEAD"],
+        ["git", "ls-files", "--modified", "--others", "--exclude-standard"],
+    ):
+        entries = query(command)
+        if entries is not None:
+            worktree_query_succeeded = True
+            worktree_entries.update(entries)
+    if worktree_query_succeeded and worktree_entries:
+        return kotlin_paths(sorted(worktree_entries))
+
+    previous_commit_entries = query(["git", "diff", "--name-only", "HEAD~1...HEAD"])
+    return kotlin_paths(previous_commit_entries or [])
 
 
 def _format_finding(finding: Finding) -> str:

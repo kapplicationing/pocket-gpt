@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -31,6 +32,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import com.pocketagent.android.R
 import com.pocketagent.android.runtime.ModelPathOrigin
 import com.pocketagent.android.runtime.ProvisionedModelState
 import com.pocketagent.android.runtime.RuntimeModelLifecycleSnapshot
@@ -60,6 +62,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.math.abs
 
 @RunWith(AndroidJUnit4::class)
 class ModelManagementSheetComposeContractTest {
@@ -388,6 +391,35 @@ class ModelManagementSheetComposeContractTest {
     }
 
     @Test
+    fun downloadedVersionReplaceActionFillsCardAndDispatchesImportEvent() {
+        val events = mutableListOf<ModelSheetEvent>()
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = sampleLibraryState(),
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        val importTag = modelLibraryImportButtonTag("qwen3.5-0.8b-q4", "q4_0")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(importTag))
+        composeRule.onNodeWithTag(importTag).assertIsDisplayed()
+        assertActionFillsCard(modelId = "qwen3.5-0.8b-q4", version = "q4_0")
+
+        composeRule.onNodeWithTag(importTag).performClick()
+        composeRule.runOnIdle {
+            assertTrue(events.contains(ModelSheetEvent.ImportModel("qwen3.5-0.8b-q4")))
+        }
+    }
+
+    @Test
     fun availableVersionDownloadActionTagDispatchesDownloadEvent() {
         val events = mutableListOf<ModelSheetEvent>()
         val libraryState = sampleLibraryState(
@@ -424,6 +456,119 @@ class ModelManagementSheetComposeContractTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun availableVersionImportActionFillsCardAndDispatchesImportEvent() {
+        val events = mutableListOf<ModelSheetEvent>()
+        val libraryState = sampleLibraryState(
+            manifest = sampleManifestWithDownloadableVersion(),
+            downloads = emptyList(),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    onEvent = { events += it },
+                )
+            }
+        }
+
+        val importTag = modelLibraryImportButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(importTag))
+        composeRule.onNodeWithTag(importTag).assertIsDisplayed()
+        assertActionFillsCard(modelId = "qwen3-0.6b-q4_k_m", version = "q4_k_m")
+
+        composeRule.onNodeWithTag(importTag).performClick()
+        composeRule.runOnIdle {
+            assertTrue(events.contains(ModelSheetEvent.ImportModel("qwen3-0.6b-q4_k_m")))
+        }
+    }
+
+    @Test
+    fun importAndReplaceActionsAreDisabledWhilePickerOwnsImportRequest() {
+        val libraryState = sampleLibraryState(
+            manifest = sampleManifestWithDownloadableVersion(),
+            downloads = emptyList(),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState(),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    modelImportRequestActive = true,
+                    onEvent = {},
+                )
+            }
+        }
+
+        val busyDescription = InstrumentationRegistry.getInstrumentation().targetContext.getString(
+            R.string.ui_model_operation_already_in_progress,
+        )
+        val stateDescriptionMatcher = SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription,
+            busyDescription,
+        )
+        val replaceTag = modelLibraryImportButtonTag("qwen3.5-0.8b-q4", "q4_0")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(replaceTag))
+        composeRule.onNode(hasTestTag(replaceTag).and(stateDescriptionMatcher))
+            .assertIsNotEnabled()
+
+        val importTag = modelLibraryImportButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(importTag))
+        composeRule.onNode(hasTestTag(importTag).and(stateDescriptionMatcher))
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun importAndReplaceActionsAreDisabledWhileRuntimeImportIsRunning() {
+        val libraryState = sampleLibraryState(
+            manifest = sampleManifestWithDownloadableVersion(),
+            downloads = emptyList(),
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                ModelSheet(
+                    libraryState = libraryState,
+                    runtimeState = sampleRuntimeState().copy(isImporting = true),
+                    modelLoadingState = sampleRuntimeLoadingState(),
+                    routingMode = RoutingMode.AUTO,
+                    presetBackingStore = presetBackingStore,
+                    modelImportRequestActive = false,
+                    onEvent = {},
+                )
+            }
+        }
+
+        val busyDescription = InstrumentationRegistry.getInstrumentation().targetContext.getString(
+            R.string.ui_model_operation_already_in_progress,
+        )
+        val busyMatcher = SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription,
+            busyDescription,
+        )
+        val replaceTag = modelLibraryImportButtonTag("qwen3.5-0.8b-q4", "q4_0")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(replaceTag))
+        composeRule.onNode(hasTestTag(replaceTag).and(busyMatcher)).assertIsNotEnabled()
+
+        val importTag = modelLibraryImportButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
+        composeRule.onNodeWithTag("unified_model_sheet")
+            .performScrollToNode(hasTestTag(importTag))
+        composeRule.onNode(hasTestTag(importTag).and(busyMatcher)).assertIsNotEnabled()
     }
 
     @Test
@@ -892,6 +1037,20 @@ class ModelManagementSheetComposeContractTest {
         val liveRegionMatcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
         composeRule.onNode(hasTestTag("model_sheet_status_message").and(liveRegionMatcher))
             .assertIsDisplayed()
+    }
+
+    private fun assertActionFillsCard(modelId: String, version: String) {
+        val importTag = modelLibraryImportButtonTag(modelId, version)
+        val contentTag = modelLibraryModelContentTag(modelId, version)
+        val actionBounds = composeRule.onNodeWithTag(importTag).getUnclippedBoundsInRoot()
+        val contentBounds = composeRule.onNodeWithTag(contentTag).getUnclippedBoundsInRoot()
+        val leftDelta = abs((actionBounds.left - contentBounds.left).value)
+        val rightDelta = abs((actionBounds.right - contentBounds.right).value)
+
+        assertTrue(
+            "Expected $importTag to fill $contentTag: action=$actionBounds, content=$contentBounds",
+            leftDelta <= 1f && rightDelta <= 1f,
+        )
     }
 }
 

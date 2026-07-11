@@ -2,6 +2,7 @@ package com.pocketagent.android.runtime.modelmanager.gguf
 
 import android.content.Context
 import android.net.Uri
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 
@@ -15,6 +16,14 @@ internal class GgufMetadataReaderImpl(
 ) : GgufMetadataReader {
     companion object {
         private const val ARCH_LLAMA = "llama"
+        private const val MAX_METADATA_ENTRIES = 100_000L
+        private const val MAX_METADATA_ARRAY_ELEMENTS = 10_000_000L
+        private const val MAX_METADATA_STRING_BYTES = 16 * 1024 * 1024L
+        private const val MAX_METADATA_KEY_BYTES = 64 * 1024L
+        private const val MAX_TENSOR_COUNT = 1_000_000L
+        private const val MAX_TENSOR_DIMENSIONS = 4
+        private const val DEFAULT_ALIGNMENT = 32L
+        private const val MAX_ALIGNMENT = 4096L
     }
 
     enum class MetadataType(val code: Int) {
@@ -60,7 +69,29 @@ internal class GgufMetadataReaderImpl(
         val version = ensureMagicAndVersion(input)
         val tensorCount = readLittleLong(input)
         val kvCount = readLittleLong(input)
+        requireNonNegativeCount("tensor count", tensorCount)
+        requireBoundedCount("metadata entry count", kvCount, MAX_METADATA_ENTRIES)
         val meta = readMetaMap(input, kvCount)
+        return buildStructured(meta, version, tensorCount, kvCount)
+    }
+
+    fun readValidatedModelStructure(input: InputStream, fileSize: Long): GgufMetadata {
+        val countingInput = CountingInputStream(input)
+        val version = ensureMagicAndVersion(countingInput)
+        val tensorCount = readLittleLong(countingInput)
+        val kvCount = readLittleLong(countingInput)
+        requireBoundedCount("tensor count", tensorCount, MAX_TENSOR_COUNT)
+        if (tensorCount == 0L) {
+            throw IOException("GGUF model must contain at least one tensor")
+        }
+        requireBoundedCount("metadata entry count", kvCount, MAX_METADATA_ENTRIES)
+        val meta = readMetaMap(countingInput, kvCount)
+        validateTensorDataBounds(
+            input = countingInput,
+            fileSize = fileSize,
+            tensorCount = tensorCount,
+            alignment = metadataAlignment(meta),
+        )
         return buildStructured(meta, version, tensorCount, kvCount)
     }
 
@@ -78,7 +109,7 @@ internal class GgufMetadataReaderImpl(
     private fun readMetaMap(input: InputStream, kvCnt: Long): Map<String, MetadataValue> =
         mutableMapOf<String, MetadataValue>().apply {
             repeat(kvCnt.toInt()) {
-                val key = readString(input)
+                val key = readString(input, MAX_METADATA_KEY_BYTES, "metadata key")
                 val valueT = MetadataType.fromCode(littleEndianBytesToInt(input.readNBytesExact(4)))
                 if (key in skipKeys) {
                     skipValue(input, valueT)
@@ -88,6 +119,113 @@ internal class GgufMetadataReaderImpl(
             }
         }
 
+    private fun metadataAlignment(meta: Map<String, MetadataValue>): Long {
+        val alignment = (meta["general.alignment"] as? MetadataValue.UInt32)?.value?.toLong()
+            ?: DEFAULT_ALIGNMENT
+        if (alignment <= 0L || alignment > MAX_ALIGNMENT || alignment and (alignment - 1L) != 0L) {
+            throw IOException("Invalid GGUF alignment: $alignment")
+        }
+        return alignment
+    }
+
+    @Suppress("ThrowsCount")
+    private fun validateTensorDataBounds(
+        input: CountingInputStream,
+        fileSize: Long,
+        tensorCount: Long,
+        alignment: Long,
+    ) {
+        requireNonNegativeCount("file size", fileSize)
+        val names = mutableSetOf<String>()
+        val tensors = buildList {
+            repeat(tensorCount.toInt()) {
+                val name = readString(input, MAX_METADATA_KEY_BYTES, "tensor name")
+                if (name.isBlank() || !names.add(name)) {
+                    throw IOException("Invalid or duplicate GGUF tensor name: $name")
+                }
+                val dimensionCount = readLEUInt32(input)
+                if (dimensionCount !in 1..MAX_TENSOR_DIMENSIONS) {
+                    throw IOException("Invalid GGUF tensor dimension count: $dimensionCount")
+                }
+                val dimensions = List(dimensionCount) {
+                    readLittleLong(input).also { dimension ->
+                        if (dimension <= 0L) throw IOException("Invalid GGUF tensor dimension: $dimension")
+                    }
+                }
+                val typeCode = readLEUInt32(input)
+                val layout = GGML_TENSOR_LAYOUTS[typeCode]
+                    ?: throw IOException("Unsupported GGUF tensor type: $typeCode")
+                if (dimensions.first() % layout.blockSize != 0L) {
+                    throw IOException(
+                        "GGUF tensor row is not divisible by block size: " +
+                            "name=$name;row=${dimensions.first()};block=${layout.blockSize}",
+                    )
+                }
+                val offset = readLittleLong(input)
+                requireNonNegativeCount("tensor offset", offset)
+                if (offset % alignment != 0L) {
+                    throw IOException("Misaligned GGUF tensor offset: name=$name;offset=$offset;alignment=$alignment")
+                }
+                add(
+                    TensorRange(
+                        name = name,
+                        offset = offset,
+                        byteCount = tensorByteCount(dimensions, layout),
+                    ),
+                )
+            }
+        }
+        val dataStart = alignUp(input.bytesRead, alignment)
+        if (dataStart >= fileSize) {
+            throw IOException("GGUF tensor data section is missing")
+        }
+        val sorted = tensors.sortedBy(TensorRange::offset)
+        var previousEnd = 0L
+        sorted.forEach { tensor ->
+            if (tensor.offset < previousEnd) {
+                throw IOException("Overlapping GGUF tensor data: ${tensor.name}")
+            }
+            val tensorEnd = addExact(tensor.offset, tensor.byteCount, "tensor range")
+            val absoluteEnd = addExact(dataStart, tensorEnd, "tensor data bound")
+            if (absoluteEnd > fileSize) {
+                throw IOException(
+                    "GGUF tensor data is truncated: name=${tensor.name};requiredEnd=$absoluteEnd;fileSize=$fileSize",
+                )
+            }
+            previousEnd = tensorEnd
+        }
+    }
+
+    private fun tensorByteCount(dimensions: List<Long>, layout: TensorLayout): Long {
+        var blocks = dimensions.first() / layout.blockSize
+        dimensions.drop(1).forEach { dimension ->
+            blocks = multiplyExact(blocks, dimension, "tensor element count")
+        }
+        return multiplyExact(blocks, layout.typeSize, "tensor byte count")
+    }
+
+    private fun alignUp(value: Long, alignment: Long): Long {
+        val remainder = value % alignment
+        return if (remainder == 0L) value else addExact(value, alignment - remainder, "tensor data alignment")
+    }
+
+    private fun multiplyExact(left: Long, right: Long, label: String): Long {
+        return try {
+            Math.multiplyExact(left, right)
+        } catch (error: ArithmeticException) {
+            throw IOException("GGUF $label overflow", error)
+        }
+    }
+
+    private fun addExact(left: Long, right: Long, label: String): Long {
+        return try {
+            Math.addExact(left, right)
+        } catch (error: ArithmeticException) {
+            throw IOException("GGUF $label overflow", error)
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod")
     private fun buildStructured(
         m: Map<String, MetadataValue>,
         version: GgufMetadata.GgufVersion,
@@ -105,7 +243,8 @@ internal class GgufMetadataReaderImpl(
                 ?.elements
                 ?.mapNotNull { (it as? MetadataValue.StringVal)?.value }
 
-        val arch = "general.architecture".str() ?: ARCH_LLAMA
+        val declaredArch = "general.architecture".str()
+        val arch = declaredArch ?: ARCH_LLAMA
 
         val basic = GgufMetadata.BasicInfo(
             uuid = "general.uuid".str(),
@@ -137,12 +276,18 @@ internal class GgufMetadataReaderImpl(
         }
 
         val architectureInfo = GgufMetadata.ArchitectureInfo(
-            architecture = arch,
+            architecture = declaredArch,
             fileType = "general.file_type".u32(),
             vocabSize = "$arch.vocab_size".u32(),
             finetune = "general.finetune".str(),
             quantizationVersion = "general.quantization_version".u32()
-        ).takeUnless { fileType == null && vocabSize == null && finetune == null && quantizationVersion == null }
+        ).takeUnless {
+            architecture == null &&
+                fileType == null &&
+                vocabSize == null &&
+                finetune == null &&
+                quantizationVersion == null
+        }
 
         val baseModels = buildList {
             val n = "general.base_model.count".u32() ?: 0
@@ -233,6 +378,7 @@ internal class GgufMetadataReaderImpl(
         )
     }
 
+    @Suppress("CyclomaticComplexMethod")
     private fun parseValue(input: InputStream, type: MetadataType): MetadataValue = when (type) {
         MetadataType.UINT8 -> {
             val byteVal = input.read()
@@ -292,11 +438,12 @@ internal class GgufMetadataReaderImpl(
             MetadataValue.Bool(byteVal != 0)
         }
         MetadataType.STRING -> {
-            MetadataValue.StringVal(readString(input))
+            MetadataValue.StringVal(readString(input, MAX_METADATA_STRING_BYTES, "metadata string"))
         }
         MetadataType.ARRAY -> {
             val elemType = MetadataType.fromCode(littleEndianBytesToInt(input.readNBytesExact(4)))
             val len = readLittleLong(input)
+            requireBoundedCount("metadata array length", len, MAX_METADATA_ARRAY_ELEMENTS)
             val count = len.toInt()
             if (arraySummariseThreshold >= 0 && count > arraySummariseThreshold) {
                 repeat(count) { skipValue(input, elemType) }
@@ -358,11 +505,14 @@ internal class GgufMetadataReaderImpl(
             MetadataType.UINT32, MetadataType.INT32, MetadataType.FLOAT32 -> input.skipFully(4)
             MetadataType.UINT64, MetadataType.INT64, MetadataType.FLOAT64 -> input.skipFully(8)
             MetadataType.STRING -> {
-                val len = readLittleLong(input); input.skipFully(len)
+                val len = readLittleLong(input)
+                requireBoundedCount("metadata string length", len, MAX_METADATA_STRING_BYTES)
+                input.skipFully(len)
             }
             MetadataType.ARRAY -> {
                 val elemType = MetadataType.fromCode(littleEndianBytesToInt(input.readNBytesExact(4)))
                 val len = readLittleLong(input)
+                requireBoundedCount("metadata array length", len, MAX_METADATA_ARRAY_ELEMENTS)
                 repeat(len.toInt()) { skipValue(input, elemType) }
             }
         }
@@ -381,14 +531,31 @@ internal class GgufMetadataReaderImpl(
             (bytes[0].toLong() and 0xFFL)
     }
 
-    private fun readString(input: InputStream): String =
+    private fun readString(
+        input: InputStream,
+        maxBytes: Long,
+        label: String,
+    ): String =
         readLittleLong(input).let { len ->
-            if (len < 0 || len > Int.MAX_VALUE) throw IOException("String too long: $len")
+            requireBoundedCount("$label length", len, maxBytes)
             ByteArray(len.toInt()).let {
                 if (it.isNotEmpty()) input.readFully(it)
                 String(it, Charsets.UTF_8)
             }
         }
+
+    private fun requireNonNegativeCount(label: String, count: Long) {
+        if (count < 0) {
+            throw IOException("Invalid $label: $count")
+        }
+    }
+
+    private fun requireBoundedCount(label: String, count: Long, maximum: Long) {
+        requireNonNegativeCount(label, count)
+        if (count > maximum) {
+            throw IOException("$label exceeds supported maximum: $count > $maximum")
+        }
+    }
 
     private fun littleEndianBytesToInt(bytes: ByteArray): Int =
         (bytes[3].toInt() and 0xFF shl 24) or
@@ -425,4 +592,72 @@ internal class GgufMetadataReaderImpl(
     private fun InputStream.readNBytesExact(n: Int) = ByteArray(n).also {
         if (read(it) != n) throw IOException("Unexpected EOF")
     }
+
+    private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
+        var bytesRead: Long = 0L
+            private set
+
+        override fun read(): Int {
+            return super.read().also { value -> if (value >= 0) bytesRead += 1L }
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            return super.read(buffer, offset, length).also { count ->
+                if (count > 0) bytesRead += count.toLong()
+            }
+        }
+
+        override fun skip(byteCount: Long): Long {
+            return super.skip(byteCount).also { skipped -> bytesRead += skipped }
+        }
+    }
+
+    private data class TensorRange(
+        val name: String,
+        val offset: Long,
+        val byteCount: Long,
+    )
+
+    private data class TensorLayout(
+        val blockSize: Long,
+        val typeSize: Long,
+    )
+
+    private val GGML_TENSOR_LAYOUTS = mapOf(
+        0 to TensorLayout(1, 4),
+        1 to TensorLayout(1, 2),
+        2 to TensorLayout(32, 18),
+        3 to TensorLayout(32, 20),
+        6 to TensorLayout(32, 22),
+        7 to TensorLayout(32, 24),
+        8 to TensorLayout(32, 34),
+        9 to TensorLayout(32, 36),
+        10 to TensorLayout(256, 84),
+        11 to TensorLayout(256, 110),
+        12 to TensorLayout(256, 144),
+        13 to TensorLayout(256, 176),
+        14 to TensorLayout(256, 210),
+        15 to TensorLayout(256, 292),
+        16 to TensorLayout(256, 66),
+        17 to TensorLayout(256, 74),
+        18 to TensorLayout(256, 98),
+        19 to TensorLayout(256, 50),
+        20 to TensorLayout(32, 18),
+        21 to TensorLayout(256, 110),
+        22 to TensorLayout(256, 82),
+        23 to TensorLayout(256, 136),
+        24 to TensorLayout(1, 1),
+        25 to TensorLayout(1, 2),
+        26 to TensorLayout(1, 4),
+        27 to TensorLayout(1, 8),
+        28 to TensorLayout(1, 8),
+        29 to TensorLayout(256, 56),
+        30 to TensorLayout(1, 2),
+        34 to TensorLayout(256, 54),
+        35 to TensorLayout(256, 66),
+        39 to TensorLayout(32, 17),
+        40 to TensorLayout(64, 36),
+        41 to TensorLayout(128, 18),
+        42 to TensorLayout(64, 18),
+    )
 }

@@ -87,7 +87,14 @@ object AppRuntimeDependencies {
             }
         }
         val newFacade = AppRuntimeFacadeFactory.buildProductionRuntimeFacade(context, graph)
-        graph.runtimeFacade.replace(newFacade)
+        val replacement = graph.runtimeFacade.replace(newFacade)
+        if (!replacement.success) {
+            Log.e(
+                "AppRuntimeDeps",
+                "RUNTIME_SWAP|phase=rejected|code=${replacement.code}|detail=${replacement.detail.orEmpty()}",
+            )
+            return
+        }
         graph.runtimeGateway.invalidatePerformanceCaches()
         synchronized(runtimeInstallFingerprintLock) {
             lastRuntimeInstallFingerprint = fingerprint
@@ -193,7 +200,8 @@ object AppRuntimeDependencies {
                 subject = installed.toAdmissionSubject(),
             )
             if (!activationDecision.allowed) {
-                return@section ProvisioningMutationResult.Blocked(activationDecision.asRuntimeDomainException().domainError)
+                val domainError = activationDecision.asRuntimeDomainException().domainError
+                return@section ProvisioningMutationResult.Blocked(domainError)
             }
             val changed = graph.provisioningStore.setActiveVersion(modelId, version)
             if (changed) {

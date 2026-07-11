@@ -103,6 +103,7 @@ internal fun ModelSheet(
     modelLoadingState: ModelLoadingState,
     routingMode: RoutingMode,
     presetBackingStore: PresetBackingStore,
+    modelImportRequestActive: Boolean = false,
     hiddenVersionKeys: Set<String> = emptySet(),
     onEvent: (ModelSheetEvent) -> Unit,
 ) {
@@ -113,6 +114,7 @@ internal fun ModelSheet(
     var selectedHuggingFaceTargetId by remember { mutableStateOf("") }
     val activeModel = modelLoadingState.activeOrRequestedModel()
     val busy = modelLoadingState is ModelLoadingState.Loading || modelLoadingState is ModelLoadingState.Offloading
+    val modelImportBusy = runtimeState.isImporting || modelImportRequestActive
     val resolvedHuggingFaceTargetId = selectedHuggingFaceTargetId
         .takeIf { selected -> libraryState.huggingFaceTargets.any { it.modelId == selected } }
         ?: libraryState.huggingFaceTargets.firstOrNull()?.modelId.orEmpty()
@@ -367,6 +369,7 @@ internal fun ModelSheet(
                     activeModel = activeModel,
                     loadedModel = modelLoadingState.loadedModel,
                     busy = busy,
+                    isImporting = modelImportBusy,
                     onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
                     onLoadVersion = { modelId, ver -> onEvent(ModelSheetEvent.LoadVersion(modelId, ver)) },
                     onRemoveVersion = { modelId, ver -> onEvent(ModelSheetEvent.RequestRemove(modelId, ver)) },
@@ -399,7 +402,7 @@ internal fun ModelSheet(
                     version = entry.version,
                     eligibility = entry.eligibility,
                     task = downloadTasksByKey[versionIdentityKey(entry.version.modelId, entry.version.version)],
-                    isImporting = runtimeState.isImporting,
+                    isImporting = modelImportBusy,
                     isEnqueuing = versionIdentityKey(entry.version.modelId, entry.version.version) in libraryState.enqueuingModelIds,
                     onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
                     onDownloadVersion = { ver -> onEvent(ModelSheetEvent.DownloadVersion(ver)) },
@@ -1489,6 +1492,7 @@ private fun DownloadedModelCard(
     activeModel: com.pocketagent.runtime.RuntimeLoadedModel?,
     loadedModel: com.pocketagent.runtime.RuntimeLoadedModel?,
     busy: Boolean,
+    isImporting: Boolean,
     onImportModel: (String) -> Unit,
     onLoadVersion: (String, String) -> Unit,
     onRemoveVersion: (String, String) -> Unit,
@@ -1513,6 +1517,11 @@ private fun DownloadedModelCard(
         busy -> stringResource(id = R.string.ui_load_button_disabled_busy)
         else -> null
     }
+    val importDisabledReason = if (isImporting) {
+        stringResource(id = R.string.ui_model_operation_already_in_progress)
+    } else {
+        null
+    }
     Card(
         modifier = Modifier.testTag(
             modelLibraryModelRowTag(
@@ -1522,7 +1531,10 @@ private fun DownloadedModelCard(
         ),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(PocketAgentDimensions.cardPadding)
+                .testTag(modelLibraryModelContentTag(model.modelId, version.version)),
             verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
         ) {
             Row(
@@ -1585,7 +1597,20 @@ private fun DownloadedModelCard(
                 ) {
                     Text(stringResource(id = if (isLoaded) R.string.ui_loaded else R.string.ui_load))
                 }
-                OutlinedButton(onClick = { haptic(); onImportModel(model.modelId) }) {
+                OutlinedButton(
+                    onClick = { haptic(); onImportModel(model.modelId) },
+                    enabled = !isImporting,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(modelLibraryImportButtonTag(model.modelId, version.version))
+                        .then(
+                            if (importDisabledReason != null) {
+                                Modifier.semantics { stateDescription = importDisabledReason }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
                     Text(stringResource(id = if (model.isProvisioned) R.string.ui_replace_file else R.string.ui_import))
                 }
             }
@@ -1622,6 +1647,11 @@ private fun AvailableModelCard(
     val reducedMotion = LocalReduceMotion.current
     val haptic = rememberHaptic()
     val hapticConfirm = rememberLongPressHaptic()
+    val importDisabledReason = when {
+        isImporting -> stringResource(id = R.string.ui_model_operation_already_in_progress)
+        !eligibility.downloadAllowed -> eligibilityMessage(eligibility)
+        else -> null
+    }
     Card(
         modifier = Modifier.testTag(
             modelLibraryModelRowTag(
@@ -1631,7 +1661,10 @@ private fun AvailableModelCard(
         ),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(PocketAgentDimensions.cardPadding)
+                .testTag(modelLibraryModelContentTag(version.modelId, version.version)),
             verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
         ) {
             Row(
@@ -1791,7 +1824,17 @@ private fun AvailableModelCard(
                     }
                     OutlinedButton(
                         onClick = { haptic(); onImportModel(version.modelId) },
-                        enabled = !isImporting && eligibility.downloadAllowed,
+                        enabled = importDisabledReason == null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(modelLibraryImportButtonTag(version.modelId, version.version))
+                            .then(
+                                if (importDisabledReason != null) {
+                                    Modifier.semantics { stateDescription = importDisabledReason }
+                                } else {
+                                    Modifier
+                                },
+                            ),
                     ) {
                         Text(stringResource(id = R.string.ui_import))
                     }
@@ -2049,6 +2092,12 @@ internal fun modelLibraryLoadButtonTag(modelId: String, version: String): String
 
 internal fun modelLibraryDownloadButtonTag(modelId: String, version: String): String =
     "model_library_download_${modelId}_${version}"
+
+internal fun modelLibraryImportButtonTag(modelId: String, version: String): String =
+    "model_library_import_${modelId}_${version}"
+
+internal fun modelLibraryModelContentTag(modelId: String, version: String): String =
+    "model_library_model_content_${modelId}_${version}"
 
 internal fun modelLibraryModelRowTag(modelId: String, version: String): String =
     if (isLaunchDefaultModelVersion(modelId, version)) {

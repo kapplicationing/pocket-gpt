@@ -5,20 +5,15 @@ import com.pocketagent.inference.InferenceRequest
 import com.pocketagent.nativebridge.CachePolicy
 import com.pocketagent.nativebridge.RuntimeInferencePorts
 import com.pocketagent.nativebridge.runtimeInferencePorts
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 internal class InferenceExecutor(
     private val inferenceModule: InferenceModule,
     private val runtimeConfig: RuntimeConfig,
     private val runtimeInferencePorts: RuntimeInferencePorts = inferenceModule.runtimeInferencePorts(),
+    private val operationCoordinator: RuntimeOperationCoordinator = RuntimeOperationCoordinator(),
 ) {
-    private val activeByRequestId = ConcurrentHashMap<String, ActiveGenerationState>()
-    private val activeBySessionId = ConcurrentHashMap<String, ActiveGenerationState>()
-    private val idleLatch = AtomicReference<CountDownLatch?>(null)
-
+    // Streaming accumulation, stop handling, metrics, and native error mapping form one state machine.
+    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "ComplexCondition")
     fun execute(
         sessionId: String,
         requestId: String,
@@ -27,10 +22,13 @@ internal class InferenceExecutor(
         cachePolicy: CachePolicy,
         stopSequences: List<String>,
         onToken: (String) -> Unit,
+        generationLease: GenerationLease? = null,
     ): InferenceExecutionResult {
-        val state = ActiveGenerationState(requestId = requestId, sessionId = sessionId)
-        activeByRequestId[requestId] = state
-        activeBySessionId[sessionId] = state
+        val acquiredHere = generationLease == null
+        val activeLease = generationLease ?: acquireGenerationLease(requestId = requestId, sessionId = sessionId)
+        require(activeLease.requestId == requestId && activeLease.sessionId == sessionId) {
+            "Generation lease owner does not match requestId=$requestId sessionId=$sessionId"
+        }
         val nativeInference = runtimeInferencePorts.cacheAwareGeneration
         val streamedText = StringBuilder()
         var stoppedBySequence = false
@@ -80,7 +78,10 @@ internal class InferenceExecutor(
                         throw RuntimeGenerationCancelledException(requestId = requestId)
                     } else {
                         throw RuntimeGenerationFailureException(
-                            message = "llama.cpp runtime generation failed: finish=${result.finishReason} code=${result.errorCode.orEmpty()}",
+                            message = buildGenerationFailureMessage(
+                                prefix = "llama.cpp runtime generation failed",
+                                result = result,
+                            ),
                             errorCode = result.errorCode,
                         )
                     }
@@ -130,7 +131,7 @@ internal class InferenceExecutor(
             }
             return InferenceExecutionResult(
                 text = streamedText.toString().trimStopSequences(stopSequences),
-                finishReason = if (bridgeErrorCode.isNullOrBlank()) finishReason else "$finishReason:${bridgeErrorCode.lowercase()}",
+                finishReason = resolvedFinishReason(finishReason, bridgeErrorCode),
                 bridgeErrorCode = bridgeErrorCode,
                 tokenCount = tokenCount,
                 firstTokenMs = firstTokenMs,
@@ -142,14 +143,14 @@ internal class InferenceExecutor(
                 kvCachePreset = kvCachePreset,
             )
         } finally {
-            activeByRequestId.remove(requestId)
-            activeBySessionId.remove(sessionId)
-            if (activeByRequestId.isEmpty()) {
-                idleLatch.getAndSet(null)?.countDown()
+            if (acquiredHere) {
+                activeLease.close()
             }
         }
     }
 
+    // Multimodal streaming mirrors the text state machine and must preserve identical terminal semantics.
+    @Suppress("CyclomaticComplexMethod")
     fun executeWithImages(
         sessionId: String,
         requestId: String,
@@ -158,6 +159,7 @@ internal class InferenceExecutor(
         maxTokens: Int,
         stopSequences: List<String>,
         onToken: (String) -> Unit,
+        generationLease: GenerationLease? = null,
     ): InferenceExecutionResult {
         val managedRuntime = runtimeInferencePorts.managedRuntime
             ?: return InferenceExecutionResult(
@@ -172,9 +174,11 @@ internal class InferenceExecutor(
                 tokensPerSec = null,
                 peakRssMb = null,
             )
-        val state = ActiveGenerationState(requestId = requestId, sessionId = sessionId)
-        activeByRequestId[requestId] = state
-        activeBySessionId[sessionId] = state
+        val acquiredHere = generationLease == null
+        val activeLease = generationLease ?: acquireGenerationLease(requestId = requestId, sessionId = sessionId)
+        require(activeLease.requestId == requestId && activeLease.sessionId == sessionId) {
+            "Generation lease owner does not match requestId=$requestId sessionId=$sessionId"
+        }
         val streamedText = StringBuilder()
         var stoppedBySequence = false
         var finishReason = "completed"
@@ -218,7 +222,10 @@ internal class InferenceExecutor(
                     throw RuntimeGenerationCancelledException(requestId = requestId)
                 } else {
                     throw RuntimeGenerationFailureException(
-                        message = "Multimodal generation failed: finish=${result.finishReason} code=${result.errorCode.orEmpty()}",
+                        message = buildGenerationFailureMessage(
+                            prefix = "Multimodal generation failed",
+                            result = result,
+                        ),
                         errorCode = result.errorCode,
                     )
                 }
@@ -239,7 +246,7 @@ internal class InferenceExecutor(
                     }
                     value
                 },
-                finishReason = if (bridgeErrorCode.isNullOrBlank()) finishReason else "$finishReason:${bridgeErrorCode.lowercase()}",
+                finishReason = resolvedFinishReason(finishReason, bridgeErrorCode),
                 bridgeErrorCode = bridgeErrorCode,
                 tokenCount = tokenCount,
                 firstTokenMs = firstTokenMs,
@@ -250,10 +257,8 @@ internal class InferenceExecutor(
                 peakRssMb = result.peakRssMb,
             )
         } finally {
-            activeByRequestId.remove(requestId)
-            activeBySessionId.remove(sessionId)
-            if (activeByRequestId.isEmpty()) {
-                idleLatch.getAndSet(null)?.countDown()
+            if (acquiredHere) {
+                activeLease.close()
             }
         }
     }
@@ -270,12 +275,41 @@ internal class InferenceExecutor(
                 detail = "requestId=$requestId",
             )
         }
-        val active = activeByRequestId[requestId]
-            ?: return CancellationResult(
+        return operationCoordinator.cancelByRequest(requestId, ::cancelNativeGeneration)
+    }
+
+    fun cancelBySession(sessionId: String): Boolean {
+        return cancelBySessionDetailed(sessionId).cancelled
+    }
+
+    fun cancelBySessionDetailed(sessionId: String): CancellationResult {
+        if (!runtimeConfig.streamContractV2Enabled) {
+            return CancellationResult(
                 cancelled = false,
-                code = "REQUEST_NOT_ACTIVE",
-                detail = "requestId=$requestId",
+                code = "STREAM_CONTRACT_V2_DISABLED",
+                detail = "sessionId=$sessionId",
             )
+        }
+        return operationCoordinator.cancelBySession(sessionId, ::cancelNativeGeneration)
+    }
+
+    fun isIdle(): Boolean = operationCoordinator.isGenerationIdle()
+
+    fun acquireLifecycleLease(timeoutMs: Long = 5_000L): LifecycleAdmissionResult {
+        return operationCoordinator.acquireLifecycle(timeoutMs, ::cancelNativeGeneration)
+    }
+
+    fun acquireGenerationLease(requestId: String, sessionId: String): GenerationLease {
+        return when (val admission = operationCoordinator.tryAcquireGeneration(requestId, sessionId)) {
+            is GenerationAdmissionResult.Acquired -> admission.lease
+            is GenerationAdmissionResult.Rejected -> throw RuntimeGenerationFailureException(
+                message = "Runtime generation rejected: ${admission.detail.orEmpty()}",
+                errorCode = admission.code,
+            )
+        }
+    }
+
+    private fun cancelNativeGeneration(requestId: String): CancellationResult {
         val native = runtimeInferencePorts.cacheAwareGeneration
             ?: return CancellationResult(
                 cancelled = false,
@@ -288,49 +322,34 @@ internal class InferenceExecutor(
                 code = "RUNTIME_NOT_NATIVE_BRIDGE",
                 detail = "requestId=$requestId",
             )
-        val cancelled = native.cancelGeneration(active.requestId)
-        if (cancelled) {
+        if (native.cancelGeneration(requestId)) {
             return CancellationResult(cancelled = true, code = "CANCELLED")
         }
         val bridgeError = managedRuntime.lastBridgeError()
         return CancellationResult(
             cancelled = false,
             code = bridgeError?.code ?: "CANCEL_REJECTED",
-            detail = bridgeError?.detail ?: "requestId=${active.requestId}",
+            detail = bridgeError?.detail ?: "requestId=$requestId",
         )
     }
 
-    fun cancelBySession(sessionId: String): Boolean {
-        return cancelBySessionDetailed(sessionId).cancelled
+    fun cancelNativeGenerationForLifetime(requestId: String): CancellationResult {
+        return cancelNativeGeneration(requestId)
     }
 
-    fun cancelBySessionDetailed(sessionId: String): CancellationResult {
-        val active = activeBySessionId[sessionId]
-            ?: return CancellationResult(
-                cancelled = false,
-                code = "SESSION_NOT_ACTIVE",
-                detail = "sessionId=$sessionId",
-            )
-        return cancelByRequestDetailed(active.requestId)
+    private fun resolvedFinishReason(finishReason: String, bridgeErrorCode: String?): String {
+        return if (bridgeErrorCode.isNullOrBlank()) {
+            finishReason
+        } else {
+            "$finishReason:${bridgeErrorCode.lowercase()}"
+        }
     }
 
-    fun isIdle(): Boolean = activeByRequestId.isEmpty()
-
-    fun cancelAllAndAwaitIdle(timeoutMs: Long = 5_000L): Boolean {
-        if (activeByRequestId.isEmpty()) {
-            return true
-        }
-        val latch = CountDownLatch(1)
-        idleLatch.set(latch)
-        if (activeByRequestId.isEmpty()) {
-            idleLatch.set(null)
-            return true
-        }
-        val native = runtimeInferencePorts.cacheAwareGeneration
-        for (requestId in activeByRequestId.keys.toList()) {
-            native?.cancelGeneration(requestId) ?: break
-        }
-        return latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+    private fun buildGenerationFailureMessage(
+        prefix: String,
+        result: com.pocketagent.nativebridge.GenerationResult,
+    ): String {
+        return "$prefix: finish=${result.finishReason} code=${result.errorCode.orEmpty()}"
     }
 }
 
@@ -352,11 +371,6 @@ data class CancellationResult(
     val cancelled: Boolean,
     val code: String,
     val detail: String? = null,
-)
-
-private data class ActiveGenerationState(
-    val requestId: String,
-    val sessionId: String,
 )
 
 private fun String.trimStopSequences(stopSequences: List<String>): String {

@@ -7,6 +7,7 @@ import com.pocketagent.inference.InferenceRequest
 import com.pocketagent.nativebridge.CacheAwareGenerationPort
 import com.pocketagent.nativebridge.ManagedRuntimePort
 import com.pocketagent.nativebridge.ModelLoadingStage
+import com.pocketagent.nativebridge.ModelLifecycleEvent
 import com.pocketagent.nativebridge.RuntimeBackend
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import com.pocketagent.nativebridge.RuntimeInferencePorts
@@ -16,9 +17,52 @@ import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class RuntimeWarmupCoordinatorTest {
+    @Test
+    fun `warmup rejects before config or load when chat owns runtime`() {
+        val inferenceModule = WarmupInferenceModule()
+        val warmupPorts = WarmupRuntimePorts()
+        val runtimeInferencePorts = RuntimeInferencePorts(
+            managedRuntime = warmupPorts,
+            cacheAwareGeneration = warmupPorts,
+            residency = warmupPorts,
+        )
+        val operations = RuntimeOperationCoordinator()
+        val active = assertIs<GenerationAdmissionResult.Acquired>(
+            operations.tryAcquireGeneration(requestId = "request-a", sessionId = "session-a"),
+        ).lease
+        val coordinator = RuntimeWarmupCoordinator(
+            inferenceModule = inferenceModule,
+            artifactVerifier = ArtifactVerifier(warmupRuntimeConfig()),
+            observabilityModule = WarmupObservabilityModule(),
+            runtimeResidencyManager = RuntimeResidencyManager(
+                inferenceModule,
+                runtimeInferencePorts = runtimeInferencePorts,
+                nowMs = monotonicClock(),
+            ),
+            runtimePlanResolver = RuntimePlanResolver(availableCpuThreads = { 6 }),
+            availableCpuThreads = { 6 },
+            nowMs = monotonicClock(),
+            runtimeInferencePorts = runtimeInferencePorts,
+            operationCoordinator = operations,
+        )
+
+        try {
+            val result = coordinator.warmup()
+
+            assertFalse(result.attempted)
+            assertEquals(RUNTIME_BUSY_GENERATION_CODE.lowercase(), result.errorCode)
+            assertEquals(0, warmupPorts.configCalls)
+            assertEquals(0, warmupPorts.loadCalls)
+            assertEquals(0, warmupPorts.generateCalls)
+        } finally {
+            active.close()
+        }
+    }
+
     @Test
     fun `warmup keeps active model resident and reuses same load key`() {
         val inferenceModule = WarmupInferenceModule()
@@ -137,6 +181,7 @@ private class WarmupRuntimePorts(
 ) : ManagedRuntimePort, CacheAwareGenerationPort, RuntimeResidencyPort {
     var loadCalls: Int = 0
     var generateCalls: Int = 0
+    var configCalls: Int = 0
     var lastMaxTokens: Int = 0
     var lastPrompt: String = ""
     var lastModelVersion: String? = null
@@ -154,6 +199,7 @@ private class WarmupRuntimePorts(
     }
 
     override fun setRuntimeGenerationConfig(config: RuntimeGenerationConfig) {
+        configCalls += 1
         this.config = config
     }
 
@@ -163,11 +209,13 @@ private class WarmupRuntimePorts(
 
     override fun lastBridgeError() = null
 
-    override fun currentModelLifecycleState() = com.pocketagent.nativebridge.ModelLifecycleEvent(
+    override fun currentModelLifecycleState() = ModelLifecycleEvent(
         state = com.pocketagent.nativebridge.ModelLifecycleState.UNLOADED,
     )
 
-    override fun observeModelLifecycleState(listener: (com.pocketagent.nativebridge.ModelLifecycleEvent) -> Unit): AutoCloseable {
+    override fun observeModelLifecycleState(
+        listener: (ModelLifecycleEvent) -> Unit,
+    ): AutoCloseable {
         listener(currentModelLifecycleState())
         return AutoCloseable { }
     }

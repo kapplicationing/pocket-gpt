@@ -2,6 +2,8 @@ package com.pocketagent.nativebridge
 
 import com.pocketagent.inference.ModelCatalog
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 data class BridgeError(
@@ -31,13 +33,14 @@ class NativeJniLlamaCppBridge(
     private var nextObserverId: Int = 1
     @Volatile
     private var lifecycleDispatcherStarted = false
+    @Volatile
+    private var lifecycleDispatcherClosed = false
+    private var lifecycleDispatcherThread: Thread? = null
     private val lifecycleObservers: MutableMap<Int, (ModelLifecycleEvent) -> Unit> = mutableMapOf()
     @Volatile
     private var lastBridgeError: BridgeError? = null
     @Volatile
     private var runtimeGenerationConfig: RuntimeGenerationConfig = RuntimeGenerationConfig.default()
-    @Volatile
-    private var activeRequestId: String? = null
     @Volatile
     private var loadedModel: LoadedModelInfo? = null
     @Volatile
@@ -289,6 +292,7 @@ class NativeJniLlamaCppBridge(
         onToken: (String) -> Unit,
     ): GenerationResult {
         val startedMs = System.currentTimeMillis()
+        if (requestId.isBlank()) return requestIdRequiredResult(startedMs)
         ensureRuntimeInitialized()
         if (!runtimeReady) {
             return currentGenerationResult(
@@ -305,7 +309,8 @@ class NativeJniLlamaCppBridge(
         }
         var tokenCount = 0
         var firstTokenMs = -1L
-        activeRequestId = requestId
+        val generationOwner = tryAcquireGeneration(requestId)
+            ?: return busyGenerationResult(startedMs = startedMs, requestId = requestId)
         return try {
             val status = runCatching {
                 nativeApi.generateStreamWithImages(
@@ -356,7 +361,8 @@ class NativeJniLlamaCppBridge(
                     null
                 },
                 tokensPerSec = if (tokenCount > 0 && firstTokenMs >= 0) {
-                    val decodeMs = ((System.currentTimeMillis() - startedMs).coerceAtLeast(0L) - firstTokenMs).coerceAtLeast(1L)
+                    val elapsedMs = (System.currentTimeMillis() - startedMs).coerceAtLeast(0L)
+                    val decodeMs = (elapsedMs - firstTokenMs).coerceAtLeast(1L)
                     tokenCount.toDouble() / (decodeMs.toDouble() / 1000.0)
                 } else {
                     null
@@ -364,7 +370,7 @@ class NativeJniLlamaCppBridge(
                 errorCode = statusErrorCode,
             )
         } finally {
-            activeRequestId = null
+            releaseGeneration(generationOwner)
         }
     }
 
@@ -377,19 +383,26 @@ class NativeJniLlamaCppBridge(
         if (!runtimeReady || usingFallback) {
             return false
         }
-        return runCatching {
-            nativeApi.generate(
-                prompt = prompt,
-                maxTokens = maxTokens,
-                cacheKey = null,
-                cachePolicyCode = cachePolicy.code,
-            )
-            true
-        }.onSuccess {
-            clearBridgeError()
-        }.onFailure { error ->
-            recordBridgeError("JNI_GENERATE_SYNC_EXCEPTION", error)
-        }.getOrElse { false }
+        val requestId = "sync-probe-${syncProbeSequence.incrementAndGet()}"
+        val generationOwner = tryAcquireGeneration(requestId) ?: return false
+        return try {
+            runCatching {
+                nativeApi.generate(
+                    requestId = requestId,
+                    prompt = prompt,
+                    maxTokens = maxTokens,
+                    cacheKey = null,
+                    cachePolicyCode = cachePolicy.code,
+                )
+                true
+            }.onSuccess {
+                clearBridgeError()
+            }.onFailure { error ->
+                recordBridgeError("JNI_GENERATE_SYNC_EXCEPTION", error)
+            }.getOrElse { false }
+        } finally {
+            releaseGeneration(generationOwner)
+        }
     }
 
     override fun loadModel(modelId: String, modelPath: String?): Boolean {
@@ -462,6 +475,8 @@ class NativeJniLlamaCppBridge(
         return loaded
     }
 
+    // Load fallback, GPU demotion, and lifecycle reporting form one ordered transaction.
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun loadModelUnchecked(
         modelId: String,
         modelPath: String?,
@@ -525,17 +540,22 @@ class NativeJniLlamaCppBridge(
         val config = backendSanitizedConfig
         activeKvCachePreset = config.kvCachePreset
         val requestedGpuLayers = if (gpuEnabledAndSupported) config.gpuLayers else 0
-        val requestedDraftGpuLayers = if (gpuEnabledAndSupported && config.speculativeEnabled && config.speculativeDraftGpuLayers > 0) {
+        val draftGpuRequested = config.speculativeEnabled && config.speculativeDraftGpuLayers > 0
+        val requestedDraftGpuLayers = if (gpuEnabledAndSupported && draftGpuRequested) {
             config.speculativeDraftGpuLayers.coerceAtLeast(0)
         } else {
             0
         }
-        val effectiveGpuLayers = if (openclQuantUnsupported || openclQuantExperimental) 0 else requestedGpuLayers
-        val effectiveDraftGpuLayers = if (openclQuantUnsupported || openclQuantExperimental) 0 else requestedDraftGpuLayers
+        val openclQuantDemoted = openclQuantUnsupported || openclQuantExperimental
+        val effectiveGpuLayers = if (openclQuantDemoted) 0 else requestedGpuLayers
+        val effectiveDraftGpuLayers = if (openclQuantDemoted) 0 else requestedDraftGpuLayers
         if (preferredBackend == GpuExecutionBackend.OPENCL) {
             logBridge(
                 "OPENCL_QUANT_POLICY",
-                "model=$normalizedModelPath|model_id=$modelId|demoted_to_cpu=$openclQuantUnsupported|effective_gpu_layers=$effectiveGpuLayers|backend=${preferredBackend.name.lowercase()}|compatibility=${openclQuantCompatibility.name.lowercase()}",
+                "model=$normalizedModelPath|model_id=$modelId" +
+                    "|demoted_to_cpu=$openclQuantUnsupported|effective_gpu_layers=$effectiveGpuLayers" +
+                    "|backend=${preferredBackend.name.lowercase()}" +
+                    "|compatibility=${openclQuantCompatibility.name.lowercase()}",
             )
         }
 
@@ -550,7 +570,8 @@ class NativeJniLlamaCppBridge(
                 append("|runtime_support=$runtimeGpuSupported")
                 append("|preferred_backend_available=$preferredBackendAvailable")
                 append("|requested_layers=${config.gpuLayers}")
-                append("|requested_draft_layers=${if (config.speculativeEnabled) config.speculativeDraftGpuLayers else 0}")
+                val draftLayers = if (config.speculativeEnabled) config.speculativeDraftGpuLayers else 0
+                append("|requested_draft_layers=$draftLayers")
             }
             recordBridgeError("GPU_BACKEND_UNAVAILABLE", detail)
             return false
@@ -660,7 +681,9 @@ class NativeJniLlamaCppBridge(
             if (canRetry) {
                 logBridge(
                     "GPU_LOAD_BACKOFF",
-                    "model=$modelId|attempt=${attemptIndex + 1}|gpu_layers=${attempt.targetGpuLayers}|draft_gpu_layers=${attempt.draftGpuLayers}|error=${finalBridgeError?.code.orEmpty()}",
+                    "model=$modelId|attempt=${attemptIndex + 1}|gpu_layers=${attempt.targetGpuLayers}" +
+                        "|draft_gpu_layers=${attempt.draftGpuLayers}" +
+                        "|error=${finalBridgeError?.code.orEmpty()}",
                 )
                 return@forEachIndexed
             }
@@ -683,6 +706,8 @@ class NativeJniLlamaCppBridge(
         return false
     }
 
+    // Generation keeps metrics, cancellation, cache policy, and terminal mapping in one owner scope.
+    @Suppress("CyclomaticComplexMethod")
     override fun generate(
         requestId: String,
         prompt: String,
@@ -692,6 +717,7 @@ class NativeJniLlamaCppBridge(
         onToken: (String) -> Unit,
     ): GenerationResult {
         val startedMs = System.currentTimeMillis()
+        if (requestId.isBlank()) return requestIdRequiredResult(startedMs)
         ensureRuntimeInitialized()
         if (!runtimeReady) {
             return currentGenerationResult(
@@ -716,11 +742,14 @@ class NativeJniLlamaCppBridge(
         var tokenCount = 0
         var firstTokenMs = -1L
         var peakRssMb: Double? = null
-        activeRequestId = requestId
+        val generationOwner = tryAcquireGeneration(requestId)
+            ?: return busyGenerationResult(startedMs = startedMs, requestId = requestId)
         return try {
             logBridge(
                 "PREFIX_CACHE_REQUEST",
-                "requestId=$requestId|cacheKeyLen=${cacheKey?.length ?: 0}|cacheKeyPrefix=${summarizeCacheKey(cacheKey)}|policy=${cachePolicy.name.lowercase()}",
+                "requestId=$requestId|cacheKeyLen=${cacheKey?.length ?: 0}" +
+                    "|cacheKeyPrefix=${summarizeCacheKey(cacheKey)}" +
+                    "|policy=${cachePolicy.name.lowercase()}",
             )
             val status = runCatching {
                 nativeApi.generateStream(
@@ -777,7 +806,8 @@ class NativeJniLlamaCppBridge(
                     null
                 },
                 tokensPerSec = if (tokenCount > 0 && firstTokenMs >= 0) {
-                    val decodeMs = ((System.currentTimeMillis() - startedMs).coerceAtLeast(0L) - firstTokenMs).coerceAtLeast(1L)
+                    val elapsedMs = (System.currentTimeMillis() - startedMs).coerceAtLeast(0L)
+                    val decodeMs = (elapsedMs - firstTokenMs).coerceAtLeast(1L)
                     tokenCount.toDouble() / (decodeMs.toDouble() / 1000.0)
                 } else {
                     null
@@ -786,7 +816,7 @@ class NativeJniLlamaCppBridge(
                 errorCode = statusErrorCode,
             )
         } finally {
-            activeRequestId = null
+            releaseGeneration(generationOwner)
         }
     }
 
@@ -843,34 +873,122 @@ class NativeJniLlamaCppBridge(
     }
 
     override fun cancelGeneration(): Boolean {
-        if (!runtimeReady) {
-            recordBridgeError("RUNTIME_NOT_READY", "Cancel requested while runtime not ready.")
-            return false
-        }
         if (usingFallback) {
             return fallbackBridge.cancelGeneration()
         }
-        return runCatching { nativeApi.cancelGeneration() }
-            .onSuccess { cancelled ->
-                if (cancelled) {
-                    clearBridgeError()
-                } else {
-                    recordBridgeError("JNI_CANCEL_RETURNED_FALSE", "native cancel returned false")
-                }
-            }
-            .onFailure { error -> recordBridgeError("JNI_CANCEL_EXCEPTION", error) }
-            .getOrElse { false }
+        recordBridgeError(
+            code = "GENERATION_REQUEST_ID_REQUIRED",
+            detail = "Native cancellation requires the exact active requestId.",
+        )
+        return false
     }
 
     override fun cancelGeneration(requestId: String): Boolean {
         if (usingFallback) {
             return fallbackBridge.cancelGeneration(requestId)
         }
-        return if (activeRequestId == requestId) {
-            cancelGeneration()
-        } else {
-            false
+        val owner = processGenerationOwner.get()
+        if (owner?.requestId != requestId) {
+            return false
         }
+        if (!runtimeReady) {
+            recordBridgeError("RUNTIME_NOT_READY", "Cancel requested while runtime not ready.")
+            return false
+        }
+        return runCatching { nativeApi.cancelGeneration(requestId) }
+            .onSuccess { cancelled ->
+                if (cancelled) {
+                    clearBridgeError()
+                } else {
+                    recordBridgeError(
+                        "JNI_CANCEL_RETURNED_FALSE",
+                        "native cancel returned false for requestId=$requestId",
+                    )
+                }
+            }
+            .onFailure { error -> recordBridgeError("JNI_CANCEL_EXCEPTION", error) }
+            .getOrElse { false }
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        val activeOwner = processGenerationOwner.get()
+        if (activeOwner != null && !cancelGeneration(activeOwner.requestId)) {
+            return RuntimeCloseResult.rejected(
+                code = "RUNTIME_CLOSE_CANCEL_REJECTED",
+                detail = "requestId=${activeOwner.requestId}",
+            )
+        }
+        val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
+        while (processGenerationOwner.get() != null && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(CLOSE_POLL_INTERVAL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return RuntimeCloseResult.rejected("RUNTIME_CLOSE_INTERRUPTED")
+            }
+        }
+        if (processGenerationOwner.get() != null) {
+            return RuntimeCloseResult.rejected("RUNTIME_CLOSE_TIMEOUT")
+        }
+        val closed = if (usingFallback) {
+            fallbackBridge.closeRuntime(timeoutMs)
+        } else {
+            freeMultimodal()
+            if (offloadModel("runtime_close")) {
+                RuntimeCloseResult.closed()
+            } else {
+                RuntimeCloseResult.terminated("RUNTIME_CLOSE_OFFLOAD_FAILED")
+            }
+        }
+        if (!closed.success) return closed
+        synchronized(lifecycleObserverLock) {
+            lifecycleObservers.clear()
+        }
+        if (!stopLifecycleDispatcher(timeoutMs)) {
+            return RuntimeCloseResult.terminated("RUNTIME_LIFECYCLE_DISPATCHER_CLOSE_TIMEOUT")
+        }
+        return RuntimeCloseResult.closed()
+    }
+
+    internal fun isLifecycleDispatcherAliveForTests(): Boolean {
+        return lifecycleDispatcherThread?.isAlive == true
+    }
+
+    private fun tryAcquireGeneration(requestId: String): ProcessGenerationOwner? {
+        val owner = ProcessGenerationOwner(requestId)
+        return owner.takeIf { processGenerationOwner.compareAndSet(null, owner) }
+    }
+
+    private fun releaseGeneration(owner: ProcessGenerationOwner) {
+        processGenerationOwner.compareAndSet(owner, null)
+    }
+
+    private fun busyGenerationResult(startedMs: Long, requestId: String): GenerationResult {
+        val activeRequestId = processGenerationOwner.get()?.requestId
+        recordBridgeError(
+            code = BUSY_GENERATION_ERROR_CODE,
+            detail = "requestId=$requestId|activeRequestId=${activeRequestId.orEmpty()}",
+        )
+        return currentGenerationResult(
+            finishReason = GenerationFinishReason.ERROR,
+            tokenCount = 0,
+            firstTokenMs = -1L,
+            totalMs = (System.currentTimeMillis() - startedMs).coerceAtLeast(0L),
+            cancelled = false,
+            errorCode = BUSY_GENERATION_ERROR_CODE,
+        )
+    }
+
+    private fun requestIdRequiredResult(startedMs: Long): GenerationResult {
+        recordBridgeError("REQUEST_ID_REQUIRED", "Generation requires a non-blank requestId.")
+        return currentGenerationResult(
+            finishReason = GenerationFinishReason.ERROR,
+            tokenCount = 0,
+            firstTokenMs = -1L,
+            totalMs = (System.currentTimeMillis() - startedMs).coerceAtLeast(0L),
+            cancelled = false,
+            errorCode = "REQUEST_ID_REQUIRED",
+        )
     }
 
     override fun runtimeBackend(): RuntimeBackend {
@@ -940,7 +1058,10 @@ class NativeJniLlamaCppBridge(
                 libraryLoader(candidate)
                 true
             }.onFailure { error ->
-                logBridge("JNI_LIBRARY_LOAD_FAILED", "library=$candidate|reason=${error.message ?: error::class.simpleName}")
+                logBridge(
+                    "JNI_LIBRARY_LOAD_FAILED",
+                    "library=$candidate|reason=${error.message ?: error::class.simpleName}",
+                )
             }.getOrElse { false }
             if (!loaded) {
                 continue
@@ -1035,6 +1156,7 @@ class NativeJniLlamaCppBridge(
     }
 
     private fun emitLifecycleEvent(event: ModelLifecycleEvent) {
+        if (lifecycleDispatcherClosed) return
         currentLifecycleEvent = event
         ensureLifecycleDispatcherStarted()
         synchronized(lifecycleDispatchLock) {
@@ -1044,20 +1166,21 @@ class NativeJniLlamaCppBridge(
     }
 
     private fun ensureLifecycleDispatcherStarted() {
-        if (lifecycleDispatcherStarted) {
+        if (lifecycleDispatcherStarted || lifecycleDispatcherClosed) {
             return
         }
         lifecycleDispatcherStarted = true
-        thread(
+        lifecycleDispatcherThread = thread(
             start = true,
             isDaemon = true,
             name = "pocketgpt-lifecycle-dispatcher",
         ) {
-            while (true) {
+            while (!lifecycleDispatcherClosed) {
                 val nextEvent = synchronized(lifecycleDispatchLock) {
-                    while (lifecycleDispatchQueue.isEmpty()) {
+                    while (lifecycleDispatchQueue.isEmpty() && !lifecycleDispatcherClosed) {
                         lifecycleDispatchLock.wait()
                     }
+                    if (lifecycleDispatcherClosed) return@thread
                     lifecycleDispatchQueue.removeFirst()
                 }
                 val listeners = synchronized(lifecycleObserverLock) {
@@ -1070,6 +1193,27 @@ class NativeJniLlamaCppBridge(
         }
     }
 
+    private fun stopLifecycleDispatcher(timeoutMs: Long): Boolean {
+        lifecycleDispatcherClosed = true
+        synchronized(lifecycleDispatchLock) {
+            lifecycleDispatchQueue.clear()
+            lifecycleDispatchLock.notifyAll()
+        }
+        val dispatcher = lifecycleDispatcherThread ?: return true
+        try {
+            val waitMs = timeoutMs.coerceAtLeast(0L)
+            if (waitMs > 0L) dispatcher.join(waitMs)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+        if (dispatcher.isAlive) return false
+        lifecycleDispatcherThread = null
+        return true
+    }
+
+    // This classifier deliberately centralizes precedence for stable lifecycle error contracts.
+    @Suppress("CyclomaticComplexMethod")
     private fun mapBridgeErrorToLifecycleCode(errorCode: String?): ModelLifecycleErrorCode {
         val normalized = errorCode?.trim()?.uppercase().orEmpty()
         return when {
@@ -1246,7 +1390,8 @@ class NativeJniLlamaCppBridge(
         }
         return BridgeError(
             code = "GPU_BACKEND_LOAD_FAILED",
-            detail = "modelId=$modelId|backend=${backend.name.lowercase()}|gpu_layers=$gpuLayers|draft_gpu_layers=$draftGpuLayers",
+            detail = "modelId=$modelId|backend=${backend.name.lowercase()}" +
+                "|gpu_layers=$gpuLayers|draft_gpu_layers=$draftGpuLayers",
         )
     }
 
@@ -1301,21 +1446,11 @@ class NativeJniLlamaCppBridge(
         if (requestedTargetGpuLayers <= 0 || requestedDraftGpuLayers <= 0 || candidateTargetGpuLayers <= 0) {
             return 0
         }
-        val scaled = (requestedDraftGpuLayers.toDouble() * candidateTargetGpuLayers.toDouble() / requestedTargetGpuLayers.toDouble())
-            .toInt()
+        val scaledRatio = requestedDraftGpuLayers.toDouble() *
+            candidateTargetGpuLayers.toDouble() /
+            requestedTargetGpuLayers.toDouble()
+        val scaled = scaledRatio.toInt()
         return scaled.coerceAtLeast(0).coerceAtMost(candidateTargetGpuLayers)
-    }
-
-    private fun isOpenClBackendActive(preferredBackend: GpuExecutionBackend): Boolean {
-        val diagnostics = backendDiagnosticsJson().orEmpty()
-        if (diagnostics.isBlank()) return false
-        val openclCount = parseBackendDeviceCount(diagnostics, OPENCL_DEVICE_COUNT_REGEX) ?: 0
-        val hexagonCount = parseBackendDeviceCount(diagnostics, HEXAGON_DEVICE_COUNT_REGEX) ?: 0
-        return when (preferredBackend) {
-            GpuExecutionBackend.OPENCL -> openclCount > 0
-            GpuExecutionBackend.AUTO -> openclCount > 0 && hexagonCount == 0
-            else -> false
-        }
     }
 
     private fun logBridge(tag: String, message: String) {
@@ -1384,6 +1519,7 @@ class NativeJniLlamaCppBridge(
         )
 
         fun initialize(): Boolean
+        @Suppress("LongParameterList") // JNI ABI mirrors the native parameter surface.
         fun loadModel(
             modelId: String,
             modelPath: String,
@@ -1420,6 +1556,7 @@ class NativeJniLlamaCppBridge(
             nKeep: Int,
             progressCallback: ProgressCallback? = null,
         ): Boolean
+        @Suppress("LongParameterList") // JNI ABI mirrors the native parameter surface.
         fun setSamplingConfig(
             temperature: Float,
             topK: Int,
@@ -1446,8 +1583,14 @@ class NativeJniLlamaCppBridge(
             cachePolicyCode: Int,
             onToken: TokenCallback,
         ): StreamStatus
-        fun generate(prompt: String, maxTokens: Int, cacheKey: String?, cachePolicyCode: Int): String
-        fun cancelGeneration(): Boolean
+        fun generate(
+            requestId: String,
+            prompt: String,
+            maxTokens: Int,
+            cacheKey: String?,
+            cachePolicyCode: Int,
+        ): String
+        fun cancelGeneration(requestId: String): Boolean
         fun unloadModel()
         fun supportsGpuOffload(): Boolean
         fun modelLayerCount(): Int? = null
@@ -1475,6 +1618,7 @@ class NativeJniLlamaCppBridge(
 
     private class JniNativeApi : NativeApi {
         external fun nativeInitialize(): Boolean
+        @Suppress("LongParameterList") // JNI ABI mirrors the native parameter surface.
         external fun nativeLoadModel(
             modelId: String,
             modelPath: String,
@@ -1511,6 +1655,7 @@ class NativeJniLlamaCppBridge(
             nKeep: Int,
             progressCallback: NativeApi.ProgressCallback?,
         ): Boolean
+        @Suppress("LongParameterList") // JNI ABI mirrors the native parameter surface.
         external fun nativeSetSamplingConfig(
             temperature: Float,
             topK: Int,
@@ -1537,8 +1682,14 @@ class NativeJniLlamaCppBridge(
             cachePolicy: Int,
             callback: NativeApi.TokenCallback,
         ): Int
-        external fun nativeGenerate(prompt: String, maxTokens: Int, cacheKey: String?, cachePolicy: Int): String
-        external fun nativeCancelGeneration(): Boolean
+        external fun nativeGenerate(
+            requestId: String,
+            prompt: String,
+            maxTokens: Int,
+            cacheKey: String?,
+            cachePolicy: Int,
+        ): String
+        external fun nativeCancelGeneration(requestId: String): Boolean
         external fun nativeUnloadModel()
         external fun nativeSupportsGpuOffload(): Boolean
         external fun nativeModelLayerCount(): Int
@@ -1655,6 +1806,8 @@ class NativeJniLlamaCppBridge(
                 3 -> NativeApi.StreamStatus(GenerationFinishReason.CALLBACK_ERROR, "JNI_CALLBACK_ERROR")
                 4 -> NativeApi.StreamStatus(GenerationFinishReason.UTF8_STREAM_ERROR, "JNI_UTF8_STREAM_ERROR")
                 5 -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, "JNI_RUNTIME_ERROR")
+                6 -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, BUSY_GENERATION_ERROR_CODE)
+                7 -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, "REQUEST_ID_REQUIRED")
                 else -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, "JNI_UNKNOWN_STATUS_$statusCode")
             }
         }
@@ -1697,10 +1850,15 @@ class NativeJniLlamaCppBridge(
             )
         }
 
-        override fun generate(prompt: String, maxTokens: Int, cacheKey: String?, cachePolicyCode: Int): String =
-            nativeGenerate(prompt, maxTokens, cacheKey, cachePolicyCode)
+        override fun generate(
+            requestId: String,
+            prompt: String,
+            maxTokens: Int,
+            cacheKey: String?,
+            cachePolicyCode: Int,
+        ): String = nativeGenerate(requestId, prompt, maxTokens, cacheKey, cachePolicyCode)
 
-        override fun cancelGeneration(): Boolean = nativeCancelGeneration()
+        override fun cancelGeneration(requestId: String): Boolean = nativeCancelGeneration(requestId)
 
         override fun unloadModel() = nativeUnloadModel()
 
@@ -1756,18 +1914,25 @@ class NativeJniLlamaCppBridge(
                 3 -> NativeApi.StreamStatus(GenerationFinishReason.CALLBACK_ERROR, "JNI_CALLBACK_ERROR")
                 4 -> NativeApi.StreamStatus(GenerationFinishReason.UTF8_STREAM_ERROR, "JNI_UTF8_STREAM_ERROR")
                 5 -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, "JNI_RUNTIME_ERROR")
+                6 -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, BUSY_GENERATION_ERROR_CODE)
+                7 -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, "REQUEST_ID_REQUIRED")
                 else -> NativeApi.StreamStatus(GenerationFinishReason.ERROR, "JNI_UNKNOWN_STATUS_$statusCode")
             }
         }
     }
 
     companion object {
+        private data class ProcessGenerationOwner(val requestId: String)
+
+        private const val BUSY_GENERATION_ERROR_CODE = "BUSY_GENERATION"
         private const val DEFAULT_NATIVE_LIBRARY_NAME = "pocket_llama"
         private const val LIBRARY_V8 = "pocket_llama_v8"
         private const val LIBRARY_V8_2 = "pocket_llama_v8_2"
         private const val LIBRARY_V8_2_DOTPROD = "pocket_llama_v8_2_dotprod"
         private const val LIBRARY_V8_2_I8MM = "pocket_llama_v8_2_i8mm"
         private const val LIBRARY_V8_2_DOTPROD_I8MM = "pocket_llama_v8_2_dotprod_i8mm"
+        private val processGenerationOwner = AtomicReference<ProcessGenerationOwner?>(null)
+        private val syncProbeSequence = AtomicLong(0L)
         private const val CPU_INFO_PATH = "/proc/cpuinfo"
         const val ENABLE_ADB_FALLBACK_ENV: String = "POCKETGPT_ENABLE_ADB_FALLBACK"
         const val ENABLE_GPU_OFFLOAD_ENV: String = "POCKETGPT_ENABLE_GPU_OFFLOAD"
@@ -1825,6 +1990,7 @@ class NativeJniLlamaCppBridge(
 
         private const val LOAD_PROGRESS_EMIT_INTERVAL_MS = 250L
         private const val LOAD_PROGRESS_EMIT_STEP = 0.05f
+        private const val CLOSE_POLL_INTERVAL_MS = 10L
         private val CPU_FEATURE_TOKEN_REGEX = Regex("[a-z0-9_]+")
 
         private data class CpuFeatureSnapshot(

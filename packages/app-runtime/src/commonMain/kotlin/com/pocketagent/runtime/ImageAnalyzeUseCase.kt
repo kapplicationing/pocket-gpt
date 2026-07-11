@@ -7,6 +7,7 @@ import com.pocketagent.inference.DeviceState
 import com.pocketagent.inference.ImageInputResult
 import com.pocketagent.inference.ImageInputModule
 import com.pocketagent.inference.InferenceModule
+import java.util.UUID
 
 internal class ImageAnalyzeUseCase(
     private val policyModule: PolicyModule,
@@ -18,6 +19,8 @@ internal class ImageAnalyzeUseCase(
     private val routingModeProvider: () -> RoutingMode,
     private val residentModelIdProvider: () -> String? = { null },
     private val availableCpuCoresProvider: () -> Int = { Runtime.getRuntime().availableProcessors() },
+    private val operationCoordinator: RuntimeOperationCoordinator = RuntimeOperationCoordinator(),
+    private val clearResidentModel: (String) -> Unit = {},
 ) {
     fun execute(
         imagePath: String,
@@ -41,8 +44,37 @@ internal class ImageAnalyzeUseCase(
                 ),
             )
         }
+        val requestId = "image-${UUID.randomUUID()}"
+        val generationLease = when (
+            val admission = operationCoordinator.tryAcquireGeneration(
+                requestId = requestId,
+                sessionId = "image",
+            )
+        ) {
+            is GenerationAdmissionResult.Acquired -> admission.lease
+            is GenerationAdmissionResult.Rejected -> return ImageAnalysisResult.Failure(
+                failure = ImageFailure.Runtime(
+                    code = admission.code.lowercase(),
+                    userMessage = "The runtime is busy with another request.",
+                    technicalDetail = admission.detail,
+                ),
+            )
+        }
+        return try {
+            executeAdmitted(imagePath = imagePath, prompt = prompt, deviceState = deviceState)
+        } finally {
+            generationLease.close()
+        }
+    }
+
+    private fun executeAdmitted(
+        imagePath: String,
+        prompt: String,
+        deviceState: DeviceState,
+    ): ImageAnalysisResult {
         val startedMs = System.currentTimeMillis()
         val residentModelBefore = residentModelIdProvider()
+        var imageModelLoadAttempted = false
         var imageModelLoaded = false
         var imageModelId: String? = null
         val output = runCatching {
@@ -56,6 +88,7 @@ internal class ImageAnalyzeUseCase(
                 "Model artifact not registered for image runtime model: $modelId"
             }
             artifactVerifier.verifyArtifactOrThrow(modelId)
+            imageModelLoadAttempted = true
             imageModelLoaded = inferenceModule.loadModel(modelId)
             check(imageModelLoaded) {
                 "Failed to load runtime model for image analysis: $modelId"
@@ -106,8 +139,18 @@ internal class ImageAnalyzeUseCase(
         // Unconditional unload would nuke the user's chat model when they share
         // the same inference engine.
         val wasResidentBefore = residentModelBefore != null && residentModelBefore == imageModelId
-        if (imageModelLoaded && !wasResidentBefore) {
+        if (imageModelLoadAttempted && !wasResidentBefore) {
             inferenceModule.unloadModel()
+            if (residentModelBefore != null && !inferenceModule.loadModel(residentModelBefore)) {
+                clearResidentModel("image_restore_failed")
+                return ImageAnalysisResult.Failure(
+                    failure = ImageFailure.Runtime(
+                        code = "resident_restore_failed",
+                        userMessage = "Image analysis finished, but the chat model could not be restored.",
+                        technicalDetail = "modelId=$residentModelBefore",
+                    ),
+                )
+            }
         }
 
         val totalLatency = System.currentTimeMillis() - startedMs

@@ -105,6 +105,38 @@ class RemoteLlamaCppRuntimeBridgeTest {
     }
 
     @Test
+    fun `close unloads model and closes remote transport`() {
+        val transport = FakeRemoteRuntimeTransport()
+        val bridge = RemoteLlamaCppRuntimeBridge(transport)
+        assertTrue(bridge.loadModel("model-a", "/tmp/model-a.gguf"))
+
+        val result = bridge.closeRuntime(timeoutMs = 1_000L)
+
+        assertTrue(result.success)
+        assertEquals(1, transport.unloadModelCalls)
+        assertEquals(1, transport.closeCalls)
+        assertNull(bridge.getLoadedModel())
+    }
+
+    @Test
+    fun `cancel preserves structured wrong-owner error`() {
+        val transport = FakeRemoteRuntimeTransport(
+            nextCancellationResult = RemoteCancellationResult(
+                cancelled = false,
+                error = BridgeError(
+                    REMOTE_ERROR_NOT_GENERATION_OWNER,
+                    "cancel_request_not_owner",
+                ),
+            ),
+        )
+        val bridge = RemoteLlamaCppRuntimeBridge(transport)
+
+        assertFalse(bridge.cancelGeneration("request-b"))
+        assertEquals(REMOTE_ERROR_NOT_GENERATION_OWNER, bridge.lastError()?.code)
+        assertEquals("cancel_request_not_owner", bridge.lastError()?.detail)
+    }
+
+    @Test
     fun `runtime mode defaults to in process and honors explicit override`() {
         assertEquals("in_process", resolveAndroidRuntimeMode(emptyMap()))
         assertEquals("in_process", resolveAndroidRuntimeMode(emptyMap()))
@@ -143,9 +175,13 @@ private class FakeRemoteRuntimeTransport(
         cancelled = false,
     ),
     private val nextLastError: BridgeError? = null,
+    private val nextCancellationResult: RemoteCancellationResult =
+        RemoteCancellationResult(cancelled = true),
 ) : RemoteRuntimeTransport {
     var setConfigCalls: Int = 0
     var loadModelCalls: Int = 0
+    var unloadModelCalls: Int = 0
+    var closeCalls: Int = 0
 
     override fun epoch(): Long = epochValue
 
@@ -165,7 +201,15 @@ private class FakeRemoteRuntimeTransport(
         return loadModelOk
     }
 
-    override fun unloadModel(): Boolean = true
+    override fun unloadModel(): Boolean {
+        unloadModelCalls += 1
+        return true
+    }
+
+    override fun close(): Boolean {
+        closeCalls += 1
+        return true
+    }
 
     override fun generate(
         requestId: String,
@@ -181,7 +225,7 @@ private class FakeRemoteRuntimeTransport(
         return nextGenerationResult
     }
 
-    override fun cancelGeneration(requestId: String?): Boolean = true
+    override fun cancelGeneration(requestId: String?): RemoteCancellationResult = nextCancellationResult
 
     override fun supportsGpuOffload(): Boolean = gpuSupported
 

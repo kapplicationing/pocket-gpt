@@ -11,7 +11,8 @@ class LlamaCppInferenceModule(
     CacheAwareGenerationPort,
     RuntimeModelRegistryPort,
     RuntimeResidencyPort,
-    RuntimeSessionCachePort {
+    RuntimeSessionCachePort,
+    RuntimeLifetimePort {
     private var activeModelId: String? = null
     private val modelPathById: MutableMap<String, String> = mutableMapOf()
     private val modelMetadataById: MutableMap<String, ModelRuntimeMetadata> = mutableMapOf()
@@ -37,6 +38,7 @@ class LlamaCppInferenceModule(
             modelRegistry = this,
             residency = this,
             sessionCache = this,
+            lifetime = this,
         )
     }
 
@@ -120,7 +122,8 @@ class LlamaCppInferenceModule(
             onToken = onToken,
         )
         check(result.success) {
-            "llama.cpp runtime generation failed. finishReason=${result.finishReason} errorCode=${result.errorCode.orEmpty()}"
+            "llama.cpp runtime generation failed. " +
+                "finishReason=${result.finishReason} errorCode=${result.errorCode.orEmpty()}"
         }
     }
 
@@ -321,6 +324,16 @@ class LlamaCppInferenceModule(
             lastWarmupDurationMs = durationMs.coerceAtLeast(0L),
             lastAccessAtEpochMs = System.currentTimeMillis(),
         )
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        val result = runtimeBridge.closeRuntime(timeoutMs)
+        if (result.success) {
+            activeModelId = null
+            activeRuntimeKey = null
+            runtimeResidencyState = RuntimeResidencyState()
+        }
+        return result
     }
 
     private fun resolveRuntimeGenerationConfig(config: RuntimeGenerationConfig): RuntimeGenerationConfig {

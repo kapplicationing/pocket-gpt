@@ -12,6 +12,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
@@ -141,8 +143,9 @@ private fun PresetBackingDropdownRow(
             OutlinedTextField(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .menuAnchor(),
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
                 readOnly = true,
+                singleLine = true,
                 value = summary,
                 onValueChange = {},
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
@@ -153,7 +156,13 @@ private fun PresetBackingDropdownRow(
             ) {
                 candidates.forEach { modelId ->
                     DropdownMenuItem(
-                        text = { Text(ModelDisplayNames.displayNameFor(modelId)) },
+                        text = {
+                            Text(
+                                text = ModelDisplayNames.displayNameFor(modelId),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                         onClick = {
                             expanded = false
                             onModelIdSelected(modelId)

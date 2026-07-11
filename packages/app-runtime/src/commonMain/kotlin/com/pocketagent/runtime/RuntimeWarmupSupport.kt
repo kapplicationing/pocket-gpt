@@ -46,7 +46,10 @@ internal class RuntimeWarmupCoordinator(
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val onWarmupStage: (String, ModelLoadingStage, Float) -> Unit = { _, _, _ -> },
     private val runtimeInferencePorts: RuntimeInferencePorts = inferenceModule.runtimeInferencePorts(),
+    private val operationCoordinator: RuntimeOperationCoordinator = RuntimeOperationCoordinator(),
 ) {
+    // Warmup owns planning, load, one-token generation, residency, and metrics as one transaction.
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     fun warmup(residencyPolicy: ModelResidencyPolicy = ModelResidencyPolicy()): WarmupResult {
         if (!residencyPolicy.warmupOnStartup) {
             return WarmupResult.skipped("warmup_disabled")
@@ -94,9 +97,23 @@ internal class RuntimeWarmupCoordinator(
             runtimeInferencePorts = runtimeInferencePorts,
         )
         runtimePlan.loadBlockedReason?.let { blockedReason ->
-            return WarmupResult.skipped("warmup_planning_blocked:${runtimePlan.estimatedMemoryMb?.toInt() ?: "unknown"}:${blockedReason}")
+            val estimatedMemory = runtimePlan.estimatedMemoryMb?.toInt()?.toString() ?: "unknown"
+            return WarmupResult.skipped(
+                "warmup_planning_blocked:$estimatedMemory:$blockedReason",
+            )
         }
-        managedRuntime.setRuntimeGenerationConfig(runtimePlan.generationConfig)
+        val warmupRequestId = "warmup-$modelId-${nowMs()}"
+        val generationLease = when (
+            val admission = operationCoordinator.tryAcquireGeneration(
+                requestId = warmupRequestId,
+                sessionId = "warmup",
+            )
+        ) {
+            is GenerationAdmissionResult.Acquired -> admission.lease
+            is GenerationAdmissionResult.Rejected -> return WarmupResult.skipped(admission.code.lowercase())
+        }
+        try {
+            managedRuntime.setRuntimeGenerationConfig(runtimePlan.generationConfig)
         val speculativePath = runtimePlan.generationConfig.speculativeEnabled &&
             !runtimePlan.generationConfig.speculativeDraftModelPath.isNullOrBlank()
 
@@ -126,7 +143,7 @@ internal class RuntimeWarmupCoordinator(
         runtimeResidencyManager.onGenerationStarted()
         val warmupResult = runCatching {
             cacheAwareGeneration.generateStreamWithCache(
-                requestId = "warmup-$modelId-${warmupStartedAtMs}",
+                requestId = warmupRequestId,
                 request = InferenceRequest(prompt = WARMUP_PROMPT, maxTokens = WARMUP_MAX_TOKENS),
                 cacheKey = null,
                 cachePolicy = CachePolicy.OFF,
@@ -181,14 +198,17 @@ internal class RuntimeWarmupCoordinator(
                 keepAliveMs = runtimePlan.keepAliveMs,
             )
         }
-        return WarmupResult(
-            attempted = true,
-            warmed = true,
-            residentHit = residencyState.residentHit,
-            loadDurationMs = loadDurationMs,
-            warmupDurationMs = warmupDurationMs,
-            speculativePath = speculativePath,
-        )
+            return WarmupResult(
+                attempted = true,
+                warmed = true,
+                residentHit = residencyState.residentHit,
+                loadDurationMs = loadDurationMs,
+                warmupDurationMs = warmupDurationMs,
+                speculativePath = speculativePath,
+            )
+        } finally {
+            generationLease.close()
+        }
     }
 
     private companion object {

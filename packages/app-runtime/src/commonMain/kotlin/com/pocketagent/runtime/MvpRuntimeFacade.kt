@@ -13,6 +13,8 @@ import com.pocketagent.inference.DeviceState
 import com.pocketagent.memory.FileBackedMemoryModule
 import com.pocketagent.memory.MemoryModule
 import com.pocketagent.nativebridge.ModelLifecycleEvent
+import com.pocketagent.nativebridge.RuntimeCloseResult
+import com.pocketagent.nativebridge.RuntimeLifetimePort
 import com.pocketagent.nativebridge.createDefaultRuntimeInferenceModule
 import com.pocketagent.tools.SafeLocalToolRuntime
 import com.pocketagent.tools.ToolModule
@@ -94,6 +96,8 @@ sealed interface ChatStreamEvent {
         val terminalEventSeen: Boolean = true,
         val firstTokenMs: Long? = null,
         val completionMs: Long? = null,
+        val recoveryDisposition: RuntimeRecoveryDisposition =
+            RuntimeFailureRecoveryPolicy.forErrorCode(errorCode),
     ) : ChatStreamEvent
 
     data class Cancelled(
@@ -141,24 +145,11 @@ interface RuntimeContainer {
         context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit = {},
-    ): ChatResponse {
-        return sendChatMessages(
-            sessionId = sessionId,
-            messages = messages,
-            taskType = taskType,
-            deviceState = context.deviceState,
-            maxTokens = context.maxTokens,
-            keepModelLoaded = context.keepModelLoaded,
-            onToken = onToken,
-            onThinkingStateChanged = onThinkingStateChanged,
-            requestTimeoutMs = context.requestTimeoutMs,
-            requestId = context.requestId,
-            previousResponseId = context.previousResponseId,
-            performanceConfig = context.performanceConfig,
-            residencyPolicy = context.residencyPolicy,
-        )
-    }
+    ): ChatResponse
 
+    @Deprecated(
+        message = "Use the RuntimeRequestContext overload so new request fields cannot be discarded.",
+    )
     fun sendChatMessages(
         sessionId: SessionId,
         messages: List<InteractionMessage>,
@@ -173,7 +164,25 @@ interface RuntimeContainer {
         previousResponseId: String? = null,
         performanceConfig: PerformanceRuntimeConfig = PerformanceRuntimeConfig.default(),
         residencyPolicy: ModelResidencyPolicy = ModelResidencyPolicy(),
-    ): ChatResponse
+    ): ChatResponse {
+        return sendChatMessages(
+            sessionId = sessionId,
+            messages = messages,
+            taskType = taskType,
+            context = RuntimeRequestContext(
+                deviceState = deviceState,
+                maxTokens = maxTokens,
+                keepModelLoaded = keepModelLoaded,
+                requestTimeoutMs = requestTimeoutMs,
+                requestId = requestId,
+                previousResponseId = previousResponseId,
+                performanceConfig = performanceConfig,
+                residencyPolicy = residencyPolicy,
+            ),
+            onToken = onToken,
+            onThinkingStateChanged = onThinkingStateChanged,
+        )
+    }
 
     fun sendUserMessage(
         sessionId: SessionId,
@@ -182,23 +191,11 @@ interface RuntimeContainer {
         context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit = {},
-    ): ChatResponse {
-        return sendUserMessage(
-            sessionId = sessionId,
-            userText = userText,
-            taskType = taskType,
-            deviceState = context.deviceState,
-            maxTokens = context.maxTokens,
-            keepModelLoaded = context.keepModelLoaded,
-            onToken = onToken,
-            onThinkingStateChanged = onThinkingStateChanged,
-            requestTimeoutMs = context.requestTimeoutMs,
-            requestId = context.requestId,
-            performanceConfig = context.performanceConfig,
-            residencyPolicy = context.residencyPolicy,
-        )
-    }
+    ): ChatResponse
 
+    @Deprecated(
+        message = "Use the RuntimeRequestContext overload so new request fields cannot be discarded.",
+    )
     fun sendUserMessage(
         sessionId: SessionId,
         userText: String,
@@ -213,25 +210,21 @@ interface RuntimeContainer {
         performanceConfig: PerformanceRuntimeConfig = PerformanceRuntimeConfig.default(),
         residencyPolicy: ModelResidencyPolicy = ModelResidencyPolicy(),
     ): ChatResponse {
-        return sendChatMessages(
+        return sendUserMessage(
             sessionId = sessionId,
-            messages = listOf(
-                InteractionMessage(
-                    role = InteractionRole.USER,
-                    parts = listOf(InteractionContentPart.Text(userText)),
-                ),
-            ),
+            userText = userText,
             taskType = taskType,
-            deviceState = deviceState,
-            maxTokens = maxTokens,
-            keepModelLoaded = keepModelLoaded,
+            context = RuntimeRequestContext(
+                deviceState = deviceState,
+                maxTokens = maxTokens,
+                keepModelLoaded = keepModelLoaded,
+                requestTimeoutMs = requestTimeoutMs,
+                requestId = requestId,
+                performanceConfig = performanceConfig,
+                residencyPolicy = residencyPolicy,
+            ),
             onToken = onToken,
             onThinkingStateChanged = onThinkingStateChanged,
-            requestTimeoutMs = requestTimeoutMs,
-            requestId = requestId,
-            previousResponseId = null,
-            performanceConfig = performanceConfig,
-            residencyPolicy = residencyPolicy,
         )
     }
     fun cancelGeneration(sessionId: SessionId): Boolean = false
@@ -280,11 +273,12 @@ interface RuntimeContainer {
 
 class DefaultMvpRuntimeFacade(
     private val container: RuntimeContainer = DefaultRuntimeContainer(),
-) : MvpRuntimeFacade, RuntimeWarmupSupport, RuntimeResourceControl {
+) : MvpRuntimeFacade, RuntimeWarmupSupport, RuntimeResourceControl, RuntimeLifetimePort {
     private val streamContractV2Enabled: Boolean = streamContractV2Enabled()
 
     override fun createSession(): SessionId = container.createSession()
 
+    @Suppress("LongMethod", "CyclomaticComplexMethod", "CognitiveComplexMethod")
     override fun streamChat(request: StreamChatRequestV2): Flow<ChatStreamEvent> = callbackFlow {
         val startedAtMs = System.currentTimeMillis()
         val terminalSent = AtomicBoolean(false)
@@ -429,6 +423,7 @@ class DefaultMvpRuntimeFacade(
                                 is RuntimeModelLoadPlanningException -> error.errorCode
                                 is RuntimeImageAttachmentUnsupportedException -> error.errorCode
                                 is RuntimeTemplateUnavailableException -> "template_unavailable"
+                                is RuntimeArtifactVerificationException -> error.errorCode
                                 is RuntimeGenerationFailureException -> error.errorCode
                                     ?.trim()
                                     ?.lowercase()
@@ -537,6 +532,11 @@ class DefaultMvpRuntimeFacade(
     override fun observeModelLifecycleEvents(listener: (ModelLifecycleEvent) -> Unit): AutoCloseable {
         return container.observeModelLifecycleEvents(listener)
     }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        return (container as? RuntimeLifetimePort)?.closeRuntime(timeoutMs)
+            ?: RuntimeCloseResult.rejected("RUNTIME_LIFETIME_UNSUPPORTED")
+    }
 }
 
 class DefaultRuntimeContainer(
@@ -560,38 +560,22 @@ class DefaultRuntimeContainer(
         recommendedGpuLayers = recommendedGpuLayers,
         mmProjPathResolver = mmProjPathResolver,
     ),
-) : RuntimeContainer {
+) : RuntimeContainer, RuntimeLifetimePort {
     override fun createSession(): SessionId = orchestrator.createSession()
 
     override fun sendChatMessages(
         sessionId: SessionId,
         messages: List<InteractionMessage>,
         taskType: String,
-        deviceState: DeviceState,
-        maxTokens: Int,
-        keepModelLoaded: Boolean,
+        context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit,
-        requestTimeoutMs: Long,
-        requestId: String,
-        previousResponseId: String?,
-        performanceConfig: PerformanceRuntimeConfig,
-        residencyPolicy: ModelResidencyPolicy,
     ): ChatResponse {
         return orchestrator.sendChatMessages(
             sessionId = sessionId,
             messages = messages,
             taskType = taskType,
-            context = RuntimeRequestContext(
-                deviceState = deviceState,
-                maxTokens = maxTokens,
-                keepModelLoaded = keepModelLoaded,
-                requestTimeoutMs = requestTimeoutMs,
-                requestId = requestId,
-            previousResponseId = previousResponseId,
-            performanceConfig = performanceConfig,
-            residencyPolicy = residencyPolicy,
-            ),
+            context = context,
             onToken = onToken,
             onThinkingStateChanged = onThinkingStateChanged,
         )
@@ -601,29 +585,15 @@ class DefaultRuntimeContainer(
         sessionId: SessionId,
         userText: String,
         taskType: String,
-        deviceState: DeviceState,
-        maxTokens: Int,
-        keepModelLoaded: Boolean,
+        context: RuntimeRequestContext,
         onToken: (String) -> Unit,
         onThinkingStateChanged: (Boolean) -> Unit,
-        requestTimeoutMs: Long,
-        requestId: String,
-        performanceConfig: PerformanceRuntimeConfig,
-        residencyPolicy: ModelResidencyPolicy,
     ): ChatResponse {
         return orchestrator.sendUserMessage(
             sessionId = sessionId,
             userText = userText,
             taskType = taskType,
-            context = RuntimeRequestContext(
-                deviceState = deviceState,
-                maxTokens = maxTokens,
-                keepModelLoaded = keepModelLoaded,
-                requestTimeoutMs = requestTimeoutMs,
-                requestId = requestId,
-                performanceConfig = performanceConfig,
-                residencyPolicy = residencyPolicy,
-            ),
+            context = context,
             onToken = onToken,
             onThinkingStateChanged = onThinkingStateChanged,
         )
@@ -631,7 +601,9 @@ class DefaultRuntimeContainer(
 
     override fun cancelGeneration(sessionId: SessionId): Boolean = orchestrator.cancelGeneration(sessionId)
 
-    override fun cancelGenerationByRequest(requestId: String): Boolean = orchestrator.cancelGenerationByRequest(requestId)
+    override fun cancelGenerationByRequest(requestId: String): Boolean {
+        return orchestrator.cancelGenerationByRequest(requestId)
+    }
 
     override fun runTool(toolName: String, jsonArgs: String): String = orchestrator.runTool(toolName, jsonArgs)
 
@@ -704,6 +676,8 @@ class DefaultRuntimeContainer(
     override fun observeModelLifecycleEvents(listener: (ModelLifecycleEvent) -> Unit): AutoCloseable {
         return orchestrator.observeModelLifecycleEvents(listener)
     }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult = orchestrator.closeRuntime(timeoutMs)
 }
 
 internal const val DEFAULT_REQUEST_TIMEOUT_MS: Long = 600_000L

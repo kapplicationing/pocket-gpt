@@ -1,5 +1,6 @@
 package com.pocketagent.android.runtime
 
+import com.pocketagent.core.model.ModelArtifactRole
 import java.io.File
 import java.util.Locale
 import org.json.JSONArray
@@ -22,10 +23,35 @@ internal fun AndroidRuntimeProvisioningStore.ensureMigrated() {
         mergedDynamicIds
             .map(::dynamicModelSpec)
             .forEach(::migrateSpecIfNeeded)
+        recoverOwnedImportArtifacts(
+            specs = BASELINE_MODEL_SPECS + mergedDynamicIds.map(::dynamicModelSpec),
+        )
         // Run alias migration once per process start to self-heal stale metadata
         // without repeating full migration work on every snapshot call.
         runPathAliasMigrationLocked()
         migrationEnsured = true
+    }
+}
+
+internal fun AndroidRuntimeProvisioningStore.recoverOwnedImportArtifacts(specs: List<ModelSpec>) {
+    val managedDirectory = managedModelDirectory()
+    val referencedPaths = specs
+        .flatMap(::readStoredVersionEntries)
+        .mapTo(mutableSetOf()) { entry -> normalizeAbsolutePath(entry.absolutePath) }
+    cleanupOwnedImportArtifacts(
+        managedDirectory = managedDirectory,
+        referencedPaths = referencedPaths,
+        activeImportPaths = PROVISIONING_ACTIVE_IMPORT_PATHS.toSet(),
+        normalizePath = ::normalizeAbsolutePath,
+        metadataFileFor = ::metadataFileFor,
+    ).failedPaths.forEach { failedPath ->
+        recordMigrationCorruption(
+            ProvisioningRecoverySignal(
+                code = "PROVISIONING_IMPORT_ARTIFACT_CLEANUP_FAILED",
+                message = "An interrupted model import still uses storage.",
+                technicalDetail = "path=$failedPath",
+            ),
+        )
     }
 }
 
@@ -92,12 +118,22 @@ internal fun AndroidRuntimeProvisioningStore.discoverDynamicModelIdsFromMetadata
         return emptySet()
     }
     return metadataFiles.mapNotNull { metadataFile ->
-        val json = runCatching { JSONObject(metadataFile.readText()) }.getOrNull() ?: return@mapNotNull null
-        val modelId = json.optString("modelId", "").trim()
+        val metadata = StoredModelSidecarMetadataStore.read(metadataFile)
+        val json = runCatching { JSONObject(metadataFile.readText()) }.getOrNull()
+        val modelId = metadata?.modelId?.trim().orEmpty().ifBlank {
+            json?.optString("modelId", "")?.trim().orEmpty()
+        }
         if (modelId.isBlank() || isBaselineModel(modelId)) {
             return@mapNotNull null
         }
-        val absolutePath = normalizeAbsolutePath(json.optString("absolutePath", "").trim())
+        val primaryArtifact = metadata?.artifacts?.firstOrNull { artifact ->
+            artifact.role == ModelArtifactRole.PRIMARY_GGUF
+        }
+        val absolutePath = normalizeAbsolutePath(
+            primaryArtifact?.absolutePath.orEmpty().ifBlank {
+                json?.optString("absolutePath", "")?.trim().orEmpty()
+            },
+        )
         val modelFile = File(absolutePath)
         if (absolutePath.isBlank() || !modelFile.exists() || !modelFile.isFile) {
             return@mapNotNull null
@@ -106,7 +142,9 @@ internal fun AndroidRuntimeProvisioningStore.discoverDynamicModelIdsFromMetadata
     }.toSet()
 }
 
-internal fun AndroidRuntimeProvisioningStore.allModelSpecs(dynamicIds: Set<String> = readDynamicModelIds()): List<ModelSpec> {
+internal fun AndroidRuntimeProvisioningStore.allModelSpecs(
+    dynamicIds: Set<String> = readDynamicModelIds(),
+): List<ModelSpec> {
     val dynamicSpecs = dynamicIds
         .filterNot { modelId -> baselineModelIdSet.contains(modelId) }
         .sorted()
@@ -120,7 +158,9 @@ internal fun AndroidRuntimeProvisioningStore.modelSpecFor(modelId: String): Mode
     return dynamicModelSpec(modelId)
 }
 
-internal fun AndroidRuntimeProvisioningStore.isBaselineModel(modelId: String): Boolean = baselineModelIdSet.contains(modelId)
+internal fun AndroidRuntimeProvisioningStore.isBaselineModel(modelId: String): Boolean {
+    return baselineModelIdSet.contains(modelId)
+}
 
 internal fun AndroidRuntimeProvisioningStore.readDynamicModelIds(): Set<String> {
     return readDynamicModelIdsWithDiagnostics().ids
@@ -211,9 +251,13 @@ internal fun AndroidRuntimeProvisioningStore.dynamicModelSpec(modelId: String): 
     )
 }
 
-internal fun AndroidRuntimeProvisioningStore.versionsKey(spec: ModelSpec): String = "model_versions_json_${spec.prefTag}"
+internal fun AndroidRuntimeProvisioningStore.versionsKey(spec: ModelSpec): String {
+    return "model_versions_json_${spec.prefTag}"
+}
 
-internal fun AndroidRuntimeProvisioningStore.activeVersionKey(spec: ModelSpec): String = "model_active_version_${spec.prefTag}"
+internal fun AndroidRuntimeProvisioningStore.activeVersionKey(spec: ModelSpec): String {
+    return "model_active_version_${spec.prefTag}"
+}
 
 internal fun AndroidRuntimeProvisioningStore.fileNameForVersion(spec: ModelSpec, version: String): String {
     val suffix = sanitizeVersion(version)
@@ -281,14 +325,19 @@ internal fun AndroidRuntimeProvisioningStore.discoverPersistedEntries(spec: Mode
             ProvisioningRecoverySignal(
                 code = "PROVISIONING_DISCOVERY_FILES_SKIPPED",
                 message = "Some discovered model files were skipped during migration for ${spec.modelId}.",
-                technicalDetail = "model=${spec.modelId};dropped=$droppedCount;samples=${droppedSamples.joinToString(",")}",
+                technicalDetail = "model=${spec.modelId};dropped=$droppedCount;" +
+                    "samples=${droppedSamples.joinToString(",")}",
             ),
         )
     }
     return discovered.sortedByDescending { it.importedAtEpochMs }
 }
 
-internal fun AndroidRuntimeProvisioningStore.discoverPersistedEntriesFromMetadata(spec: ModelSpec): List<StoredVersionEntry> {
+// Migration discovery keeps corruption accounting and recovery evidence in one ordered pass.
+@Suppress("CyclomaticComplexMethod")
+internal fun AndroidRuntimeProvisioningStore.discoverPersistedEntriesFromMetadata(
+    spec: ModelSpec,
+): List<StoredVersionEntry> {
     val metadataFiles = discoveryModelDirectories()
         .asSequence()
         .flatMap { dir -> dir.listFiles()?.asSequence() ?: emptySequence() }
@@ -320,32 +369,45 @@ internal fun AndroidRuntimeProvisioningStore.discoverPersistedEntriesFromMetadat
                 key = "migration_metadata_${spec.prefTag}_${metadataFile.name.hashCode()}",
                 raw = raw,
                 code = "PROVISIONING_METADATA_JSON_CORRUPT",
-                detail = "model=${spec.modelId};file=${metadataFile.name};error=${error.message ?: "json_parse_failed"}",
+                detail = "model=${spec.modelId};file=${metadataFile.name};" +
+                    "error=${error.message ?: "json_parse_failed"}",
             )
             return@forEach
         }
-        val modelId = json.optString("modelId", "").trim()
+        val sidecar = StoredModelSidecarMetadataStore.read(metadataFile)
+        val primaryArtifact = sidecar?.artifacts?.firstOrNull { artifact ->
+            artifact.role == ModelArtifactRole.PRIMARY_GGUF
+        }
+        val modelId = sidecar?.modelId?.trim().orEmpty().ifBlank {
+            json.optString("modelId", "").trim()
+        }
         if (modelId != spec.modelId) {
             return@forEach
         }
-        val absolutePath = normalizeAbsolutePath(json.optString("absolutePath", "").trim())
-        val sha = json.optString("sha256", "").trim()
-        val version = sanitizeVersion(json.optString("version", "").trim())
+        val absolutePath = normalizeAbsolutePath(
+            primaryArtifact?.absolutePath.orEmpty().ifBlank {
+                json.optString("absolutePath", "").trim()
+            },
+        )
+        val sha = primaryArtifact?.expectedSha256.orEmpty().ifBlank {
+            json.optString("sha256", "").trim()
+        }
+        val version = sanitizeVersion(
+            sidecar?.version?.trim().orEmpty().ifBlank {
+                json.optString("version", "").trim()
+            },
+        )
         val modelFile = File(absolutePath)
-        if (
-            absolutePath.isBlank() ||
-            !modelFile.exists() ||
-            !modelFile.isFile ||
-            sha.isBlank() ||
-            version.isBlank()
-        ) {
+        if (isInvalidPersistedMetadata(absolutePath, modelFile, sha, version)) {
             droppedCount += 1
             if (droppedSamples.size < 3) {
                 droppedSamples += "${metadataFile.name}:missing_required_fields"
             }
             return@forEach
         }
-        val issuer = json.optString("provenanceIssuer", PROVISIONING_DEFAULT_ISSUER).trim().ifBlank { PROVISIONING_DEFAULT_ISSUER }
+        val issuer = json.optString("provenanceIssuer", PROVISIONING_DEFAULT_ISSUER)
+            .trim()
+            .ifBlank { PROVISIONING_DEFAULT_ISSUER }
         discovered += StoredVersionEntry(
             version = version,
             absolutePath = absolutePath,
@@ -354,10 +416,13 @@ internal fun AndroidRuntimeProvisioningStore.discoverPersistedEntriesFromMetadat
             provenanceSignature = json.optString("provenanceSignature", "").trim().ifBlank {
                 sha256Hex("$issuer|${spec.modelId}|$sha|v1".encodeToByteArray())
             },
-            runtimeCompatibility = json.optString("runtimeCompatibility", PROVISIONING_RUNTIME_COMPATIBILITY_TAG)
-                .trim()
-                .ifBlank { PROVISIONING_RUNTIME_COMPATIBILITY_TAG },
-            fileSizeBytes = json.optLong("fileSizeBytes", modelFile.length().coerceAtLeast(0L)).coerceAtLeast(0L),
+            runtimeCompatibility = primaryArtifact?.runtimeCompatibility.orEmpty().ifBlank {
+                json.optString("runtimeCompatibility", PROVISIONING_RUNTIME_COMPATIBILITY_TAG)
+                    .trim()
+                    .ifBlank { PROVISIONING_RUNTIME_COMPATIBILITY_TAG }
+            },
+            fileSizeBytes = primaryArtifact?.fileSizeBytes
+                ?: json.optLong("fileSizeBytes", modelFile.length().coerceAtLeast(0L)).coerceAtLeast(0L),
             importedAtEpochMs = json.optLong("importedAtEpochMs", modelFile.lastModified()).takeIf { it > 0L }
                 ?: System.currentTimeMillis(),
         )
@@ -377,6 +442,15 @@ internal fun AndroidRuntimeProvisioningStore.discoverPersistedEntriesFromMetadat
         )
     }
     return discovered.sortedByDescending { it.importedAtEpochMs }
+}
+
+private fun isInvalidPersistedMetadata(
+    absolutePath: String,
+    modelFile: File,
+    sha: String,
+    version: String,
+): Boolean {
+    return absolutePath.isBlank() || !modelFile.isFile || sha.isBlank() || version.isBlank()
 }
 
 internal fun AndroidRuntimeProvisioningStore.discoveryModelDirectories(): List<File> {

@@ -3,8 +3,10 @@ package com.pocketagent.android.runtime
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.res.AssetFileDescriptor
 import android.net.Uri
 import android.os.Build
+import android.os.CancellationSignal
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
@@ -19,14 +21,23 @@ import com.pocketagent.inference.ModelCatalog
 import com.pocketagent.inference.ModelRuntimeProfile
 import com.pocketagent.runtime.ModelRegistry
 import com.pocketagent.runtime.RuntimeConfig
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -61,6 +72,8 @@ class AndroidRuntimeProvisioningStore(
     @Volatile
     private var lastLoadedModelCache: LastLoadedModelRef? = null
 
+    // Snapshot assembly stays cohesive so recovery signals and model state share one read boundary.
+    @Suppress("CyclomaticComplexMethod")
     fun snapshot(): RuntimeProvisioningSnapshot {
         MainThreadGuard.assertNotMainThread("AndroidRuntimeProvisioningStore.snapshot")
         ensureMigrated()
@@ -100,7 +113,8 @@ class AndroidRuntimeProvisioningStore(
             if (fallbackAliasPath != null) {
                 corruptionSignals += ProvisioningRecoverySignal(
                     code = "MODEL_PATH_ALIAS_STALE",
-                    message = "Model path alias is stale for ${spec.modelId}. Refresh runtime checks to re-link local files.",
+                    message = "Model path alias is stale for ${spec.modelId}. " +
+                        "Refresh runtime checks to re-link local files.",
                     technicalDetail = "model=${spec.modelId};missing_path=$activePath;fallback_path=$fallbackAliasPath",
                 )
             }
@@ -151,10 +165,14 @@ class AndroidRuntimeProvisioningStore(
             storageSummary = storageSummary(),
             requiredModelIds = startupCandidateModelIds,
             storageRootLabel = storageRootLabel,
-            recoverableCorruptions = corruptionSignals.distinctBy { signal -> "${signal.code}:${signal.technicalDetail}" },
+            recoverableCorruptions = corruptionSignals.distinctBy { signal ->
+                "${signal.code}:${signal.technicalDetail}"
+            },
         )
     }
 
+    // This transaction normalizes provider failures and rolls back files for every throwable, including cancellation.
+    @Suppress("ThrowsCount", "TooGenericExceptionCaught")
     suspend fun importModel(
         modelId: String,
         sourceUri: Uri,
@@ -162,65 +180,112 @@ class AndroidRuntimeProvisioningStore(
     ): RuntimeModelImportResult {
         val spec = modelSpecFor(modelId)
         return withContext(Dispatchers.IO) {
-            withModelLock(modelId) {
-                ensureMigrated()
-                val destinationDir = managedModelDirectory()
-                val destinationFile = File(destinationDir, fileNameForVersion(spec, version))
-                val tempFile = File(destinationDir, ".${destinationFile.name}.tmp")
-                val digest = MessageDigest.getInstance("SHA-256")
+            ensureMigrated()
+            val importContext = currentCoroutineContext()
+            val destinationDir = managedModelDirectory()
+            val tempFile = File(
+                destinationDir,
+                "$PROVISIONING_IMPORT_TEMP_PREFIX${UUID.randomUUID()}$PROVISIONING_IMPORT_TEMP_SUFFIX",
+            )
+            val normalizedTempPath = normalizeAbsolutePath(tempFile.absolutePath)
+            PROVISIONING_ACTIVE_IMPORT_PATHS += normalizedTempPath
+            var normalizedDestinationPath: String? = null
+            val digest = MessageDigest.getInstance("SHA-256")
 
-                val copiedBytes = context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                    BufferedInputStream(input).use { bufferedInput ->
-                        BufferedOutputStream(tempFile.outputStream()).use { output ->
-                            val buffer = ByteArray(PROVISIONING_COPY_BUFFER_SIZE_BYTES)
-                            var total = 0L
-                            while (true) {
-                                val read = bufferedInput.read(buffer)
-                                if (read <= 0) {
-                                    break
-                                }
-                                digest.update(buffer, 0, read)
-                                output.write(buffer, 0, read)
-                                total += read
-                            }
-                            output.flush()
-                            total
-                        }
+            try {
+                val copiedBytes = try {
+                    openModelAssetDescriptor(modelId = modelId, sourceUri = sourceUri).use { descriptor ->
+                        copyModelInputToTempFileCancellable(
+                            input = descriptor.createInputStream(),
+                            tempFile = tempFile,
+                            digest = digest,
+                        )
                     }
-                } ?: throw RuntimeDomainException(
-                    domainError = RuntimeDomainError(
-                        code = RuntimeErrorCodes.PROVISIONING_IMPORT_SOURCE_UNREADABLE,
-                        userMessage = "Unable to read the selected model file.",
-                        technicalDetail = "model=$modelId;source_uri=$sourceUri",
-                    ),
-                )
-
-                if (destinationFile.exists()) {
-                    destinationFile.delete()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: RuntimeDomainException) {
+                    throw error
+                } catch (error: Exception) {
+                    throw unreadableImportSource(modelId = modelId, sourceUri = sourceUri, cause = error)
                 }
-                if (!tempFile.renameTo(destinationFile)) {
-                    throw RuntimeDomainException(
-                        domainError = RuntimeDomainError(
-                            code = RuntimeErrorCodes.PROVISIONING_IMPORT_PERSIST_FAILED,
-                            userMessage = "Unable to save the imported model file.",
-                            technicalDetail = "model=$modelId;destination=${destinationFile.absolutePath}",
-                        ),
-                    )
-                }
-
+                importContext.ensureActive()
                 val sha = digest.digest().toHex()
-                val result = upsertInstalledVersion(
+                ModelImportIdentityValidator.validateOrThrow(modelId = modelId, modelFile = tempFile)
+                val destinationFile = importedModelDestinationFile(
+                    destinationDir = destinationDir,
                     spec = spec,
-                    version = version,
-                    absolutePath = destinationFile.absolutePath,
                     sha = sha,
-                    provenanceIssuer = PROVISIONING_DEFAULT_ISSUER,
-                    provenanceSignature = sha256Hex("$PROVISIONING_DEFAULT_ISSUER|${spec.modelId}|$sha|v1".encodeToByteArray()),
-                    runtimeCompatibility = PROVISIONING_RUNTIME_COMPATIBILITY_TAG,
-                    fileSizeBytes = copiedBytes,
-                    makeActive = false,
                 )
-                result
+                val destinationPath = normalizeAbsolutePath(destinationFile.absolutePath)
+                normalizedDestinationPath = destinationPath
+                PROVISIONING_ACTIVE_IMPORT_PATHS += destinationPath
+
+                withModelLock(modelId) {
+                    importContext.ensureActive()
+                    ensureMigrated()
+                    val previousEntries = readStoredVersionEntries(spec)
+                    val publishedByThisImport = if (destinationFile.exists()) {
+                        val existingSha = runCatching { sha256HexFromFile(destinationFile) }.getOrNull()
+                        if (existingSha != sha) {
+                            throw importPersistFailure(
+                                modelId = modelId,
+                                destinationFile = destinationFile,
+                                detail = "content_address_collision_or_corruption",
+                            )
+                        }
+                        tempFile.delete()
+                        false
+                    } else {
+                        if (!publishImportedModel(tempFile = tempFile, destinationFile = destinationFile)) {
+                            destinationFile.takeIf { it.exists() }?.delete()
+                            throw importPersistFailure(modelId = modelId, destinationFile = destinationFile)
+                        }
+                        true
+                    }
+
+                    try {
+                        val result = upsertInstalledVersion(
+                            spec = spec,
+                            version = version,
+                            absolutePath = destinationFile.absolutePath,
+                            sha = sha,
+                            provenanceIssuer = PROVISIONING_DEFAULT_ISSUER,
+                            provenanceSignature = sha256Hex(
+                                "$PROVISIONING_DEFAULT_ISSUER|${spec.modelId}|$sha|v1".encodeToByteArray(),
+                            ),
+                            runtimeCompatibility = PROVISIONING_RUNTIME_COMPATIBILITY_TAG,
+                            fileSizeBytes = copiedBytes,
+                            makeActive = false,
+                            durableCommit = true,
+                        )
+                        val remainingEntries = readStoredVersionEntries(spec)
+                        previousEntries
+                            .filter { previous ->
+                                remainingEntries.none { current ->
+                                    current.absolutePath == previous.absolutePath
+                                }
+                            }
+                            .forEach { previous ->
+                                deleteManagedFileIfOrphaned(
+                                    absolutePath = previous.absolutePath,
+                                    remainingEntries = remainingEntries,
+                                )
+                            }
+                        result
+                    } catch (error: AmbiguousImportMetadataException) {
+                        throw error.failure
+                    } catch (error: Throwable) {
+                        if (publishedByThisImport) {
+                            destinationFile.takeIf { it.exists() }?.delete()
+                            metadataFileFor(destinationFile.absolutePath).takeIf { it.exists() }?.delete()
+                        }
+                        throw error
+                    }
+                }
+            } finally {
+                tempFile.takeIf { it.exists() }?.delete()
+                PROVISIONING_ACTIVE_IMPORT_PATHS -= normalizedTempPath
+                normalizedDestinationPath?.let(PROVISIONING_ACTIVE_IMPORT_PATHS::remove)
             }
         }
     }
@@ -245,7 +310,9 @@ class AndroidRuntimeProvisioningStore(
                     absolutePath = file.absolutePath,
                     sha = sha,
                     provenanceIssuer = PROVISIONING_DEFAULT_ISSUER,
-                    provenanceSignature = sha256Hex("$PROVISIONING_DEFAULT_ISSUER|${spec.modelId}|$sha|v1".encodeToByteArray()),
+                    provenanceSignature = sha256Hex(
+                        "$PROVISIONING_DEFAULT_ISSUER|${spec.modelId}|$sha|v1".encodeToByteArray(),
+                    ),
                     runtimeCompatibility = PROVISIONING_RUNTIME_COMPATIBILITY_TAG,
                     fileSizeBytes = file.length().coerceAtLeast(0L),
                     makeActive = false,
@@ -274,14 +341,15 @@ class AndroidRuntimeProvisioningStore(
         val spec = modelSpecFor(modelId)
         return withModelLock(modelId) {
             ensureMigrated()
+            val normalizedIssuer = provenanceIssuer.ifBlank { PROVISIONING_DEFAULT_ISSUER }
             val result = upsertInstalledVersion(
                 spec = spec,
                 version = version,
                 absolutePath = absolutePath,
                 sha = sha256,
-                provenanceIssuer = provenanceIssuer.ifBlank { PROVISIONING_DEFAULT_ISSUER },
+                provenanceIssuer = normalizedIssuer,
                 provenanceSignature = provenanceSignature.ifBlank {
-                    sha256Hex("${provenanceIssuer.ifBlank { PROVISIONING_DEFAULT_ISSUER }}|${spec.modelId}|$sha256|v1".encodeToByteArray())
+                    sha256Hex("$normalizedIssuer|${spec.modelId}|$sha256|v1".encodeToByteArray())
                 },
                 runtimeCompatibility = runtimeCompatibility.ifBlank { PROVISIONING_RUNTIME_COMPATIBILITY_TAG },
                 fileSizeBytes = fileSizeBytes.coerceAtLeast(0L),
@@ -301,14 +369,16 @@ class AndroidRuntimeProvisioningStore(
             }.getOrElse { error ->
                 Log.w(
                     LOG_TAG,
-                    "Failed to mirror downloaded model into Downloads for ${spec.modelId}@${result.version}: ${error.message}",
+                    "Failed to mirror downloaded model into Downloads for " +
+                        "${spec.modelId}@${result.version}: ${error.message}",
                 )
                 false
             }
             if (!mirrored) {
                 Log.w(
                     LOG_TAG,
-                    "Skipping Downloads mirror for ${spec.modelId}@${result.version}; install remains available in managed storage.",
+                    "Skipping Downloads mirror for ${spec.modelId}@${result.version}; " +
+                        "install remains available in managed storage.",
                 )
             }
             invalidateStorageSummaryCache()
@@ -640,6 +710,8 @@ class AndroidRuntimeProvisioningStore(
         )
     }
 
+    // This is the single transactional metadata writer; named arguments keep its persistence contract auditable.
+    @Suppress("LongParameterList")
     private fun upsertInstalledVersion(
         spec: ModelSpec,
         version: String,
@@ -655,8 +727,11 @@ class AndroidRuntimeProvisioningStore(
         displayName: String? = null,
         promptProfileId: String? = null,
         installedArtifacts: List<InstalledArtifactDescriptor>? = null,
+        durableCommit: Boolean = false,
     ): RuntimeModelImportResult {
         val entries = readStoredVersionEntries(spec).toMutableList()
+        val previousVersionsRaw = prefs.getString(versionsKey(spec), null)
+        val previousActiveVersion = prefs.readOptional(activeVersionKey(spec))
         val now = System.currentTimeMillis()
         val sanitizedVersion = sanitizeVersion(version)
         val normalizedPath = normalizeAbsolutePath(absolutePath)
@@ -673,7 +748,43 @@ class AndroidRuntimeProvisioningStore(
         // Keep one canonical entry per source path so repeated stage seeding does not create unbounded duplicates.
         entries.removeAll { it.version == sanitizedVersion || it.absolutePath == normalizedPath }
         entries.add(entry)
-        writeStoredVersionEntries(spec, entries)
+        val shouldBecomeActive = makeActive || previousActiveVersion.isNullOrBlank()
+        val editor = prefs.edit().putString(versionsKey(spec), encodeStoredVersions(entries).toString())
+        if (shouldBecomeActive) {
+            editor.putString(activeVersionKey(spec), sanitizedVersion)
+        }
+        if (durableCommit) {
+            val commitResult = commitOrRollback(
+                commit = editor::commit,
+                rollback = {
+                    val rollbackEditor = prefs.edit()
+                    if (previousVersionsRaw == null) {
+                        rollbackEditor.remove(versionsKey(spec))
+                    } else {
+                        rollbackEditor.putString(versionsKey(spec), previousVersionsRaw)
+                    }
+                    if (previousActiveVersion == null) {
+                        rollbackEditor.remove(activeVersionKey(spec))
+                    } else {
+                        rollbackEditor.putString(activeVersionKey(spec), previousActiveVersion)
+                    }
+                    rollbackEditor.commit()
+                },
+            )
+            if (!commitResult.committed) {
+                val failure = importPersistFailure(
+                    modelId = spec.modelId,
+                    destinationFile = File(normalizedPath),
+                    detail = "metadata_commit_failed",
+                )
+                if (!commitResult.rollbackSucceeded) {
+                    throw AmbiguousImportMetadataException(failure = failure)
+                }
+                throw failure
+            }
+        } else {
+            editor.apply()
+        }
         writeManagedMetadataIfApplicable(
             modelId = spec.modelId,
             entry = entry,
@@ -683,9 +794,6 @@ class AndroidRuntimeProvisioningStore(
             promptProfileId = promptProfileId,
             installedArtifacts = installedArtifacts,
         )
-        if (makeActive || prefs.readOptional(activeVersionKey(spec)).isNullOrBlank()) {
-            prefs.edit().putString(activeVersionKey(spec), sanitizedVersion).apply()
-        }
         invalidateStorageSummaryCache()
         val isActive = prefs.readOptional(activeVersionKey(spec)) == sanitizedVersion
         return RuntimeModelImportResult(
@@ -736,7 +844,9 @@ class AndroidRuntimeProvisioningStore(
                             InstalledArtifactDescriptor(
                                 artifactId = "${spec.modelId}::${entry.version}::primary",
                                 role = ModelArtifactRole.PRIMARY_GGUF,
-                                fileName = entry.absolutePath.substringAfterLast('/').ifBlank { "${spec.modelId}-${entry.version}.gguf" },
+                                fileName = entry.absolutePath.substringAfterLast('/').ifBlank {
+                                    "${spec.modelId}-${entry.version}.gguf"
+                                },
                                 absolutePath = entry.absolutePath,
                                 expectedSha256 = entry.sha256,
                                 runtimeCompatibility = entry.runtimeCompatibility,
@@ -798,7 +908,10 @@ class AndroidRuntimeProvisioningStore(
                 prefs.edit().putString(activeVersionKey, replacement).apply()
             }
         }
-        val repairedActive = selectRuntimeConfigEntry(activeVersion = prefs.readOptional(activeVersionKey), entries = deduped)
+        val repairedActive = selectRuntimeConfigEntry(
+            activeVersion = prefs.readOptional(activeVersionKey),
+            entries = deduped,
+        )
         val currentActive = prefs.readOptional(activeVersionKey)
         if (repairedActive != null && repairedActive.version != currentActive) {
             changed = true
@@ -890,7 +1003,11 @@ class AndroidRuntimeProvisioningStore(
                         }.getOrElse { false }
                         if (relocated && targetFile.exists() && targetFile.length() == currentFile.length()) {
                             changed = true
-                            Log.i(LOG_TAG, "Relocated ${spec.modelId} from legacy path ${entry.absolutePath} to ${targetFile.absolutePath}")
+                            Log.i(
+                                LOG_TAG,
+                                "Relocated ${spec.modelId} from legacy path ${entry.absolutePath} " +
+                                    "to ${targetFile.absolutePath}",
+                            )
                             return@map entry.copy(
                                 absolutePath = normalizeAbsolutePath(targetFile.absolutePath),
                                 fileSizeBytes = targetFile.length().coerceAtLeast(0L),
@@ -993,7 +1110,8 @@ class AndroidRuntimeProvisioningStore(
                             entries = emptyList(),
                             signal = ProvisioningRecoverySignal(
                                 code = "PROVISIONING_ACTIVE_VERSION_ORPHANED",
-                                message = "Active model version metadata was orphaned for ${spec.modelId} and has been reset.",
+                                message = "Active model version metadata was orphaned for ${spec.modelId} " +
+                                    "and has been reset.",
                                 technicalDetail = emptyDetail,
                             ),
                         )
@@ -1044,7 +1162,8 @@ class AndroidRuntimeProvisioningStore(
         val signal = ProvisioningRecoverySignal(
             code = "PROVISIONING_VERSIONS_RECOVERED_FROM_DISCOVERY",
             message = "Stored model metadata was corrupted for ${spec.modelId} and rebuilt from local model files.",
-            technicalDetail = "model=${spec.modelId};source=$corruptionCode;recovered=${recoveredEntries.size};$corruptionDetail",
+            technicalDetail = "model=${spec.modelId};source=$corruptionCode;" +
+                "recovered=${recoveredEntries.size};$corruptionDetail",
         )
         recordMigrationCorruption(signal)
         return StoredEntriesReadResult(
@@ -1128,7 +1247,8 @@ class AndroidRuntimeProvisioningStore(
         if (!SHA256_HEX_REGEX.matches(sha)) {
             signals += ProvisioningRecoverySignal(
                 code = "MODEL_METADATA_SHA_INVALID",
-                message = "Model metadata is inconsistent for ${spec.modelId}. Re-import or re-download to refresh integrity metadata.",
+                message = "Model metadata is inconsistent for ${spec.modelId}. " +
+                    "Re-import or re-download to refresh integrity metadata.",
                 technicalDetail = "model=${spec.modelId};version=${activeVersion.version};sha=$sha",
             )
         }
@@ -1137,22 +1257,30 @@ class AndroidRuntimeProvisioningStore(
         if (declaredSize > 0L && actualSize > 0L && declaredSize != actualSize) {
             signals += ProvisioningRecoverySignal(
                 code = "MODEL_METADATA_SIZE_MISMATCH",
-                message = "Model file size does not match stored metadata for ${spec.modelId}. Re-import or re-download to repair.",
-                technicalDetail = "model=${spec.modelId};version=${activeVersion.version};declared=$declaredSize;actual=$actualSize",
+                message = "Model file size does not match stored metadata for ${spec.modelId}. " +
+                    "Re-import or re-download to repair.",
+                technicalDetail = "model=${spec.modelId};version=${activeVersion.version};" +
+                    "declared=$declaredSize;actual=$actualSize",
             )
         }
         if (activeVersion.runtimeCompatibility != PROVISIONING_RUNTIME_COMPATIBILITY_TAG) {
             signals += ProvisioningRecoverySignal(
                 code = "MODEL_METADATA_RUNTIME_MISMATCH",
-                message = "Model runtime compatibility metadata is outdated for ${spec.modelId}. Use a compatible download.",
-                technicalDetail = "model=${spec.modelId};version=${activeVersion.version};stored_runtime=${activeVersion.runtimeCompatibility};expected=$PROVISIONING_RUNTIME_COMPATIBILITY_TAG",
+                message = "Model runtime compatibility metadata is outdated for ${spec.modelId}. " +
+                    "Use a compatible download.",
+                technicalDetail = "model=${spec.modelId};version=${activeVersion.version};" +
+                    "stored_runtime=${activeVersion.runtimeCompatibility};" +
+                    "expected=$PROVISIONING_RUNTIME_COMPATIBILITY_TAG",
             )
         }
         if (activeVersion.provenanceIssuer.isBlank() || activeVersion.provenanceSignature.isBlank()) {
             signals += ProvisioningRecoverySignal(
                 code = "MODEL_METADATA_PROVENANCE_MISSING",
-                message = "Model provenance metadata is incomplete for ${spec.modelId}. Re-download verified artifacts.",
-                technicalDetail = "model=${spec.modelId};version=${activeVersion.version};issuer_blank=${activeVersion.provenanceIssuer.isBlank()};signature_blank=${activeVersion.provenanceSignature.isBlank()}",
+                message = "Model provenance metadata is incomplete for ${spec.modelId}. " +
+                    "Re-download verified artifacts.",
+                technicalDetail = "model=${spec.modelId};version=${activeVersion.version};" +
+                    "issuer_blank=${activeVersion.provenanceIssuer.isBlank()};" +
+                    "signature_blank=${activeVersion.provenanceSignature.isBlank()}",
             )
         }
         return signals
@@ -1244,7 +1372,10 @@ class AndroidRuntimeProvisioningStore(
                     candidate.exists() && candidate.isDirectory && candidate.canWrite()
                 }.getOrDefault(false)
             }
-            ?: error("External model storage is unavailable; app-private storage is not a supported canonical cache path.")
+            ?: error(
+                "External model storage is unavailable; " +
+                    "app-private storage is not a supported canonical cache path.",
+            )
         managedStorageRootCache.compareAndSet(null, externalRoot)
         return managedStorageRootCache.get() ?: externalRoot
     }
@@ -1295,7 +1426,7 @@ class AndroidRuntimeProvisioningStore(
         return runCatching {
             val outputStream = resolver.openOutputStream(targetUri, "w")
             if (outputStream == null) {
-                throw IllegalStateException("Unable to open destination stream for Downloads mirror.")
+                error("Unable to open destination stream for Downloads mirror.")
             }
             outputStream.use { output ->
                 sourceFile.inputStream().buffered().use { input ->
@@ -1390,6 +1521,98 @@ class AndroidRuntimeProvisioningStore(
         }
     }
 
+    private fun publishImportedModel(tempFile: File, destinationFile: File): Boolean {
+        return try {
+            Files.move(
+                tempFile.toPath(),
+                destinationFile.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+            true
+        } catch (_: AtomicMoveNotSupportedException) {
+            runCatching {
+                Files.move(
+                    tempFile.toPath(),
+                    destinationFile.toPath(),
+                )
+            }.isSuccess
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    // Content providers may throw platform-specific errors; propagate any throwable through this cancellable bridge.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun openModelAssetDescriptor(modelId: String, sourceUri: Uri): AssetFileDescriptor {
+        return suspendCancellableCoroutine { continuation ->
+            val cancellationSignal = CancellationSignal()
+            continuation.invokeOnCancellation { cancellationSignal.cancel() }
+            try {
+                val descriptor = context.contentResolver.openAssetFileDescriptor(
+                    sourceUri,
+                    "r",
+                    cancellationSignal,
+                )
+                if (descriptor == null) {
+                    continuation.resumeWithException(
+                        unreadableImportSource(modelId = modelId, sourceUri = sourceUri),
+                    )
+                } else if (continuation.isActive) {
+                    continuation.resume(descriptor) { descriptor.close() }
+                } else {
+                    descriptor.close()
+                }
+            } catch (error: Throwable) {
+                if (continuation.isActive) {
+                    continuation.resumeWithException(error)
+                }
+            }
+        }
+    }
+
+    private fun importedModelDestinationFile(
+        destinationDir: File,
+        spec: ModelSpec,
+        sha: String,
+    ): File {
+        val modelToken = sha256Hex(spec.modelId.encodeToByteArray()).take(12)
+        return File(destinationDir, "pocketgpt-import-$modelToken-$sha.gguf")
+    }
+
+    private fun importPersistFailure(
+        modelId: String,
+        destinationFile: File,
+        detail: String = "publish_failed",
+    ): RuntimeDomainException {
+        return RuntimeDomainException(
+            domainError = RuntimeDomainError(
+                code = RuntimeErrorCodes.PROVISIONING_IMPORT_PERSIST_FAILED,
+                userMessage = "Unable to save the imported model file.",
+                technicalDetail = "model=$modelId;destination=${destinationFile.absolutePath};detail=$detail",
+            ),
+        )
+    }
+
+    private class AmbiguousImportMetadataException(
+        val failure: RuntimeDomainException,
+    ) : RuntimeException(failure)
+
+    private fun unreadableImportSource(
+        modelId: String,
+        sourceUri: Uri,
+        cause: Throwable? = null,
+    ): RuntimeDomainException {
+        return RuntimeDomainException(
+            domainError = RuntimeDomainError(
+                code = RuntimeErrorCodes.PROVISIONING_IMPORT_SOURCE_UNREADABLE,
+                userMessage = "Unable to read the selected model file.",
+                technicalDetail = "model=$modelId;source_uri=$sourceUri",
+            ),
+            cause = cause,
+        )
+    }
+
     private fun <T> withModelLock(modelId: String, block: () -> T): T {
         val lock = lockForModel(modelId)
         return synchronized(lock) {
@@ -1427,7 +1650,8 @@ internal fun staleActiveVersionSignal(
     return ProvisioningRecoverySignal(
         code = "MODEL_ACTIVE_VERSION_STALE",
         message = "Active model version pointer is stale for $modelId. Re-activate an installed version.",
-        technicalDetail = "model=$modelId;active_version=$normalizedActiveVersion;installed_versions=${installedVersions.joinToString(separator = ",") { version -> version.version }}",
+        technicalDetail = "model=$modelId;active_version=$normalizedActiveVersion;installed_versions=" +
+            installedVersions.joinToString(separator = ",") { version -> version.version },
     )
 }
 

@@ -2,6 +2,7 @@ package com.pocketagent.android.ui.state
 
 import com.pocketagent.core.ChatResponse
 import com.pocketagent.runtime.ChatStreamEvent
+import com.pocketagent.runtime.RuntimeRecoveryDisposition
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -111,5 +112,55 @@ class StreamStateReducerTest {
         assertEquals(true, afterThinking.isThinking)
         assertNull(afterThinking.firstTokenMs)
         assertEquals(null, afterThinking.terminal)
+    }
+
+    @Test
+    fun `failed event preserves stable code and typed recovery disposition`() {
+        data class Case(
+            val errorCode: String,
+            val disposition: RuntimeRecoveryDisposition,
+            val recoveryAction: RecoveryAction,
+        )
+
+        val cases = listOf(
+            Case(
+                "runtime_incompatible_model_format",
+                RuntimeRecoveryDisposition.SELECT_DIFFERENT_MODEL,
+                RecoveryAction.CHANGE_MODEL,
+            ),
+            Case(
+                "model_file_unavailable",
+                RuntimeRecoveryDisposition.REPROVISION_MODEL,
+                RecoveryAction.REDOWNLOAD_MODEL,
+            ),
+            Case("out_of_memory", RuntimeRecoveryDisposition.SELECT_DIFFERENT_MODEL, RecoveryAction.CHANGE_MODEL),
+            Case("backend_init_failed", RuntimeRecoveryDisposition.RESTART_RUNTIME, RecoveryAction.RESTART_APP),
+            Case("busy_generation", RuntimeRecoveryDisposition.RETRY_REQUEST, RecoveryAction.RETRY_LOAD),
+            Case(
+                "template_unavailable",
+                RuntimeRecoveryDisposition.SELECT_DIFFERENT_MODEL,
+                RecoveryAction.CHANGE_MODEL,
+            ),
+            Case("unknown_code", RuntimeRecoveryDisposition.RETRY_REQUEST, RecoveryAction.RETRY_LOAD),
+        )
+
+        cases.forEach { case ->
+            val event = ChatStreamEvent.Failed(
+                requestId = "req-${case.errorCode}",
+                errorCode = case.errorCode,
+                message = "Opaque runtime detail that must not determine recovery.",
+            )
+            val terminal = reducer.onEvent(
+                state = StreamReducerState.initial(event.requestId),
+                event = event,
+                elapsedMs = 25L,
+            ).terminal
+
+            assertNotNull(terminal)
+            assertEquals(case.disposition, event.recoveryDisposition, case.errorCode)
+            assertEquals(case.errorCode, terminal.errorCode, case.errorCode)
+            assertEquals(case.errorCode, terminal.uiError?.sourceCode, case.errorCode)
+            assertEquals(case.recoveryAction, terminal.uiError?.recoveryAction, case.errorCode)
+        }
     }
 }

@@ -38,6 +38,38 @@ import kotlin.test.assertTrue
 
 class SendMessageUseCaseTest {
     @Test
+    fun `busy admission rejects before appending user turn or loading model`() {
+        val operations = RuntimeOperationCoordinator()
+        val active = when (
+            val admission = operations.tryAcquireGeneration(
+                requestId = "request-a",
+                sessionId = "session-a",
+            )
+        ) {
+            is GenerationAdmissionResult.Acquired -> admission.lease
+            is GenerationAdmissionResult.Rejected -> error("Expected initial admission")
+        }
+        val fixture = createFixture(
+            runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
+            policyModule = permissivePolicy(),
+            inferenceModule = SendRecordingInferenceModule(),
+            operationCoordinator = operations,
+        )
+
+        try {
+            val failure = assertFailsWith<RuntimeGenerationFailureException> {
+                fixture.useCase.execute(fixture.request())
+            }
+
+            assertEquals(RUNTIME_BUSY_GENERATION_CODE, failure.errorCode)
+            assertEquals(emptyList(), fixture.conversationModule.listTurns(SessionId("session-1")))
+            assertEquals(0, fixture.inferenceModule.loadCalls)
+        } finally {
+            active.close()
+        }
+    }
+
+    @Test
     fun `throws when routing policy event is denied`() {
         val fixture = createFixture(
             runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
@@ -111,8 +143,12 @@ class SendMessageUseCaseTest {
             override fun supportsGpuOffload(): Boolean = false
             override fun runtimeBackend(): RuntimeBackend = RuntimeBackend.NATIVE_JNI
             override fun lastBridgeError(): BridgeError? = null
-            override fun currentModelLifecycleState(): ModelLifecycleEvent = ModelLifecycleEvent(state = ModelLifecycleState.UNLOADED)
-            override fun observeModelLifecycleState(listener: (ModelLifecycleEvent) -> Unit): AutoCloseable = AutoCloseable {}
+            override fun currentModelLifecycleState(): ModelLifecycleEvent = ModelLifecycleEvent(
+                state = ModelLifecycleState.UNLOADED,
+            )
+            override fun observeModelLifecycleState(
+                listener: (ModelLifecycleEvent) -> Unit,
+            ): AutoCloseable = AutoCloseable { }
             override fun currentRssMb(): Double? = null
             override fun isRuntimeReleased(): Boolean = false
             override fun isMultimodalEnabled(): Boolean = false
@@ -377,7 +413,9 @@ class SendMessageUseCaseTest {
             ),
         )
 
-        assertEquals("<think>private reasoning</think>Visible response <tool_call>{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"}}</tool_call>", response.text)
+        val expectedText = "<think>private reasoning</think>Visible response " +
+            "<tool_call>{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"}}</tool_call>"
+        assertEquals(expectedText, response.text)
         assertTrue(response.toolCalls.isEmpty())
         assertEquals(null, response.reasoningContent)
         assertEquals(
@@ -483,7 +521,16 @@ class SendMessageUseCaseTest {
                         reloadReason = RuntimeReloadReason.GENERATION_CONFIG_CHANGED,
                         lastLoadDurationMs = 420L,
                     ),
-                    prefixCacheDiagnosticsLine = "PREFIX_CACHE_DIAG|last_cache_hit=true|last_reused_tokens=128|prefix_cache_hit_rate=0.75|store_state_success=2|store_state_failure=1|restore_state_success=4|restore_state_failure=0",
+                    prefixCacheDiagnosticsLine = listOf(
+                        "PREFIX_CACHE_DIAG",
+                        "last_cache_hit=true",
+                        "last_reused_tokens=128",
+                        "prefix_cache_hit_rate=0.75",
+                        "store_state_success=2",
+                        "store_state_failure=1",
+                        "restore_state_success=4",
+                        "restore_state_failure=0",
+                    ).joinToString("|"),
                 ),
             ),
         )
@@ -594,9 +641,15 @@ class SendMessageUseCaseTest {
 
     @Test
     fun `injectImageMarkers inserts single marker after last user tag`() {
-        val prompt = "<|im_start|>system\nYou are helpful.<|im_end|>\n<|im_start|>user\nDescribe this image.<|im_end|>"
+        val prompt = buildString {
+            append("<|im_start|>system\nYou are helpful.<|im_end|>\n")
+            append("<|im_start|>user\nDescribe this image.<|im_end|>")
+        }
         val result = injectImageMarkers(prompt, 1)
-        val expected = "<|im_start|>system\nYou are helpful.<|im_end|>\n<|im_start|>user\n<__media__>\nDescribe this image.<|im_end|>"
+        val expected = buildString {
+            append("<|im_start|>system\nYou are helpful.<|im_end|>\n")
+            append("<|im_start|>user\n<__media__>\nDescribe this image.<|im_end|>")
+        }
         assertEquals(expected, result)
     }
 
@@ -651,6 +704,7 @@ class SendMessageUseCaseTest {
 private class SendMessageFixture(
     val inferenceModule: SendRecordingInferenceModule,
     val runtimeResidencyManager: RuntimeResidencyManager,
+    val conversationModule: InMemoryConversationModule,
 ) {
     lateinit var useCase: SendMessageUseCase
     var cancelByRequestCalls: Int = 0
@@ -697,6 +751,7 @@ private fun createFixture(
     generationTimeoutGuardFactory: (Long, () -> Unit) -> GenerationTimeoutGuardHandle = { timeoutMs, onTimeout ->
         GenerationTimeoutGuard(timeoutMs = timeoutMs, onTimeout = onTimeout)
     },
+    operationCoordinator: RuntimeOperationCoordinator = RuntimeOperationCoordinator(),
 ): SendMessageFixture {
     val modelLifecycle = ModelLifecycleCoordinator(
         inferenceModule = inferenceModule,
@@ -704,6 +759,7 @@ private fun createFixture(
         runtimeConfig = runtimeConfig,
     )
     val observability = NoopObservabilityModule()
+    val conversationModule = InMemoryConversationModule()
     val runtimeResidencyManager = RuntimeResidencyManager(
         inferenceModule = inferenceModule,
         runtimeInferencePorts = runtimeInferencePorts,
@@ -711,9 +767,10 @@ private fun createFixture(
     val fixture = SendMessageFixture(
         inferenceModule = inferenceModule,
         runtimeResidencyManager = runtimeResidencyManager,
+        conversationModule = conversationModule,
     )
     fixture.useCase = SendMessageUseCase(
-        conversationModule = InMemoryConversationModule(),
+        conversationModule = conversationModule,
         routingModule = routingModule,
         policyModule = policyModule,
         observabilityModule = observability,
@@ -726,6 +783,7 @@ private fun createFixture(
             inferenceModule = inferenceModule,
             runtimeConfig = runtimeConfig,
             runtimeInferencePorts = runtimeInferencePorts,
+            operationCoordinator = operationCoordinator,
         ),
         modelLifecycleCoordinator = modelLifecycle,
         runtimePlanResolver = runtimePlanResolver,

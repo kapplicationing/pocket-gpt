@@ -1,6 +1,6 @@
 # Test Strategy
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 This document explains how to choose evidence. Exact commands live in
 `docs/testing/runbooks.md` and `scripts/dev/README.md`.
@@ -41,7 +41,7 @@ device, and hosted/CI evidence. A local mapper or static rule does not.
 | Startup/provisioning/runtime readiness | Focused ViewModel/runtime tests | `android-instrumented` | lifecycle E2E, CI wrapper |
 | Maestro/helper/harness change | Shell syntax, flow lint, helper contract test | One focused affected flow | Full lane only after helper contract is fixed |
 | Download/model-library behavior | Focused unit/source audit | `fast`, relevant model-library smoke | lifecycle E2E if first-run/download contract changed |
-| Hot text input or settings jank | Source audit for `TextFieldValue` and state fanout | `perf-interaction.sh` on benchmark variant | Perfetto for the worst journey; JankStats only if needed |
+| Hot text input or settings jank | Source audit for `TextFieldValue` and state fanout | `perf-interaction-gate.sh` on benchmark variant | Perfetto for the worst journey; JankStats only if needed |
 | Native/runtime performance | Stage benchmark or operation-specific benchmark | Trace/log evidence | Promotion benchmark sweep |
 | Docs/tooling only | `bash -n` or docs/gov check for changed tool | `git diff --check` | No Android lane unless commands changed |
 

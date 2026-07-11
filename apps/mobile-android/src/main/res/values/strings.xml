@@ -220,6 +220,7 @@
     <string name="ui_model_import">Import model file</string>
     <string name="ui_model_replace">Replace model file</string>
     <string name="ui_model_import_in_progress">Importing model file. This can take a while for large GGUF files.</string>
+    <string name="ui_model_import_in_progress_named">Importing %1$s. This can take a while for large GGUF files.</string>
     <string name="ui_model_import_success">Imported and verified metadata for %1$s.</string>
     <string name="ui_model_import_success_active">Imported %1$s (%2$s): verified and active.</string>
     <string name="ui_model_import_success_inactive">Imported %1$s (%2$s): verified, activation pending.</string>

@@ -36,6 +36,14 @@ internal const val REMOTE_ERROR_TIMEOUT = "REMOTE_TIMEOUT"
 internal const val REMOTE_ERROR_BUSY = "REMOTE_BUSY"
 internal const val REMOTE_ERROR_RUNTIME = "REMOTE_RUNTIME_ERROR"
 internal const val REMOTE_ERROR_MODEL_NOT_LOADED = "REMOTE_MODEL_NOT_LOADED"
+internal const val REMOTE_ERROR_REQUEST_ID_REQUIRED = "REMOTE_REQUEST_ID_REQUIRED"
+internal const val REMOTE_ERROR_NOT_GENERATION_OWNER = "REMOTE_NOT_GENERATION_OWNER"
+internal const val REMOTE_ERROR_CANCEL_REJECTED = "REMOTE_CANCEL_REJECTED"
+
+internal data class RemoteCancellationResult(
+    val cancelled: Boolean,
+    val error: BridgeError? = null,
+)
 
 internal interface RemoteRuntimeTransport {
     fun epoch(): Long
@@ -53,11 +61,12 @@ internal interface RemoteRuntimeTransport {
         cachePolicy: CachePolicy,
         onToken: (String) -> Unit,
     ): GenerationResult
-    fun cancelGeneration(requestId: String?): Boolean
+    fun cancelGeneration(requestId: String?): RemoteCancellationResult
     fun supportsGpuOffload(): Boolean
     fun backendDiagnosticsJson(): String?
     fun lastError(): BridgeError?
     fun runGpuProbe(request: GpuProbeRequest, timeoutMs: Long): GpuProbeResult
+    fun close(): Boolean = true
 }
 
 internal class MessengerRemoteRuntimeTransport(
@@ -82,6 +91,8 @@ internal class MessengerRemoteRuntimeTransport(
     private var bindConnection: ServiceConnection? = null
     @Volatile
     private var bindLatch: CountDownLatch? = null
+    @Volatile
+    private var transportClosed: Boolean = false
 
     private val incomingHandler = Handler(ipcLooper) { message ->
         when (message.what) {
@@ -216,15 +227,30 @@ internal class MessengerRemoteRuntimeTransport(
         return remoteTimeoutGenerationResult()
     }
 
-    override fun cancelGeneration(requestId: String?): Boolean {
+    override fun cancelGeneration(requestId: String?): RemoteCancellationResult {
         val reply = sendCommand(
             what = LlamaRuntimeIpc.MSG_GENERATE_CANCEL,
             payload = Bundle().apply {
                 putString(LlamaRuntimeIpc.EXTRA_REQUEST_ID, requestId)
             },
             timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
-        ) ?: return false
-        return reply.getBoolean(LlamaRuntimeIpc.EXTRA_OK, false)
+        ) ?: return RemoteCancellationResult(
+            cancelled = false,
+            error = BridgeError(REMOTE_ERROR_PROCESS_DIED),
+        )
+        val cancelled = reply.getBoolean(LlamaRuntimeIpc.EXTRA_OK, false)
+        if (cancelled) {
+            return RemoteCancellationResult(cancelled = true)
+        }
+        return RemoteCancellationResult(
+            cancelled = false,
+            error = BridgeError(
+                code = reply.getString(LlamaRuntimeIpc.EXTRA_ERROR_CODE)
+                    ?.takeIf { code -> code.isNotBlank() }
+                    ?: REMOTE_ERROR_RUNTIME,
+                detail = reply.getString(LlamaRuntimeIpc.EXTRA_ERROR_DETAIL),
+            ),
+        )
     }
 
     override fun supportsGpuOffload(): Boolean {
@@ -308,6 +334,19 @@ internal class MessengerRemoteRuntimeTransport(
         )
     }
 
+    override fun close(): Boolean {
+        transportClosed = true
+        val connection = synchronized(transportLock) {
+            val current = bindConnection
+            bindConnection = null
+            remoteMessenger = null
+            current
+        }
+        val unbound = connection == null || runCatching { appContext.unbindService(connection) }.isSuccess
+        handleDisconnectLocked()
+        return unbound
+    }
+
     private fun sendCommand(
         what: Int,
         payload: Bundle,
@@ -344,15 +383,19 @@ internal class MessengerRemoteRuntimeTransport(
     }
 
     private fun ensureConnected(): Messenger? {
+        if (transportClosed) return null
         remoteMessenger?.let { return it }
         val latch = synchronized(transportLock) {
+            if (transportClosed) return null
             remoteMessenger?.let { return it }
             bindLatch?.let { return@synchronized it }
             val connectedLatch = CountDownLatch(1)
             bindLatch = connectedLatch
             val connection = object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                    remoteMessenger = Messenger(service)
+                    if (!transportClosed) {
+                        remoteMessenger = Messenger(service)
+                    }
                     synchronized(transportLock) {
                         bindLatch?.countDown()
                         bindLatch = null

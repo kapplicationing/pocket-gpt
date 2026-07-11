@@ -7,6 +7,7 @@ import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pocketagent.inference.ModelCatalog
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
@@ -82,10 +83,11 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
 
     @Test
     fun importModelResolvesVisionMmprojFromAppDownloadsDirectory() = runBlocking {
-        val source = writeTempFile(
+        val source = writeMinimalGgufFile(
             dir = appContext.cacheDir,
             fileName = "vision-import-source.gguf",
-            content = "vision-import-source-content",
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            identity = "vision-import-source",
         )
         val mmProjFileName = ModelCatalog.mmProjFileNameFor(ModelCatalog.QWEN_3_5_0_8B_Q4)
             ?: throw AssertionError("Expected mmproj filename for vision model.")
@@ -116,6 +118,101 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
                     .absolutePath
                     .orEmpty(),
             ),
+        )
+    }
+
+    @Test
+    fun failedReplacementPreservesPublishedModelAndSuccessfulRetryReplacesAtomically() = runBlocking {
+        val modelId = ModelCatalog.QWEN_3_5_0_8B_Q4
+        val version = "replacement-v1"
+        val originalSource = writeMinimalGgufFile(
+            dir = appContext.cacheDir,
+            fileName = "replacement-original.gguf",
+            modelId = modelId,
+            identity = "replacement-original",
+        )
+        val original = store.importModel(
+            modelId = modelId,
+            sourceUri = android.net.Uri.fromFile(originalSource),
+            version = version,
+        )
+        val publishedFile = File(original.absolutePath)
+        val originalBytes = publishedFile.readBytes()
+        val missingSource = File(appContext.cacheDir, "replacement-missing.gguf").apply { delete() }
+
+        val failure = runCatching {
+            store.importModel(
+                modelId = modelId,
+                sourceUri = android.net.Uri.fromFile(missingSource),
+                version = version,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is RuntimeDomainException)
+        assertEquals(
+            RuntimeErrorCodes.PROVISIONING_IMPORT_SOURCE_UNREADABLE,
+            (failure as RuntimeDomainException).domainError.code,
+        )
+        assertTrue(publishedFile.exists())
+        assertEquals(originalBytes.toList(), publishedFile.readBytes().toList())
+        val descriptorAfterFailure = requireNotNull(
+            store.listInstalledVersions(modelId).singleOrNull { it.version == version },
+        )
+        assertEquals(original.sha256, descriptorAfterFailure.sha256)
+        assertEquals(normalizePath(original.absolutePath), normalizePath(descriptorAfterFailure.absolutePath))
+        assertFalse(
+            requireNotNull(publishedFile.parentFile).listFiles().orEmpty().any(::isOwnedImportTempFile),
+        )
+
+        val replacementSource = writeMinimalGgufFile(
+            dir = appContext.cacheDir,
+            fileName = "replacement-new.gguf",
+            modelId = modelId,
+            identity = "replacement-new",
+        )
+        val replacement = store.importModel(
+            modelId = modelId,
+            sourceUri = android.net.Uri.fromFile(replacementSource),
+            version = version,
+        )
+
+        val replacementFile = File(replacement.absolutePath)
+        assertFalse(normalizePath(publishedFile.absolutePath) == normalizePath(replacement.absolutePath))
+        assertFalse(publishedFile.exists())
+        assertTrue(replacementSource.readBytes().contentEquals(replacementFile.readBytes()))
+        val replacementDescriptor = requireNotNull(
+            store.listInstalledVersions(modelId).singleOrNull { it.version == version },
+        )
+        assertEquals(replacement.sha256, replacementDescriptor.sha256)
+        assertEquals(replacement.copiedBytes, replacementDescriptor.fileSizeBytes)
+        assertEquals(normalizePath(replacement.absolutePath), normalizePath(replacementDescriptor.absolutePath))
+    }
+
+    @Test
+    fun importRejectsMismatchedModelIdentityWithoutPublishing() = runBlocking {
+        val mismatchedSource = writeMinimalGgufFile(
+            dir = appContext.cacheDir,
+            fileName = "mismatched-qwen3.gguf",
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
+            identity = "wrong-model",
+        )
+
+        val failure = runCatching {
+            store.importModel(
+                modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+                sourceUri = android.net.Uri.fromFile(mismatchedSource),
+                version = "mismatch-v1",
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is RuntimeDomainException)
+        assertEquals(
+            RuntimeErrorCodes.PROVISIONING_IMPORT_MODEL_MISMATCH,
+            (failure as RuntimeDomainException).domainError.code,
+        )
+        assertTrue(store.listInstalledVersions(ModelCatalog.QWEN_3_5_0_8B_Q4).isEmpty())
+        assertFalse(
+            store.managedModelDirectory().listFiles().orEmpty().any(::isOwnedImportedModelFile),
         )
     }
 
@@ -251,10 +348,11 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
 
     @Test
     fun persistedManagedModelsAreDiscoveredAfterPreferencesReset() = runBlocking {
-        val source = writeTempFile(
+        val source = writeMinimalGgufFile(
             dir = appContext.cacheDir,
             fileName = "persisted-discovery-source.gguf",
-            content = "persisted-model-content",
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            identity = "persisted-model",
         )
         val sourceUri = android.net.Uri.fromFile(source)
 
@@ -276,6 +374,38 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
             recoveredModel.installedVersions.any { it.version == "persisted-v1" },
         )
         assertEquals("persisted-v1", recoveredModel.activeVersion)
+    }
+
+    @Test
+    fun freshStoreCleansInterruptedImportArtifactsWithoutTouchingReferencedOrUnrelatedFiles() = runBlocking {
+        val source = writeMinimalGgufFile(
+            dir = appContext.cacheDir,
+            fileName = "cleanup-referenced-source.gguf",
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            identity = "cleanup-referenced",
+        )
+        val referenced = store.importModel(
+            modelId = ModelCatalog.QWEN_3_5_0_8B_Q4,
+            sourceUri = android.net.Uri.fromFile(source),
+            version = "cleanup-v1",
+        )
+        val managedDirectory = store.managedModelDirectory()
+        val ownedTemp = File(
+            managedDirectory,
+            "${PROVISIONING_IMPORT_TEMP_PREFIX}interrupted$PROVISIONING_IMPORT_TEMP_SUFFIX",
+        ).apply { writeText("partial") }
+        val orphan = File(
+            managedDirectory,
+            "pocketgpt-import-0123456789ab-${"f".repeat(64)}.gguf",
+        ).apply { writeText("orphan") }
+        val unrelatedTemp = File(managedDirectory, "download.tmp").apply { writeText("keep") }
+
+        AndroidRuntimeProvisioningStore(appContext).snapshot()
+
+        assertTrue(File(referenced.absolutePath).exists())
+        assertFalse(ownedTemp.exists())
+        assertFalse(orphan.exists())
+        assertTrue(unrelatedTemp.exists())
     }
 
     @Test
@@ -303,10 +433,11 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
 
     @Test
     fun persistedDynamicManagedModelsAreDiscoveredAfterPreferencesReset() = runBlocking {
-        val source = writeTempFile(
+        val source = writeMinimalGgufFile(
             dir = appContext.cacheDir,
             fileName = "persisted-dynamic-discovery-source.gguf",
-            content = "persisted-dynamic-model-content",
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
+            identity = "persisted-dynamic",
         )
         val sourceUri = android.net.Uri.fromFile(source)
         val modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M
@@ -324,7 +455,10 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
         val recoveredModel = recoveredSnapshot.models.firstOrNull { it.modelId == modelId }
 
         assertNotNull("Expected recovered snapshot to include dynamic model id.", recoveredModel)
-        assertTrue("Expected dynamic persisted model to be rediscovered after metadata reset.", recoveredModel!!.isProvisioned)
+        assertTrue(
+            "Expected dynamic persisted model to be rediscovered after metadata reset.",
+            recoveredModel!!.isProvisioned,
+        )
         assertTrue(
             "Expected recovered dynamic installed versions to include the imported version.",
             recoveredModel.installedVersions.any { it.version == "persisted-dynamic-v1" },
@@ -444,10 +578,11 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
 
     @Test
     fun storageSummaryRefreshesImmediatelyAfterRemovingInstalledVersion() = runBlocking {
-        val source = writeTempFile(
+        val source = writeMinimalGgufFile(
             dir = appContext.cacheDir,
             fileName = "storage-summary-remove-source.gguf",
-            content = "storage-summary-remove-content",
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
+            identity = "storage-summary-remove",
         )
         val sourceUri = android.net.Uri.fromFile(source)
 
@@ -476,10 +611,11 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
 
     @Test
     fun removeOnlyVersionClearsActiveVersionInSnapshot() = runBlocking {
-        val source = writeTempFile(
+        val source = writeMinimalGgufFile(
             dir = appContext.cacheDir,
             fileName = "remove-only-source.gguf",
-            content = "only-version",
+            modelId = ModelCatalog.QWEN3_1_7B_Q4_K_M,
+            identity = "only-version",
         )
         val sourceUri = android.net.Uri.fromFile(source)
 
@@ -577,6 +713,65 @@ class AndroidRuntimeProvisioningStoreInstrumentationTest {
     private fun writeTempFile(dir: File, fileName: String, content: String): File {
         dir.mkdirs()
         return File(dir, fileName).apply { writeText(content) }
+    }
+
+    private fun writeMinimalGgufFile(
+        dir: File,
+        fileName: String,
+        modelId: String,
+        identity: String,
+    ): File {
+        val descriptor = requireNotNull(ModelCatalog.descriptorFor(modelId))
+        val architecture = descriptor.ggufArchitectures.single()
+        val embeddingSize = requireNotNull(descriptor.expectedEmbeddingSize)
+        val output = ByteArrayOutputStream()
+
+        fun writeUInt32(value: Int) {
+            repeat(4) { shift -> output.write(value ushr (shift * 8) and 0xff) }
+        }
+
+        fun writeUInt64(value: Long) {
+            repeat(8) { shift -> output.write((value ushr (shift * 8) and 0xff).toInt()) }
+        }
+
+        fun writeString(value: String) {
+            val bytes = value.encodeToByteArray()
+            writeUInt64(bytes.size.toLong())
+            output.write(bytes)
+        }
+
+        fun writeStringMetadata(key: String, value: String) {
+            writeString(key)
+            writeUInt32(8)
+            writeString(value)
+        }
+
+        fun writeUInt32Metadata(key: String, value: Int) {
+            writeString(key)
+            writeUInt32(4)
+            writeUInt32(value)
+        }
+
+        output.write(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+        writeUInt32(3)
+        writeUInt64(1L)
+        writeUInt64(4L)
+        writeStringMetadata("general.architecture", architecture)
+        writeStringMetadata("general.name", "$modelId-$identity")
+        writeUInt32Metadata("general.file_type", 0)
+        writeUInt32Metadata("$architecture.embedding_length", embeddingSize)
+        writeString("token_embd.weight")
+        writeUInt32(1)
+        writeUInt64(1L)
+        writeUInt32(0)
+        writeUInt64(0L)
+        while (output.size() % 32 != 0) {
+            output.write(0)
+        }
+        writeUInt32(0)
+
+        dir.mkdirs()
+        return File(dir, fileName).apply { writeBytes(output.toByteArray()) }
     }
 
     private fun resetProvisioningStorage() {

@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 internal data class ResidentRuntimeSlot(
     val modelId: String,
@@ -288,6 +289,20 @@ internal class RuntimeResidencyManager(
                 },
             )
         }
+    }
+
+    fun close() {
+        synchronized(lock) {
+            cancelExpiryLocked()
+            pendingUnloadReason = null
+            residentSlot = null
+            activeRequestCount = 0
+        }
+        scope.cancel()
+    }
+
+    fun clearResidentAfterExternalUnload(reason: String) {
+        cancelAndClear(reason)
     }
 
     private fun refreshSlotLocked(current: ResidentRuntimeSlot, keepAliveMs: Long) {

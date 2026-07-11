@@ -2,6 +2,7 @@ package com.pocketagent.android.runtime
 
 import com.pocketagent.nativebridge.CachePolicy
 import com.pocketagent.nativebridge.KvCachePreset
+import com.pocketagent.nativebridge.RuntimeCloseResult
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,6 +23,7 @@ class GpuProbeServiceTest {
         assertEquals(GpuProbeStatus.FAILED, result.status)
         assertEquals(GpuProbeFailureReason.NATIVE_RUNTIME_UNAVAILABLE, result.failureReason)
         assertEquals("runtime:init_failed", result.detail)
+        assertEquals(1, bridge.closeCalls)
     }
 
     @Test
@@ -86,6 +88,7 @@ class GpuProbeServiceTest {
         assertEquals(GpuProbeStatus.QUALIFIED, result.status)
         assertEquals(2, result.maxStableGpuLayers)
         assertTrue(result.detail?.contains("last_generate_failed_layer=4") == true)
+        assertEquals(1, bridge.closeCalls)
     }
 
     @Test
@@ -107,6 +110,7 @@ class GpuProbeServiceTest {
                 cfg.kvCachePreset == KvCachePreset.SAFE
             },
         )
+        assertEquals(1, bridge.closeCalls)
     }
 }
 
@@ -129,6 +133,7 @@ private class FakeGpuProbeBridge(
     private var currentLayer: Int = 0
     val generationConfigs: MutableList<RuntimeGenerationConfig> = mutableListOf()
     val seenLayers: MutableList<Int> = mutableListOf()
+    var closeCalls: Int = 0
 
     override fun isReady(): Boolean = ready
 
@@ -153,4 +158,9 @@ private class FakeGpuProbeBridge(
     override fun unloadModel() = Unit
 
     override fun lastErrorDetail(): String? = errorDetail
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        closeCalls += 1
+        return RuntimeCloseResult.closed()
+    }
 }

@@ -4,6 +4,7 @@ import com.pocketagent.inference.InferenceModule
 import com.pocketagent.inference.InferenceRequest
 import com.pocketagent.nativebridge.BridgeError
 import com.pocketagent.nativebridge.CachePolicy
+import com.pocketagent.nativebridge.CacheAwareGenerationPort
 import com.pocketagent.nativebridge.GenerationFinishReason
 import com.pocketagent.nativebridge.GenerationResult
 import com.pocketagent.nativebridge.ManagedRuntimePort
@@ -12,6 +13,10 @@ import com.pocketagent.nativebridge.ModelLifecycleState
 import com.pocketagent.nativebridge.RuntimeBackend
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import com.pocketagent.nativebridge.RuntimeInferencePorts
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -19,6 +24,52 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class InferenceExecutorTest {
+    @Test
+    fun `executor rejects overlapping generation before second native call`() {
+        val native = BlockingCacheAwareGenerationPort()
+        val executor = InferenceExecutor(
+            inferenceModule = FakeInferenceModule(emptyList()),
+            runtimeConfig = testRuntimeConfig(),
+            runtimeInferencePorts = RuntimeInferencePorts(cacheAwareGeneration = native),
+        )
+        val workers = Executors.newSingleThreadExecutor()
+        try {
+            val first = workers.submit<InferenceExecutionResult> {
+                executor.execute(
+                    sessionId = "session-a",
+                    requestId = "request-a",
+                    request = InferenceRequest(prompt = "prompt-a", maxTokens = 8),
+                    cacheKey = null,
+                    cachePolicy = CachePolicy.OFF,
+                    stopSequences = emptyList(),
+                    onToken = {},
+                )
+            }
+            assertTrue(native.generationStarted.await(2, TimeUnit.SECONDS))
+
+            val failure = assertFailsWith<RuntimeGenerationFailureException> {
+                executor.execute(
+                    sessionId = "session-b",
+                    requestId = "request-b",
+                    request = InferenceRequest(prompt = "prompt-b", maxTokens = 8),
+                    cacheKey = null,
+                    cachePolicy = CachePolicy.OFF,
+                    stopSequences = emptyList(),
+                    onToken = {},
+                )
+            }
+
+            assertEquals(RUNTIME_BUSY_GENERATION_CODE, failure.errorCode)
+            assertEquals(1, native.generateCalls.get())
+            native.releaseGeneration.countDown()
+            first.get(2, TimeUnit.SECONDS)
+            assertTrue(executor.isIdle())
+        } finally {
+            native.releaseGeneration.countDown()
+            workers.shutdownNow()
+        }
+    }
+
     @Test
     fun `executor trims stop sequence from final text and suppresses trailing deltas`() {
         val fakeInference = FakeInferenceModule(
@@ -189,6 +240,40 @@ class InferenceExecutorTest {
     }
 }
 
+private class BlockingCacheAwareGenerationPort : CacheAwareGenerationPort {
+    val generationStarted = CountDownLatch(1)
+    val releaseGeneration = CountDownLatch(1)
+    val generateCalls = AtomicInteger(0)
+
+    override fun generateStreamWithCache(
+        requestId: String,
+        request: InferenceRequest,
+        cacheKey: String?,
+        cachePolicy: CachePolicy,
+        onToken: (String) -> Unit,
+    ): GenerationResult {
+        generateCalls.incrementAndGet()
+        generationStarted.countDown()
+        releaseGeneration.await(2, TimeUnit.SECONDS)
+        onToken("ok")
+        return GenerationResult(
+            finishReason = GenerationFinishReason.COMPLETED,
+            tokenCount = 1,
+            firstTokenMs = 1L,
+            totalMs = 2L,
+            cancelled = false,
+        )
+    }
+
+    override fun cancelGeneration(requestId: String): Boolean = true
+
+    override fun actualGpuLayers(): Int? = null
+
+    override fun actualDraftGpuLayers(): Int? = null
+
+    override fun lastGpuLoadRetryCount(): Int? = null
+}
+
 private class FakeInferenceModule(
     private val tokens: List<String>,
 ) : InferenceModule {
@@ -210,7 +295,7 @@ private class FakeManagedRuntime(
     private val errorCode: String? = null,
 ) : ManagedRuntimePort {
     override fun loadModel(modelId: String, modelVersion: String?, strictGpuOffload: Boolean) = true
-    override fun setRuntimeGenerationConfig(config: RuntimeGenerationConfig) {}
+    override fun setRuntimeGenerationConfig(config: RuntimeGenerationConfig) = Unit
     override fun supportsGpuOffload() = false
     override fun runtimeBackend() = RuntimeBackend.NATIVE_JNI
     override fun lastBridgeError(): BridgeError? = null

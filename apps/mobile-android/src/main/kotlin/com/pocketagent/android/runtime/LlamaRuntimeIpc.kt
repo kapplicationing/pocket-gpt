@@ -1,6 +1,9 @@
 package com.pocketagent.android.runtime
 
 internal object LlamaRuntimeIpc {
+    /** This IPC version has no image payload or image-generation command contract. */
+    const val SUPPORTS_IMAGE_GENERATION = false
+
     const val MSG_PING = 1
     const val MSG_SET_CONFIG = 2
     const val MSG_GET_CONFIG = 3

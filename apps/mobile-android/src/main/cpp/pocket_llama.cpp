@@ -47,8 +47,11 @@ constexpr jint STREAM_STATUS_CANCELLED = 2;
 constexpr jint STREAM_STATUS_CALLBACK_ERROR = 3;
 constexpr jint STREAM_STATUS_UTF8_STREAM_ERROR = 4;
 constexpr jint STREAM_STATUS_RUNTIME_ERROR = 5;
+constexpr jint STREAM_STATUS_BUSY = 6;
+constexpr jint STREAM_STATUS_REQUEST_ID_REQUIRED = 7;
 
 std::mutex g_mutex;
+std::mutex g_generation_owner_mutex;
 enum class BackendInitMode {
     NONE,
     CPU_ONLY,
@@ -62,6 +65,8 @@ llama_model * g_draft_model = nullptr;
 llama_context * g_draft_context = nullptr;
 llama_sampler * g_draft_sampler = nullptr;
 std::atomic<bool> g_cancel_requested{false};
+std::atomic<bool> g_generation_active{false};
+std::string g_active_generation_request_id;
 constexpr size_t MAX_TARGET_PREFIX_STATE_BYTES = 192u * 1024u * 1024u;
 constexpr size_t MAX_DRAFT_PREFIX_STATE_BYTES = 48u * 1024u * 1024u;
 bool g_model_uses_recurrent_memory = false;
@@ -167,6 +172,66 @@ struct LoadProgressContext {
     float scale = 1.0f;
     float last_progress = 0.0f;
     bool cancelled = false;
+};
+
+bool try_acquire_generation_owner(const std::string & request_id) {
+    if (request_id.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_generation_owner_mutex);
+    bool expected = false;
+    if (!g_generation_active.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire)) {
+        return false;
+    }
+    g_active_generation_request_id = request_id;
+    g_cancel_requested.store(false, std::memory_order_release);
+    return true;
+}
+
+bool cancel_generation_if_owner(const std::string & request_id) {
+    std::lock_guard<std::mutex> lock(g_generation_owner_mutex);
+    if (!g_generation_active.load(std::memory_order_acquire) ||
+        g_active_generation_request_id != request_id) {
+        return false;
+    }
+    g_cancel_requested.store(true, std::memory_order_release);
+    return true;
+}
+
+void release_generation_if_owner(const std::string & request_id) {
+    std::lock_guard<std::mutex> lock(g_generation_owner_mutex);
+    if (!g_generation_active.load(std::memory_order_acquire) ||
+        g_active_generation_request_id != request_id) {
+        return;
+    }
+    g_cancel_requested.store(false, std::memory_order_release);
+    g_active_generation_request_id.clear();
+    g_generation_active.store(false, std::memory_order_release);
+}
+
+class ScopedGenerationOwner {
+public:
+    explicit ScopedGenerationOwner(const std::string & request_id)
+        : request_id_(request_id), acquired_(try_acquire_generation_owner(request_id)) {}
+
+    ~ScopedGenerationOwner() {
+        if (acquired_) {
+            release_generation_if_owner(request_id_);
+        }
+    }
+
+    bool acquired() const { return acquired_; }
+
+    ScopedGenerationOwner(const ScopedGenerationOwner &) = delete;
+    ScopedGenerationOwner & operator=(const ScopedGenerationOwner &) = delete;
+
+private:
+    std::string request_id_;
+    bool acquired_ = false;
 };
 
 int32_t clamp_i32(int32_t value, int32_t min_value, int32_t max_value) {
@@ -3524,12 +3589,18 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nativeGenerate(
     JNIEnv * env,
     jobject /*thiz*/,
+    jstring requestId,
     jstring prompt,
     jint maxTokens,
     jstring cacheKey,
     jint cachePolicy) {
+    const std::string request_id = to_std_string(env, requestId);
     const std::string prompt_text = to_std_string(env, prompt);
     if (prompt_text.empty()) {
+        return env->NewStringUTF("");
+    }
+    ScopedGenerationOwner generation_owner(request_id);
+    if (!generation_owner.acquired()) {
         return env->NewStringUTF("");
     }
     std::string output;
@@ -3615,8 +3686,10 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
     jint cachePolicy,
     jobject callback) {
     const std::string request_id = to_std_string(env, requestId);
-    (void)request_id;
     const std::string prompt_text = to_std_string(env, prompt);
+    if (request_id.empty()) {
+        return STREAM_STATUS_REQUEST_ID_REQUIRED;
+    }
     if (prompt_text.empty() || callback == nullptr) {
         return STREAM_STATUS_RUNTIME_ERROR;
     }
@@ -3639,6 +3712,12 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
         env->DeleteLocalRef(callback_class);
         log_error("nativeGenerateStream failed: callback.onToken(String) missing");
         return STREAM_STATUS_CALLBACK_ERROR;
+    }
+
+    ScopedGenerationOwner generation_owner(request_id);
+    if (!generation_owner.acquired()) {
+        env->DeleteLocalRef(callback_class);
+        return STREAM_STATUS_BUSY;
     }
 
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -3676,10 +3755,11 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nativeCancelGeneration(
-    JNIEnv * /*env*/,
-    jobject /*thiz*/) {
-    g_cancel_requested.store(true, std::memory_order_release);
-    return JNI_TRUE;
+    JNIEnv * env,
+    jobject /*thiz*/,
+    jstring requestId) {
+    const std::string request_id = to_std_string(env, requestId);
+    return cancel_generation_if_owner(request_id) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -3811,6 +3891,7 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_pocketagent_nativebridge_NativeJniLlamaCppBridge_00024JniNativeApi_nativeGenerate(
     JNIEnv * env,
     jobject thiz,
+    jstring requestId,
     jstring prompt,
     jint maxTokens,
     jstring cacheKey,
@@ -3818,6 +3899,7 @@ Java_com_pocketagent_nativebridge_NativeJniLlamaCppBridge_00024JniNativeApi_nati
     return Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nativeGenerate(
         env,
         thiz,
+        requestId,
         prompt,
         maxTokens,
         cacheKey,
@@ -3855,10 +3937,12 @@ Java_com_pocketagent_nativebridge_NativeJniLlamaCppBridge_00024JniNativeApi_nati
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_pocketagent_nativebridge_NativeJniLlamaCppBridge_00024JniNativeApi_nativeCancelGeneration(
     JNIEnv * env,
-    jobject thiz) {
+    jobject thiz,
+    jstring requestId) {
     return Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nativeCancelGeneration(
         env,
-        thiz);
+        thiz,
+        requestId);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -4161,8 +4245,10 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
     jint maxTokens,
     jobject callback) {
     const std::string request_id = to_std_string(env, requestId);
-    (void)request_id;
     const std::string prompt_text = to_std_string(env, prompt);
+    if (request_id.empty()) {
+        return STREAM_STATUS_REQUEST_ID_REQUIRED;
+    }
     if (prompt_text.empty() || callback == nullptr) {
         return STREAM_STATUS_RUNTIME_ERROR;
     }
@@ -4178,6 +4264,12 @@ Java_com_pocketagent_android_AndroidLlamaCppRuntimeBridge_00024JniNativeApi_nati
         env->DeleteLocalRef(callback_class);
         log_error("nativeGenerateStreamWithImages: callback.onToken(String) missing");
         return STREAM_STATUS_CALLBACK_ERROR;
+    }
+
+    ScopedGenerationOwner generation_owner(request_id);
+    if (!generation_owner.acquired()) {
+        env->DeleteLocalRef(callback_class);
+        return STREAM_STATUS_BUSY;
     }
 
     std::lock_guard<std::mutex> lock(g_mutex);

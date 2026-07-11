@@ -1,15 +1,18 @@
 package com.pocketagent.android.ui
 
+import androidx.lifecycle.SavedStateHandle
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatAppViewModelTest {
 
     @Test
     fun `transient shell flows can be set and cleared`() {
-        val viewModel = ChatAppViewModel()
+        val viewModel = ChatAppViewModel(SavedStateHandle())
         val version = ModelDistributionVersion(
             modelId = "demo-model",
             version = "v1",
@@ -21,7 +24,7 @@ class ChatAppViewModelTest {
             fileSizeBytes = 1024L,
         )
 
-        viewModel.setSelectedModelIdForImport("demo-model")
+        val importRequest = requireNotNull(viewModel.requestModelImport("demo-model"))
         viewModel.setPendingGetReadyActivation("demo-model" to "v1")
         viewModel.setPendingMeteredWarningVersion(version)
         viewModel.setPendingNotificationPermissionVersion(version)
@@ -29,7 +32,7 @@ class ChatAppViewModelTest {
         viewModel.setLastDownloadTransitionRefreshKey("task:completed")
         val nextSequence = viewModel.incrementReadinessRefreshSequence()
 
-        assertEquals("demo-model", viewModel.selectedModelIdForImport.value)
+        assertEquals(importRequest, viewModel.modelImportRequest.value)
         assertEquals("demo-model" to "v1", viewModel.pendingGetReadyActivation.value)
         assertEquals(version, viewModel.pendingMeteredWarningVersion.value)
         assertEquals(version, viewModel.pendingNotificationPermissionVersion.value)
@@ -38,18 +41,38 @@ class ChatAppViewModelTest {
         assertEquals(1L, nextSequence)
         assertEquals(1L, viewModel.readinessRefreshSequence.value)
 
-        viewModel.setSelectedModelIdForImport(null)
+        val activeImport = requireNotNull(viewModel.consumeModelImportRequest())
+        assertFalse(activeImport.pickerPending)
         viewModel.setPendingGetReadyActivation(null)
         viewModel.setPendingMeteredWarningVersion(null)
         viewModel.setPendingNotificationPermissionVersion(null)
         viewModel.setPendingRoutingModeSwitch(null)
         viewModel.setLastDownloadTransitionRefreshKey(null)
 
-        assertNull(viewModel.selectedModelIdForImport.value)
+        assertNull(viewModel.modelImportRequest.value)
         assertNull(viewModel.pendingGetReadyActivation.value)
         assertNull(viewModel.pendingMeteredWarningVersion.value)
         assertNull(viewModel.pendingNotificationPermissionVersion.value)
         assertNull(viewModel.pendingRoutingModeSwitch.value)
         assertNull(viewModel.lastDownloadTransitionRefreshKey.value)
+    }
+
+    @Test
+    fun `model import request is single owner and survives only the picker phase`() {
+        val savedStateHandle = SavedStateHandle()
+        val original = ChatAppViewModel(savedStateHandle)
+
+        val pending = requireNotNull(original.requestModelImport("demo-model"))
+        assertNull(original.requestModelImport("another-model"))
+
+        val restoredDuringPicker = ChatAppViewModel(savedStateHandle)
+        assertEquals(pending, restoredDuringPicker.modelImportRequest.value)
+
+        val active = requireNotNull(restoredDuringPicker.consumeModelImportRequest())
+        assertFalse(active.pickerPending)
+        assertNull(restoredDuringPicker.modelImportRequest.value)
+
+        val restoredAfterImportStarted = ChatAppViewModel(savedStateHandle)
+        assertNull(restoredAfterImportStarted.modelImportRequest.value)
     }
 }

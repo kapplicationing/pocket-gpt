@@ -143,6 +143,7 @@ class UiErrorMapperTest {
 
         assertNotNull(error)
         assertEquals("UI-TOOL-SCHEMA-001", error.code)
+        assertEquals("invalid_field_value", error.sourceCode)
     }
 
     @Test
@@ -159,6 +160,41 @@ class UiErrorMapperTest {
 
         assertNotNull(error)
         assertEquals("UI-IMG-VAL-001", error.code)
+        assertEquals("unsupported_extension", error.sourceCode)
+    }
+
+    @Test
+    fun `typed image runtime failure preserves source code and recovery`() {
+        val error = UiErrorMapper.fromImageResult(
+            ImageAnalysisResult.Failure(
+                ImageFailure.Runtime(
+                    code = "out_of_memory",
+                    userMessage = "Image analysis failed.",
+                    technicalDetail = "allocation failed",
+                ),
+            ),
+        )
+
+        assertNotNull(error)
+        assertEquals("out_of_memory", error.sourceCode)
+        assertEquals(RecoveryAction.CHANGE_MODEL, error.recoveryAction)
+    }
+
+    @Test
+    fun `typed tool execution failure preserves source code`() {
+        val error = UiErrorMapper.fromToolResult(
+            ToolExecutionResult.Failure(
+                ToolFailure.Execution(
+                    code = "tool_runtime_error",
+                    userMessage = "Tool request failed.",
+                    technicalDetail = "execution failed",
+                ),
+            ),
+        )
+
+        assertNotNull(error)
+        assertEquals("tool_runtime_error", error.sourceCode)
+        assertEquals(RecoveryAction.RETRY_LOAD, error.recoveryAction)
     }
 
     @Test
@@ -173,6 +209,7 @@ class UiErrorMapperTest {
         assertNotNull(error)
         assertTrue(error.userMessage.contains("fit in available memory", ignoreCase = true))
         assertEquals(RecoveryAction.CHANGE_MODEL, error.recoveryAction)
+        assertEquals("OUT_OF_MEMORY", error.sourceCode)
     }
 
     @Test
@@ -180,7 +217,8 @@ class UiErrorMapperTest {
         val error = UiErrorMapper.fromModelLifecycleResult(
             RuntimeModelLifecycleCommandResult.rejected(
                 code = ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE,
-                detail = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT:modelId=unsupported-model|required_format=unsupported_quant",
+                detail = "RUNTIME_INCOMPATIBLE_MODEL_FORMAT:" +
+                    "modelId=unsupported-model|required_format=unsupported_quant",
             ),
         )
 

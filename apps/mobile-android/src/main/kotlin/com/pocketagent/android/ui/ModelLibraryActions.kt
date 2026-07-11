@@ -24,8 +24,32 @@ internal class ModelLibraryActions(
     }
 
     fun importModel(modelId: String) {
-        appViewModel.setSelectedModelIdForImport(modelId)
-        chatAppLaunchers.launchModelImportPicker()
+        if (
+            provisioningViewModel.modelImportOperation.value !is ModelImportOperationState.Idle ||
+            provisioningViewModel.uiState.value.isImporting
+        ) {
+            provisioningViewModel.setStatusMessage(
+                context.getString(R.string.ui_model_operation_already_in_progress),
+            )
+            return
+        }
+        val request = appViewModel.requestModelImport(modelId)
+        if (request == null) {
+            provisioningViewModel.setStatusMessage(
+                context.getString(R.string.ui_model_operation_already_in_progress),
+            )
+            return
+        }
+        runCatching { chatAppLaunchers.launchModelImportPicker() }
+            .onFailure { error ->
+                appViewModel.consumeModelImportRequest()
+                provisioningViewModel.setStatusMessage(
+                    context.getString(
+                        R.string.ui_model_import_failure,
+                        error.message ?: "Unable to open the document picker.",
+                    ),
+                )
+            }
     }
 
     suspend fun resolveHuggingFaceCandidate(input: String, targetModelId: String) {

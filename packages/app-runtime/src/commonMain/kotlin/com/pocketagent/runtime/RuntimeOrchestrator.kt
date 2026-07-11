@@ -29,6 +29,8 @@ import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
 import com.pocketagent.nativebridge.RuntimeBackend
 import com.pocketagent.nativebridge.ManagedRuntimePort
 import com.pocketagent.nativebridge.RuntimeInferencePorts
+import com.pocketagent.nativebridge.RuntimeLifetimePort
+import com.pocketagent.nativebridge.RuntimeCloseResult
 import com.pocketagent.nativebridge.createDefaultRuntimeInferenceModule
 import com.pocketagent.nativebridge.runtimeInferencePorts
 import com.pocketagent.tools.SafeLocalToolRuntime
@@ -61,7 +63,8 @@ class RuntimeOrchestrator(
     private val recommendedGpuLayers: (String, PerformanceRuntimeConfig) -> Int? = { _, _ -> null },
     private val mmProjPathResolver: (String) -> String? = { null },
     private val availableCpuCoresProvider: () -> Int = { Runtime.getRuntime().availableProcessors() },
-) : RuntimeContainer {
+    private val operationCoordinator: RuntimeOperationCoordinator = RuntimeOperationCoordinator(),
+) : RuntimeContainer, RuntimeLifetimePort {
     private val runtimeInferencePorts: RuntimeInferencePorts = inferenceModule.runtimeInferencePorts()
     private val runtimeLifecycleObserverLock = Any()
     private val runtimeLifecycleDispatchLock = Object()
@@ -71,7 +74,13 @@ class RuntimeOrchestrator(
     @Volatile
     private var runtimeLifecycleDispatcherStarted: Boolean = false
     @Volatile
-    private var currentRuntimeLifecycleEvent: ModelLifecycleEvent = ModelLifecycleEvent(state = ModelLifecycleState.UNLOADED)
+    private var runtimeLifecycleDispatcherClosed: Boolean = false
+    private var runtimeLifecycleDispatcherThread: Thread? = null
+    private var managedRuntimeLifecycleSubscription: AutoCloseable? = null
+    @Volatile
+    private var currentRuntimeLifecycleEvent: ModelLifecycleEvent = ModelLifecycleEvent(
+        state = ModelLifecycleState.UNLOADED,
+    )
     private val imageInputModule = RuntimeImageInputModule(inferenceModule)
     private val sessionManager = RuntimeSessionManager(conversationModule, memoryModule)
     private val interactionRegistry = ModelInteractionRegistry(specProvider = modelSpecProvider)
@@ -83,6 +92,7 @@ class RuntimeOrchestrator(
         inferenceModule = inferenceModule,
         runtimeConfig = runtimeConfig,
         runtimeInferencePorts = runtimeInferencePorts,
+        operationCoordinator = operationCoordinator,
     )
     private val toolLoopCoordinator = ToolLoopCoordinator(toolModule)
     private val runtimePlanResolver = RuntimePlanResolver(
@@ -143,6 +153,8 @@ class RuntimeOrchestrator(
         routingModeProvider = { routingMode },
         residentModelIdProvider = { runtimeResidencyManager.loadedModelId() },
         availableCpuCoresProvider = availableCpuCoresProvider,
+        operationCoordinator = operationCoordinator,
+        clearResidentModel = runtimeResidencyManager::clearResidentAfterExternalUnload,
     )
     private val diagnosticsUseCase = DiagnosticsUseCase(
         policyModule = policyModule,
@@ -168,6 +180,7 @@ class RuntimeOrchestrator(
         runtimePlanResolver = runtimePlanResolver,
         onWarmupStage = ::emitWarmupLifecycleStage,
         runtimeInferencePorts = runtimeInferencePorts,
+        operationCoordinator = operationCoordinator,
     )
 
     init {
@@ -176,8 +189,61 @@ class RuntimeOrchestrator(
         if (managedRuntime != null && modelRegistry != null) {
             artifactVerifier.registerRuntimeModelPaths(modelRegistry)
             currentRuntimeLifecycleEvent = managedRuntime.currentModelLifecycleState()
-            managedRuntime.observeModelLifecycleState(::emitRuntimeLifecycleEvent)
+            managedRuntimeLifecycleSubscription = managedRuntime.observeModelLifecycleState(::emitRuntimeLifecycleEvent)
         }
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        val runtimeLifetime = runtimeInferencePorts.lifetime
+            ?: return RuntimeCloseResult.rejected("RUNTIME_LIFETIME_UNSUPPORTED")
+        val preparation = operationCoordinator.prepareClose(
+            timeoutMs = timeoutMs,
+            cancel = inferenceExecutor::cancelNativeGenerationForLifetime,
+        )
+        if (preparation is RuntimeClosePreparationResult.Rejected) {
+            return RuntimeCloseResult.rejected(preparation.code, preparation.detail)
+        }
+        if (preparation is RuntimeClosePreparationResult.Closed) return RuntimeCloseResult.closed()
+        val closeLease = (preparation as RuntimeClosePreparationResult.Prepared).lease
+        runCatching { managedRuntimeLifecycleSubscription?.close() }.getOrElse { error ->
+            closeLease.close()
+            return RuntimeCloseResult.rejected(
+                code = "RUNTIME_SUBSCRIPTION_CLOSE_EXCEPTION",
+                detail = error.message ?: error::class.simpleName,
+            )
+        }
+        val nativeClose = runCatching { runtimeLifetime.closeRuntime(timeoutMs) }.getOrElse { error ->
+            closeLease.commit()
+            return RuntimeCloseResult.terminated(
+                code = "NATIVE_RUNTIME_CLOSE_EXCEPTION",
+                detail = error.message ?: error::class.simpleName,
+            )
+        }
+        if (!nativeClose.success) {
+            if (nativeClose.runtimeReusable) {
+                closeLease.close()
+                managedRuntimeLifecycleSubscription = runtimeInferencePorts.managedRuntime
+                    ?.observeModelLifecycleState(::emitRuntimeLifecycleEvent)
+                return nativeClose
+            }
+            closeLease.commit()
+            return nativeClose
+        }
+        closeLease.commit()
+        managedRuntimeLifecycleSubscription = null
+        val residencyClosed = runCatching { runtimeResidencyManager.close() }.isSuccess
+        val dispatcherClosed = runCatching { stopRuntimeLifecycleDispatcher(timeoutMs) }.getOrDefault(false)
+        if (!residencyClosed || !dispatcherClosed) {
+            return RuntimeCloseResult.terminated("RUNTIME_POST_CLOSE_CLEANUP_FAILED")
+        }
+        synchronized(runtimeLifecycleObserverLock) {
+            runtimeLifecycleObservers.clear()
+        }
+        return RuntimeCloseResult.closed()
+    }
+
+    internal fun isLifecycleDispatcherAliveForTests(): Boolean {
+        return runtimeLifecycleDispatcherThread?.isAlive == true
     }
 
     override fun createSession(): SessionId = sessionManager.createSession()
@@ -212,40 +278,6 @@ class RuntimeOrchestrator(
         )
     }
 
-    override fun sendChatMessages(
-        sessionId: SessionId,
-        messages: List<InteractionMessage>,
-        taskType: String,
-        deviceState: DeviceState,
-        maxTokens: Int,
-        keepModelLoaded: Boolean,
-        onToken: (String) -> Unit,
-        onThinkingStateChanged: (Boolean) -> Unit,
-        requestTimeoutMs: Long,
-        requestId: String,
-        previousResponseId: String?,
-        performanceConfig: PerformanceRuntimeConfig,
-        residencyPolicy: ModelResidencyPolicy,
-    ): ChatResponse {
-        return sendChatMessages(
-            sessionId = sessionId,
-            messages = messages,
-            taskType = taskType,
-            context = RuntimeRequestContext(
-                deviceState = deviceState,
-                maxTokens = maxTokens,
-                keepModelLoaded = keepModelLoaded,
-                requestTimeoutMs = requestTimeoutMs,
-                requestId = requestId,
-                previousResponseId = previousResponseId,
-                performanceConfig = performanceConfig,
-                residencyPolicy = residencyPolicy,
-            ),
-            onToken = onToken,
-            onThinkingStateChanged = onThinkingStateChanged,
-        )
-    }
-
     override fun sendUserMessage(
         sessionId: SessionId,
         userText: String,
@@ -265,38 +297,6 @@ class RuntimeOrchestrator(
                 onThinkingStateChanged = onThinkingStateChanged,
                 routingMode = routingMode,
             ),
-        )
-    }
-
-    override fun sendUserMessage(
-        sessionId: SessionId,
-        userText: String,
-        taskType: String,
-        deviceState: DeviceState,
-        maxTokens: Int,
-        keepModelLoaded: Boolean,
-        onToken: (String) -> Unit,
-        onThinkingStateChanged: (Boolean) -> Unit,
-        requestTimeoutMs: Long,
-        requestId: String,
-        performanceConfig: PerformanceRuntimeConfig,
-        residencyPolicy: ModelResidencyPolicy,
-    ): ChatResponse {
-        return sendUserMessage(
-            sessionId = sessionId,
-            userText = userText,
-            taskType = taskType,
-            context = RuntimeRequestContext(
-                deviceState = deviceState,
-                maxTokens = maxTokens,
-                keepModelLoaded = keepModelLoaded,
-                requestTimeoutMs = requestTimeoutMs,
-                requestId = requestId,
-                performanceConfig = performanceConfig,
-                residencyPolicy = residencyPolicy,
-            ),
-            onToken = onToken,
-            onThinkingStateChanged = onThinkingStateChanged,
         )
     }
 
@@ -363,7 +363,9 @@ class RuntimeOrchestrator(
             is ImageAnalysisResult.Success -> result.content
             is ImageAnalysisResult.Failure -> {
                 val failure = result.failure
-                if (failure is ImageFailure.PolicyDenied || (failure is ImageFailure.Runtime && failure.code == "image_runtime_error")) {
+                val shouldThrow = failure is ImageFailure.PolicyDenied ||
+                    (failure is ImageFailure.Runtime && failure.code == "image_runtime_error")
+                if (shouldThrow) {
                     throw IllegalStateException(failure.technicalDetail ?: failure.userMessage)
                 }
                 result.toLegacyString()
@@ -490,14 +492,24 @@ class RuntimeOrchestrator(
     }
 
     override fun evictResidentModel(reason: String): Boolean {
-        runtimeResidencyManager.unload(reason)
-        observabilityModule.recordLatencyMetric(
-            "inference.resident_eviction.${sanitizeMetricSegment(reason)}",
-            1.0,
-        )
-        return true
+        val lifecycleLease = when (val admission = inferenceExecutor.acquireLifecycleLease(STOP_AWAIT_TIMEOUT_MS)) {
+            is LifecycleAdmissionResult.Acquired -> admission.lease
+            is LifecycleAdmissionResult.Rejected -> return false
+        }
+        return try {
+            runtimeResidencyManager.unload(reason)
+            observabilityModule.recordLatencyMetric(
+                "inference.resident_eviction.${sanitizeMetricSegment(reason)}",
+                1.0,
+            )
+            true
+        } finally {
+            lifecycleLease.close()
+        }
     }
 
+    // Preflight, drain ownership, native mutation, and lifecycle publication are one atomic command.
+    @Suppress("CyclomaticComplexMethod")
     override fun loadModel(modelId: String, modelVersion: String?): RuntimeModelLifecycleCommandResult {
         // Pre-flight checks (outside lock) — fast rejection without blocking other operations.
         val availableModels = inferenceModule.listAvailableModels().toSet()
@@ -552,76 +564,84 @@ class RuntimeOrchestrator(
                 )
             }
 
-            // Stop-Await-Release: cancel active generations and wait for them to finish.
-            if (!inferenceExecutor.isIdle()) {
-                inferenceExecutor.cancelAllAndAwaitIdle(timeoutMs = STOP_AWAIT_TIMEOUT_MS)
-            }
-
-            // Unload previous model if one is resident.
-            if (runtimeResidencyManager.loadedModelId() != null) {
-                runtimeResidencyManager.unload(reason = "model_switch")
-                awaitNativeCleanup(managedRuntime)
-            }
-
-            // Re-check last-one-wins after awaiting + unload.
-            if (pendingLoadModelId.get() != modelId) {
-                return RuntimeModelLifecycleCommandResult.rejected(
-                    code = ModelLifecycleErrorCode.CANCELLED_BY_NEWER_REQUEST,
-                    detail = "superseded_after_unload:${pendingLoadModelId.get()}",
-                )
-            }
-
-            val performanceConfig = PerformanceRuntimeConfig.forProfile(
-                profile = RuntimePerformanceProfile.BALANCED,
-                availableCpuThreads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
-                gpuEnabled = managedRuntime.supportsGpuOffload(),
-            )
-            val runtimePlan = runtimePlanResolver.resolve(
-                sessionId = "manual-load",
-                modelId = modelId,
-                modelVersion = modelVersion,
-                taskType = "manual_load",
-                stopSequences = emptyList(),
-                requestConfig = performanceConfig,
-                residencyPolicy = ModelResidencyPolicy(),
-                deviceState = DeviceState(batteryPercent = 80, thermalLevel = 3, ramClassGb = 8),
-                runtimeInferencePorts = runtimeInferencePorts,
-            )
-            lastResolvedRuntimePlan.set(runtimePlan)
-            runtimePlan.loadBlockedReason?.let { blockedReason ->
-                return RuntimeModelLifecycleCommandResult.rejected(
-                    code = ModelLifecycleErrorCode.OUT_OF_MEMORY,
-                    detail = blockedReason,
+            val lifecycleLease = when (val admission = inferenceExecutor.acquireLifecycleLease(STOP_AWAIT_TIMEOUT_MS)) {
+                is LifecycleAdmissionResult.Acquired -> admission.lease
+                is LifecycleAdmissionResult.Rejected -> return RuntimeModelLifecycleCommandResult.rejected(
+                    code = ModelLifecycleErrorCode.BUSY_GENERATION,
+                    detail = admission.detail ?: admission.code,
                     loadedModel = loadedModel(),
                 )
             }
-            managedRuntime.setRuntimeGenerationConfig(runtimePlan.generationConfig)
-            val loaded = managedRuntime.loadModel(
-                modelId = modelId,
-                modelVersion = modelVersion,
-                strictGpuOffload = runtimePlan.generationConfig.strictGpuOffload,
-            )
-            if (!loaded) {
-                val bridgeError = managedRuntime.lastBridgeError()
-                return RuntimeModelLifecycleCommandResult.rejected(
-                    code = mapBridgeLifecycleCode(bridgeError?.code),
-                    detail = bridgeError?.detail,
-                    loadedModel = loadedModel(),
+            try {
+
+                // Unload previous model if one is resident.
+                if (runtimeResidencyManager.loadedModelId() != null) {
+                    runtimeResidencyManager.unload(reason = "model_switch")
+                    awaitNativeCleanup(managedRuntime)
+                }
+
+                // Re-check last-one-wins after awaiting + unload.
+                if (pendingLoadModelId.get() != modelId) {
+                    return RuntimeModelLifecycleCommandResult.rejected(
+                        code = ModelLifecycleErrorCode.CANCELLED_BY_NEWER_REQUEST,
+                        detail = "superseded_after_unload:${pendingLoadModelId.get()}",
+                    )
+                }
+
+                val performanceConfig = PerformanceRuntimeConfig.forProfile(
+                    profile = RuntimePerformanceProfile.BALANCED,
+                    availableCpuThreads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
+                    gpuEnabled = managedRuntime.supportsGpuOffload(),
                 )
-            }
-            runtimeResidencyManager.attachResidentSlot(
-                modelId = modelId,
-                slotId = runtimePlan.prefixCacheSlotId,
-                keepAliveMs = runtimePlan.keepAliveMs,
-                sessionCacheIdentity = runtimePlan.sessionCacheIdentity,
-            )
-            initMultimodalIfAvailable(modelId, managedRuntime)
-            return RuntimeModelLifecycleCommandResult.applied(
-                loadedModel = RuntimeLoadedModel(
+                val runtimePlan = runtimePlanResolver.resolve(
+                    sessionId = "manual-load",
                     modelId = modelId,
                     modelVersion = modelVersion,
-                ),
-            )
+                    taskType = "manual_load",
+                    stopSequences = emptyList(),
+                    requestConfig = performanceConfig,
+                    residencyPolicy = ModelResidencyPolicy(),
+                    deviceState = DeviceState(batteryPercent = 80, thermalLevel = 3, ramClassGb = 8),
+                    runtimeInferencePorts = runtimeInferencePorts,
+                )
+                lastResolvedRuntimePlan.set(runtimePlan)
+                runtimePlan.loadBlockedReason?.let { blockedReason ->
+                    return RuntimeModelLifecycleCommandResult.rejected(
+                        code = ModelLifecycleErrorCode.OUT_OF_MEMORY,
+                        detail = blockedReason,
+                        loadedModel = loadedModel(),
+                    )
+                }
+                managedRuntime.setRuntimeGenerationConfig(runtimePlan.generationConfig)
+                val loaded = managedRuntime.loadModel(
+                    modelId = modelId,
+                    modelVersion = modelVersion,
+                    strictGpuOffload = runtimePlan.generationConfig.strictGpuOffload,
+                )
+                if (!loaded) {
+                    val bridgeError = managedRuntime.lastBridgeError()
+                    return RuntimeModelLifecycleCommandResult.rejected(
+                        code = mapBridgeLifecycleCode(bridgeError?.code),
+                        detail = bridgeError?.detail,
+                        loadedModel = loadedModel(),
+                    )
+                }
+                runtimeResidencyManager.attachResidentSlot(
+                    modelId = modelId,
+                    slotId = runtimePlan.prefixCacheSlotId,
+                    keepAliveMs = runtimePlan.keepAliveMs,
+                    sessionCacheIdentity = runtimePlan.sessionCacheIdentity,
+                )
+                initMultimodalIfAvailable(modelId, managedRuntime)
+                return RuntimeModelLifecycleCommandResult.applied(
+                    loadedModel = RuntimeLoadedModel(
+                        modelId = modelId,
+                        modelVersion = modelVersion,
+                    ),
+                )
+            } finally {
+                lifecycleLease.close()
+            }
         } finally {
             pendingLoadModelId.compareAndSet(modelId, null)
             modelLifecycleLock.unlock()
@@ -634,7 +654,7 @@ class RuntimeOrchestrator(
             return
         }
         val useGpu = managedRuntime.supportsGpuOffload()
-        val initialized = runCatching {
+        runCatching {
             managedRuntime.initMultimodal(
                 mmProjPath = mmProjPath,
                 useGpu = useGpu,
@@ -647,20 +667,28 @@ class RuntimeOrchestrator(
     override fun offloadModel(reason: String): RuntimeModelLifecycleCommandResult {
         modelLifecycleLock.lock()
         try {
-            // Stop-Await-Release: cancel active generations before offloading.
-            if (!inferenceExecutor.isIdle()) {
-                inferenceExecutor.cancelAllAndAwaitIdle(timeoutMs = STOP_AWAIT_TIMEOUT_MS)
-            }
-            val currentlyLoaded = loadedModel()
-            return when (runtimeResidencyManager.requestUnload(reason = reason)) {
-                RuntimeUnloadDisposition.UNLOADED,
-                RuntimeUnloadDisposition.NO_RESIDENT_MODEL,
-                -> RuntimeModelLifecycleCommandResult.applied(loadedModel = null)
-
-                RuntimeUnloadDisposition.QUEUED -> RuntimeModelLifecycleCommandResult.queued(
-                    loadedModel = currentlyLoaded,
-                    detail = "offload_queued_while_generation_active",
+            val lifecycleLease = when (val admission = inferenceExecutor.acquireLifecycleLease(STOP_AWAIT_TIMEOUT_MS)) {
+                is LifecycleAdmissionResult.Acquired -> admission.lease
+                is LifecycleAdmissionResult.Rejected -> return RuntimeModelLifecycleCommandResult.rejected(
+                    code = ModelLifecycleErrorCode.BUSY_GENERATION,
+                    detail = admission.detail ?: admission.code,
+                    loadedModel = loadedModel(),
                 )
+            }
+            try {
+                val currentlyLoaded = loadedModel()
+                return when (runtimeResidencyManager.requestUnload(reason = reason)) {
+                    RuntimeUnloadDisposition.UNLOADED,
+                    RuntimeUnloadDisposition.NO_RESIDENT_MODEL,
+                    -> RuntimeModelLifecycleCommandResult.applied(loadedModel = null)
+
+                    RuntimeUnloadDisposition.QUEUED -> RuntimeModelLifecycleCommandResult.queued(
+                        loadedModel = currentlyLoaded,
+                        detail = "offload_queued_while_generation_active",
+                    )
+                }
+            } finally {
+                lifecycleLease.close()
             }
         } finally {
             modelLifecycleLock.unlock()
@@ -840,19 +868,22 @@ class RuntimeOrchestrator(
     }
 
     private fun ensureRuntimeLifecycleDispatcherStarted() {
-        if (runtimeLifecycleDispatcherStarted) {
+        if (runtimeLifecycleDispatcherStarted || runtimeLifecycleDispatcherClosed) {
             return
         }
         synchronized(runtimeLifecycleDispatchLock) {
-            if (runtimeLifecycleDispatcherStarted) {
+            if (runtimeLifecycleDispatcherStarted || runtimeLifecycleDispatcherClosed) {
                 return
             }
             runtimeLifecycleDispatcherStarted = true
             val dispatcherThread = Thread({
-                while (true) {
+                while (!runtimeLifecycleDispatcherClosed) {
                     val nextEvent = synchronized(runtimeLifecycleDispatchLock) {
-                        while (runtimeLifecycleDispatchQueue.isEmpty()) {
+                        while (runtimeLifecycleDispatchQueue.isEmpty() && !runtimeLifecycleDispatcherClosed) {
                             runtimeLifecycleDispatchLock.wait()
+                        }
+                        if (runtimeLifecycleDispatcherClosed) {
+                            return@Thread
                         }
                         runtimeLifecycleDispatchQueue.removeFirst()
                     }
@@ -865,11 +896,32 @@ class RuntimeOrchestrator(
                 }
             }, "runtime-orchestrator-lifecycle")
             dispatcherThread.isDaemon = true
+            runtimeLifecycleDispatcherThread = dispatcherThread
             dispatcherThread.start()
         }
     }
 
+    private fun stopRuntimeLifecycleDispatcher(timeoutMs: Long): Boolean {
+        runtimeLifecycleDispatcherClosed = true
+        synchronized(runtimeLifecycleDispatchLock) {
+            runtimeLifecycleDispatchQueue.clear()
+            runtimeLifecycleDispatchLock.notifyAll()
+        }
+        val dispatcher = runtimeLifecycleDispatcherThread ?: return true
+        try {
+            val waitMs = timeoutMs.coerceAtLeast(0L)
+            if (waitMs > 0L) dispatcher.join(waitMs)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+        if (dispatcher.isAlive) return false
+        runtimeLifecycleDispatcherThread = null
+        return true
+    }
+
     private fun emitRuntimeLifecycleEvent(event: ModelLifecycleEvent) {
+        if (runtimeLifecycleDispatcherClosed) return
         currentRuntimeLifecycleEvent = event
         ensureRuntimeLifecycleDispatcherStarted()
         synchronized(runtimeLifecycleDispatchLock) {
@@ -905,7 +957,11 @@ class RuntimeOrchestrator(
                 state = if (modelId.isNullOrBlank()) ModelLifecycleState.UNLOADED else ModelLifecycleState.LOADED,
                 modelId = modelId,
                 modelVersion = modelVersion,
-                loadingDetail = if (modelId.isNullOrBlank()) null else defaultLoadingDetail(ModelLoadingStage.COMPLETED),
+                loadingDetail = if (modelId.isNullOrBlank()) {
+                    null
+                } else {
+                    defaultLoadingDetail(ModelLoadingStage.COMPLETED)
+                },
                 loadingStage = if (modelId.isNullOrBlank()) null else ModelLoadingStage.COMPLETED,
                 loadingProgress = if (modelId.isNullOrBlank()) null else 1.0f,
             ),
@@ -919,7 +975,9 @@ private const val NATIVE_CLEANUP_TIMEOUT_MS = 2_000L
 private const val NATIVE_CLEANUP_STABLE_DELTA_MB = 4.0
 private const val NATIVE_CLEANUP_REQUIRED_STABLE_READS = 2
 
-private fun mapBridgeLifecycleCode(errorCode: String?): ModelLifecycleErrorCode {
+// Error normalization intentionally keeps all backend spellings in one auditable mapping.
+@Suppress("CyclomaticComplexMethod")
+internal fun mapBridgeLifecycleCode(errorCode: String?): ModelLifecycleErrorCode {
     val normalized = errorCode?.trim()?.uppercase().orEmpty()
     return when {
         normalized.contains("OUT_OF_MEMORY") ||
@@ -927,11 +985,11 @@ private fun mapBridgeLifecycleCode(errorCode: String?): ModelLifecycleErrorCode 
             normalized.contains("ENOMEM") ->
             ModelLifecycleErrorCode.OUT_OF_MEMORY
 
-        normalized.contains("MODEL") || normalized.contains("FILE") || normalized.contains("PATH") ->
-            ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE
-
         normalized.contains("COMPAT") || normalized.contains("PROVENANCE") || normalized.contains("CHECKSUM") ->
             ModelLifecycleErrorCode.RUNTIME_INCOMPATIBLE
+
+        normalized.contains("MODEL") || normalized.contains("FILE") || normalized.contains("PATH") ->
+            ModelLifecycleErrorCode.MODEL_FILE_UNAVAILABLE
 
         normalized.contains("BUSY") -> ModelLifecycleErrorCode.BUSY_GENERATION
 

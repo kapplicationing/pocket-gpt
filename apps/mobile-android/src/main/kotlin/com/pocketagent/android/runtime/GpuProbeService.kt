@@ -18,6 +18,7 @@ import com.pocketagent.nativebridge.FlashAttnMode
 import com.pocketagent.nativebridge.GpuExecutionBackend
 import com.pocketagent.nativebridge.KvCachePreset
 import com.pocketagent.nativebridge.NativeJniLlamaCppBridge
+import com.pocketagent.nativebridge.RuntimeCloseResult
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,7 @@ internal interface GpuProbeBridge {
     fun generateSyncProbe(prompt: String, maxTokens: Int, cachePolicy: CachePolicy): Boolean
     fun unloadModel()
     fun lastErrorDetail(): String?
+    fun closeRuntime(timeoutMs: Long = PROBE_CLOSE_TIMEOUT_MS): RuntimeCloseResult = RuntimeCloseResult.closed()
 }
 
 internal class NativeGpuProbeBridge : GpuProbeBridge {
@@ -80,6 +82,8 @@ internal class NativeGpuProbeBridge : GpuProbeBridge {
     override fun lastErrorDetail(): String? {
         return delegate.lastError()?.let { "${it.code}:${it.detail.orEmpty()}" }
     }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult = delegate.closeRuntime(timeoutMs)
 }
 
 internal class GpuProbeRunner(
@@ -90,6 +94,14 @@ internal class GpuProbeRunner(
 ) {
     fun runProbeLadder(request: GpuProbeRequest): GpuProbeResult {
         val bridge = bridgeFactory()
+        return try {
+            runProbeLadder(request = request, bridge = bridge)
+        } finally {
+            bridge.closeRuntime()
+        }
+    }
+
+    private fun runProbeLadder(request: GpuProbeRequest, bridge: GpuProbeBridge): GpuProbeResult {
         if (!bridge.isReady()) {
             return GpuProbeResult(
                 status = GpuProbeStatus.FAILED,
@@ -195,6 +207,8 @@ internal class GpuProbeRunner(
         }
     }
 }
+
+private const val PROBE_CLOSE_TIMEOUT_MS = 5_000L
 
 internal object GpuProbeIpc {
     const val MSG_PROBE_REQUEST = 1

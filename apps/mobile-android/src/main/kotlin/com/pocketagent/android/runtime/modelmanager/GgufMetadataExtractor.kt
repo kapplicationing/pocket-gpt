@@ -1,6 +1,7 @@
 package com.pocketagent.android.runtime.modelmanager
 
 import android.util.Log
+import com.pocketagent.android.runtime.writeTextAtomically
 import com.pocketagent.android.runtime.modelmanager.gguf.GgufMetadata
 import com.pocketagent.android.runtime.modelmanager.gguf.GgufMetadataReaderImpl
 import java.io.File
@@ -39,15 +40,14 @@ internal object GgufMetadataExtractor {
      *
      * @return true if GGUF metadata was successfully extracted and persisted.
      */
+    @Suppress("TooGenericExceptionCaught")
     fun extractAndPersist(modelFile: File, metadataFile: File): Boolean {
         if (!modelFile.exists() || !modelFile.isFile) {
             Log.w(LOG_TAG, "Model file does not exist: ${modelFile.absolutePath}")
             return false
         }
         return try {
-            val gguf = modelFile.inputStream().buffered().use { input ->
-                reader.readStructuredMetadata(input)
-            }
+            val gguf = inspect(modelFile).getOrThrow()
             val ggufJson = toJson(gguf)
 
             val existing = if (metadataFile.exists()) {
@@ -58,9 +58,12 @@ internal object GgufMetadataExtractor {
             existing.put("gguf", ggufJson)
             existing.put("ggufExtractedAtEpochMs", System.currentTimeMillis())
 
-            metadataFile.parentFile?.mkdirs()
-            metadataFile.writeText(existing.toString())
-            Log.i(LOG_TAG, "Extracted GGUF metadata for ${modelFile.name}: arch=${gguf.architecture?.architecture}, ctx=${gguf.dimensions?.contextLength}")
+            writeTextAtomically(metadataFile, existing.toString())
+            Log.i(
+                LOG_TAG,
+                "Extracted GGUF metadata for ${modelFile.name}: " +
+                    "arch=${gguf.architecture?.architecture}, ctx=${gguf.dimensions?.contextLength}",
+            )
             true
         } catch (error: Exception) {
             Log.w(LOG_TAG, "Failed to extract GGUF metadata from ${modelFile.name}: ${error.message}")
@@ -68,6 +71,27 @@ internal object GgufMetadataExtractor {
         }
     }
 
+    fun inspect(modelFile: File): Result<GgufMetadata> {
+        return runCatching {
+            require(modelFile.exists() && modelFile.isFile) {
+                "Model file does not exist: ${modelFile.absolutePath}"
+            }
+            modelFile.inputStream().buffered().use(reader::readStructuredMetadata)
+        }
+    }
+
+    fun inspectValidatedModelStructure(modelFile: File): Result<GgufMetadata> {
+        return runCatching {
+            require(modelFile.exists() && modelFile.isFile) {
+                "Model file does not exist: ${modelFile.absolutePath}"
+            }
+            modelFile.inputStream().use { input ->
+                reader.readValidatedModelStructure(input = input, fileSize = modelFile.length())
+            }
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod")
     private fun toJson(gguf: GgufMetadata): JSONObject {
         val json = JSONObject()
         json.put("version", gguf.version.label)

@@ -15,6 +15,8 @@ DO_BUILD=0
 ALLOW_DEBUGGABLE=0
 OUT_DIR=""
 BUILD_SOURCE="preinstalled-nondebuggable"
+BUILD_VARIANT="unverified-nondebuggable"
+NATIVE_RUNTIME_PACKAGED_JSON="null"
 DEBUGGABLE=0
 STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-interaction.xml"
@@ -26,7 +28,8 @@ usage() {
 Usage: $0 --scenario settings-nav|model-sheet|drawer-search [--serial SERIAL] [--build] [--allow-debuggable] [--out-dir DIR]
 
 Measures PocketGPT non-generation UI frame stats on the benchmark variant.
-Run three samples per scenario and compare medians before claiming improvement.
+For acceptance evidence, use perf-interaction-gate.sh to capture and evaluate
+three samples. This command captures one diagnostic sample.
 EOF
 }
 
@@ -85,6 +88,7 @@ if [[ -z "$OUT_DIR" ]]; then
   OUT_DIR="$REPO_ROOT/tmp/perf-interaction/$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}"
 fi
 mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
 adb_shell() {
   adb -s "$SERIAL" shell "$@"
@@ -243,18 +247,26 @@ type_text_slowly() {
 }
 
 if [[ "$DO_BUILD" -eq 1 ]]; then
-  echo "[perf-interaction] building :apps:mobile-android:assembleBenchmark"
-  (cd "$REPO_ROOT" && ./gradlew :apps:mobile-android:assembleBenchmark -q)
+  echo "[perf-interaction] building native-enabled :apps:mobile-android:assembleBenchmark"
+  (cd "$REPO_ROOT" && ./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true :apps:mobile-android:assembleBenchmark -q)
   APK="$REPO_ROOT/apps/mobile-android/build/outputs/apk/benchmark/mobile-android-benchmark.apk"
   [[ -f "$APK" ]] || {
     echo "[perf-interaction] benchmark APK not found at $APK" >&2
     exit 66
   }
+  unzip -Z1 "$APK" >"$OUT_DIR/apk-entries.txt"
+  grep -Fxq 'lib/arm64-v8a/libpocket_llama.so' "$OUT_DIR/apk-entries.txt" || {
+    echo "[perf-interaction] benchmark APK is missing lib/arm64-v8a/libpocket_llama.so" >&2
+    exit 66
+  }
   adb -s "$SERIAL" install -r "$APK" >/dev/null
-  BUILD_SOURCE="assembled-benchmark"
+  BUILD_SOURCE="assembled-native-benchmark"
+  BUILD_VARIANT="benchmark"
+  NATIVE_RUNTIME_PACKAGED_JSON="true"
 fi
 
-INSTALLED_FLAGS="$(adb -s "$SERIAL" shell pm dump "$PACKAGE" 2>/dev/null | awk '/pkgFlags=/ {print; exit}')"
+PACKAGE_DUMP="$(adb -s "$SERIAL" shell dumpsys package "$PACKAGE" 2>/dev/null || true)"
+INSTALLED_FLAGS="$(awk '/pkgFlags=/ {print; exit}' <<<"$PACKAGE_DUMP")"
 if [[ -z "$INSTALLED_FLAGS" ]]; then
   echo "[perf-interaction] $PACKAGE is not installed on $SERIAL. Re-run with --build or install manually." >&2
   exit 67
@@ -268,6 +280,14 @@ if echo "$INSTALLED_FLAGS" | grep -q DEBUGGABLE; then
     echo "[perf-interaction] refusing to measure DEBUGGABLE build. Use --build for benchmark variant." >&2
     exit 68
   fi
+fi
+VERSION_CODE="$(sed -n 's/.*versionCode=\([^ ]*\).*/\1/p' <<<"$PACKAGE_DUMP" | head -n 1 | tr -d '\r')"
+VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName=//p' <<<"$PACKAGE_DUMP" | head -n 1 | tr -d '\r')"
+LAST_UPDATE_TIME="$(sed -n 's/^[[:space:]]*lastUpdateTime=//p' <<<"$PACKAGE_DUMP" | head -n 1 | tr -d '\r')"
+INSTALLED_APK_PATH="$(adb -s "$SERIAL" shell pm path "$PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1 | tr -d '\r')"
+if [[ -z "$VERSION_CODE" || -z "$VERSION_NAME" || -z "$LAST_UPDATE_TIME" || -z "$INSTALLED_APK_PATH" ]]; then
+  echo "[perf-interaction] failed to read stable package identity for $PACKAGE on $SERIAL" >&2
+  exit 67
 fi
 
 wake_and_dismiss_keyguard
@@ -331,20 +351,70 @@ else
   DEBUGGABLE_JSON=false
 fi
 
-cat >"$OUT_DIR/summary.json" <<EOF
-{
-  "scenario": "$SCENARIO",
-  "serial": "$SERIAL",
-  "package": "$PACKAGE",
-  "build_source": "$BUILD_SOURCE",
-  "debuggable": $DEBUGGABLE_JSON,
-  "started_at_utc": "$STARTED_AT_UTC",
-  "janky_pct": $JANKY,
-  "p50_ms": $P50,
-  "p90_ms": $P90,
-  "p99_ms": $P99,
-  "artifact_dir": "$OUT_DIR"
+python3 - \
+  "$OUT_DIR/summary.json" \
+  "$SCENARIO" \
+  "$SERIAL" \
+  "$PACKAGE" \
+  "$BUILD_SOURCE" \
+  "$BUILD_VARIANT" \
+  "$NATIVE_RUNTIME_PACKAGED_JSON" \
+  "$DEBUGGABLE_JSON" \
+  "$VERSION_CODE" \
+  "$VERSION_NAME" \
+  "$LAST_UPDATE_TIME" \
+  "$INSTALLED_APK_PATH" \
+  "$STARTED_AT_UTC" \
+  "$JANKY" \
+  "$P50" \
+  "$P90" \
+  "$P99" \
+  "$OUT_DIR" <<'PY'
+import json
+import sys
+
+(
+    output_path,
+    scenario,
+    serial,
+    package,
+    build_source,
+    build_variant,
+    native_runtime_packaged,
+    debuggable,
+    version_code,
+    version_name,
+    last_update_time,
+    installed_apk_path,
+    started_at_utc,
+    janky_pct,
+    p50_ms,
+    p90_ms,
+    p99_ms,
+    artifact_dir,
+) = sys.argv[1:]
+payload = {
+    "scenario": scenario,
+    "serial": serial,
+    "package": package,
+    "build_source": build_source,
+    "build_variant": build_variant,
+    "native_runtime_packaged": True if native_runtime_packaged == "true" else None,
+    "debuggable": debuggable == "true",
+    "version_code": version_code,
+    "version_name": version_name,
+    "last_update_time": last_update_time,
+    "installed_apk_path": installed_apk_path,
+    "started_at_utc": started_at_utc,
+    "janky_pct": float(janky_pct),
+    "p50_ms": float(p50_ms),
+    "p90_ms": float(p90_ms),
+    "p99_ms": float(p99_ms),
+    "artifact_dir": artifact_dir,
 }
-EOF
+with open(output_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
 
 echo "scenario=${SCENARIO} janky=${JANKY}% p50=${P50}ms p90=${P90}ms p99=${P99}ms artifacts=${OUT_DIR}"

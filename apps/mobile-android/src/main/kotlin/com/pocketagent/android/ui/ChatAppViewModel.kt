@@ -1,17 +1,72 @@
 package com.pocketagent.android.ui
 
+import androidx.compose.runtime.Immutable
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class ChatAppViewModel : ViewModel() {
+@Immutable
+internal data class ModelImportRequest(
+    val operationId: Long,
+    val modelId: String,
+    val pickerPending: Boolean,
+)
 
-    private val _selectedModelIdForImport = MutableStateFlow<String?>(null)
-    val selectedModelIdForImport = _selectedModelIdForImport.asStateFlow()
+class ChatAppViewModel(
+    private val savedStateHandle: SavedStateHandle,
+) : ViewModel() {
+    private val modelImportRequestLock = Any()
+    private var lastModelImportOperationId = savedStateHandle[MODEL_IMPORT_SEQUENCE_KEY] ?: 0L
+    private val _modelImportRequest = MutableStateFlow(restorePendingModelImportRequest())
+    internal val modelImportRequest = _modelImportRequest.asStateFlow()
 
-    fun setSelectedModelIdForImport(modelId: String?) {
-        _selectedModelIdForImport.value = modelId
+    internal fun requestModelImport(modelId: String): ModelImportRequest? {
+        val normalizedModelId = modelId.trim().takeIf { it.isNotEmpty() } ?: return null
+        return synchronized(modelImportRequestLock) {
+            if (_modelImportRequest.value != null) {
+                return@synchronized null
+            }
+            lastModelImportOperationId += 1L
+            savedStateHandle[MODEL_IMPORT_SEQUENCE_KEY] = lastModelImportOperationId
+            savedStateHandle[MODEL_IMPORT_MODEL_ID_KEY] = normalizedModelId
+            savedStateHandle[MODEL_IMPORT_OPERATION_ID_KEY] = lastModelImportOperationId
+            ModelImportRequest(
+                operationId = lastModelImportOperationId,
+                modelId = normalizedModelId,
+                pickerPending = true,
+            ).also { request -> _modelImportRequest.value = request }
+        }
+    }
+
+    internal fun consumeModelImportRequest(): ModelImportRequest? {
+        return synchronized(modelImportRequestLock) {
+            val request = _modelImportRequest.value?.takeIf { it.pickerPending }
+                ?: return@synchronized null
+            clearPersistedPendingModelImport()
+            _modelImportRequest.value = null
+            request.copy(pickerPending = false)
+        }
+    }
+
+    private fun restorePendingModelImportRequest(): ModelImportRequest? {
+        val modelId = savedStateHandle.get<String>(MODEL_IMPORT_MODEL_ID_KEY)
+        val operationId = savedStateHandle.get<Long>(MODEL_IMPORT_OPERATION_ID_KEY)
+        if (modelId.isNullOrBlank() || operationId == null) {
+            clearPersistedPendingModelImport()
+            return null
+        }
+        return ModelImportRequest(
+            operationId = operationId,
+            modelId = modelId,
+            pickerPending = true,
+        )
+    }
+
+    private fun clearPersistedPendingModelImport() {
+        savedStateHandle.remove<String>(MODEL_IMPORT_MODEL_ID_KEY)
+        savedStateHandle.remove<Long>(MODEL_IMPORT_OPERATION_ID_KEY)
     }
 
     private val _pendingGetReadyActivation = MutableStateFlow<Pair<String, String>?>(null)
@@ -55,5 +110,11 @@ class ChatAppViewModel : ViewModel() {
     fun incrementReadinessRefreshSequence(): Long {
         _readinessRefreshSequence.value += 1L
         return _readinessRefreshSequence.value
+    }
+
+    private companion object {
+        const val MODEL_IMPORT_MODEL_ID_KEY = "model_import_model_id"
+        const val MODEL_IMPORT_OPERATION_ID_KEY = "model_import_operation_id"
+        const val MODEL_IMPORT_SEQUENCE_KEY = "model_import_sequence"
     }
 }

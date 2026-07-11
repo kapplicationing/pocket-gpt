@@ -70,12 +70,36 @@ interface RuntimeSessionCachePort {
     fun loadSessionCache(filePath: String): Boolean
 }
 
+data class RuntimeCloseResult(
+    val success: Boolean,
+    val runtimeReusable: Boolean,
+    val code: String? = null,
+    val detail: String? = null,
+) {
+    companion object {
+        fun closed(): RuntimeCloseResult = RuntimeCloseResult(success = true, runtimeReusable = false)
+
+        fun rejected(code: String, detail: String? = null): RuntimeCloseResult {
+            return RuntimeCloseResult(success = false, runtimeReusable = true, code = code, detail = detail)
+        }
+
+        fun terminated(code: String, detail: String? = null): RuntimeCloseResult {
+            return RuntimeCloseResult(success = false, runtimeReusable = false, code = code, detail = detail)
+        }
+    }
+}
+
+interface RuntimeLifetimePort {
+    fun closeRuntime(timeoutMs: Long = 5_000L): RuntimeCloseResult
+}
+
 data class RuntimeInferencePorts(
     val managedRuntime: ManagedRuntimePort? = null,
     val cacheAwareGeneration: CacheAwareGenerationPort? = null,
     val modelRegistry: RuntimeModelRegistryPort? = null,
     val residency: RuntimeResidencyPort? = null,
     val sessionCache: RuntimeSessionCachePort? = null,
+    val lifetime: RuntimeLifetimePort? = null,
 )
 
 interface RuntimeInferencePortProvider {

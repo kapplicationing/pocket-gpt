@@ -13,6 +13,7 @@ import com.pocketagent.nativebridge.ModelLifecycleEvent
 import com.pocketagent.nativebridge.ModelLifecycleState
 import com.pocketagent.nativebridge.ModelLoadOptions
 import com.pocketagent.nativebridge.RuntimeBackend
+import com.pocketagent.nativebridge.RuntimeCloseResult
 import com.pocketagent.nativebridge.RuntimeGenerationConfig
 
 internal class RemoteLlamaCppRuntimeBridge internal constructor(
@@ -173,11 +174,16 @@ internal class RemoteLlamaCppRuntimeBridge internal constructor(
     override fun cancelGeneration(requestId: String): Boolean = cancelGenerationInternal(requestId)
 
     private fun cancelGenerationInternal(requestId: String?): Boolean {
-        val cancelled = transport.cancelGeneration(requestId)
-        if (!cancelled) {
-            recordError(REMOTE_ERROR_RUNTIME, "remote cancel returned false")
+        val result = transport.cancelGeneration(requestId)
+        if (result.cancelled) {
+            clearError()
+        } else {
+            recordError(
+                code = result.error?.code ?: REMOTE_ERROR_RUNTIME,
+                detail = result.error?.detail ?: "remote cancel returned false",
+            )
         }
-        return cancelled
+        return result.cancelled
     }
 
     override fun unloadModel() {
@@ -193,7 +199,16 @@ internal class RemoteLlamaCppRuntimeBridge internal constructor(
                 modelVersion = loaded?.modelVersion,
             ),
         )
-        transport.unloadModel()
+        if (!transport.unloadModel()) {
+            recordError(REMOTE_ERROR_RUNTIME, "remote unload failed:reason=$reason")
+            emitLifecycleFailure(
+                modelId = loaded?.modelId,
+                modelVersion = loaded?.modelVersion,
+                errorCode = ModelLifecycleErrorCode.UNKNOWN,
+                detail = lastBridgeError?.detail,
+            )
+            return false
+        }
         loadedModelState = null
         preparedEpoch = transport.epoch()
         emitLifecycleEvent(
@@ -204,6 +219,21 @@ internal class RemoteLlamaCppRuntimeBridge internal constructor(
             ),
         )
         return true
+    }
+
+    override fun closeRuntime(timeoutMs: Long): RuntimeCloseResult {
+        val unloaded = runCatching { offloadModel("runtime_close") }.getOrDefault(false)
+        if (!unloaded) {
+            return RuntimeCloseResult.rejected("REMOTE_RUNTIME_UNLOAD_FAILED")
+        }
+        synchronized(lifecycleObserverLock) {
+            lifecycleObservers.clear()
+        }
+        return if (transport.close()) {
+            RuntimeCloseResult.closed()
+        } else {
+            RuntimeCloseResult.terminated("REMOTE_RUNTIME_UNBIND_FAILED")
+        }
     }
 
     override fun runtimeBackend(): RuntimeBackend {

@@ -45,15 +45,45 @@ class LlamaRuntimeService : Service() {
     override fun onBind(intent: android.content.Intent?): IBinder = messenger.binder
 
     override fun onDestroy() {
+        primaryBridge.closeRuntime(timeoutMs = SERVICE_CLOSE_TIMEOUT_MS)
         scope.cancel()
         super.onDestroy()
     }
 
     private fun handleMessage(what: Int, correlationId: Int, data: Bundle, replyTo: Messenger) {
         when (what) {
+            in LlamaRuntimeIpc.MSG_PING..LlamaRuntimeIpc.MSG_GET_CONFIG -> {
+                handleConfigMessage(what, correlationId, data, replyTo)
+            }
+
+            in LlamaRuntimeIpc.MSG_LIST_MODELS..LlamaRuntimeIpc.MSG_UNLOAD_MODEL -> {
+                handleModelMessage(what, correlationId, data, replyTo)
+            }
+
+            in LlamaRuntimeIpc.MSG_GENERATE_START..LlamaRuntimeIpc.MSG_GENERATE_CANCEL -> {
+                handleGenerationMessage(what, correlationId, data, replyTo)
+            }
+
+            in LlamaRuntimeIpc.MSG_SUPPORTS_GPU..LlamaRuntimeIpc.MSG_LAST_ERROR -> {
+                handleDiagnosticsMessage(what, correlationId, data, replyTo)
+            }
+        }
+    }
+
+    private fun handleConfigMessage(what: Int, correlationId: Int, data: Bundle, replyTo: Messenger) {
+        when (what) {
             LlamaRuntimeIpc.MSG_PING -> sendReply(replyTo, correlationId, okReply())
-            LlamaRuntimeIpc.MSG_SET_CONFIG -> handleSetConfig(correlationId = correlationId, data = data, replyTo = replyTo)
+            LlamaRuntimeIpc.MSG_SET_CONFIG -> handleSetConfig(
+                correlationId = correlationId,
+                data = data,
+                replyTo = replyTo,
+            )
             LlamaRuntimeIpc.MSG_GET_CONFIG -> sendReply(replyTo, correlationId, currentConfig.toBundle().withOk())
+        }
+    }
+
+    private fun handleModelMessage(what: Int, correlationId: Int, data: Bundle, replyTo: Messenger) {
+        when (what) {
             LlamaRuntimeIpc.MSG_LIST_MODELS -> handleNonStreaming(correlationId, replyTo) {
                 okReply().apply {
                     putStringArrayList(
@@ -74,18 +104,26 @@ class LlamaRuntimeService : Service() {
                 primaryBridge.unloadModel()
                 okReply()
             }
+        }
+    }
 
-            LlamaRuntimeIpc.MSG_GENERATE_START -> handleGenerate(correlationId = correlationId, data = data, replyTo = replyTo)
-            LlamaRuntimeIpc.MSG_GENERATE_CANCEL -> {
-                val requestId = data.getString(LlamaRuntimeIpc.EXTRA_REQUEST_ID)
-                val cancelled = if (requestId.isNullOrBlank()) {
-                    primaryBridge.cancelGeneration()
-                } else {
-                    primaryBridge.cancelGeneration(requestId)
-                }
-                sendReply(replyTo, correlationId, if (cancelled) okReply() else errorReply(primaryBridge.lastError()))
-            }
+    private fun handleGenerationMessage(what: Int, correlationId: Int, data: Bundle, replyTo: Messenger) {
+        when (what) {
+            LlamaRuntimeIpc.MSG_GENERATE_START -> handleGenerate(
+                correlationId = correlationId,
+                data = data,
+                replyTo = replyTo,
+            )
+            LlamaRuntimeIpc.MSG_GENERATE_CANCEL -> handleGenerateCancel(
+                correlationId = correlationId,
+                requestId = data.getString(LlamaRuntimeIpc.EXTRA_REQUEST_ID),
+                replyTo = replyTo,
+            )
+        }
+    }
 
+    private fun handleDiagnosticsMessage(what: Int, correlationId: Int, data: Bundle, replyTo: Messenger) {
+        when (what) {
             LlamaRuntimeIpc.MSG_SUPPORTS_GPU -> handleNonStreaming(correlationId, replyTo) {
                 okReply().apply {
                     putBoolean(LlamaRuntimeIpc.EXTRA_RUNTIME_SUPPORTED, primaryBridge.supportsGpuOffload())
@@ -98,7 +136,11 @@ class LlamaRuntimeService : Service() {
                 }
             }
 
-            LlamaRuntimeIpc.MSG_RUN_GPU_PROBE -> handleProbe(correlationId = correlationId, data = data, replyTo = replyTo)
+            LlamaRuntimeIpc.MSG_RUN_GPU_PROBE -> handleProbe(
+                correlationId = correlationId,
+                data = data,
+                replyTo = replyTo,
+            )
             LlamaRuntimeIpc.MSG_LAST_ERROR -> {
                 val error = primaryBridge.lastError()
                 sendReply(
@@ -150,9 +192,15 @@ class LlamaRuntimeService : Service() {
         val prompt = data.getString(LlamaRuntimeIpc.EXTRA_PROMPT).orEmpty()
         val maxTokens = data.getInt(LlamaRuntimeIpc.EXTRA_MAX_TOKENS, 0)
         val cacheKey = data.getString(LlamaRuntimeIpc.EXTRA_CACHE_KEY)
-        val cachePolicy = CachePolicy.entries.firstOrNull { it.code == data.getInt(LlamaRuntimeIpc.EXTRA_CACHE_POLICY, 0) }
+        val cachePolicyCode = data.getInt(LlamaRuntimeIpc.EXTRA_CACHE_POLICY, 0)
+        val cachePolicy = CachePolicy.entries.firstOrNull { it.code == cachePolicyCode }
             ?: CachePolicy.OFF
-        if (!executionGate.tryBeginGeneration()) {
+        if (requestId.isBlank()) {
+            sendStreamResult(replyTo, correlationId, invalidRequestIdGenerationResult())
+            return
+        }
+        val generationLease = executionGate.tryBeginGeneration(requestId)
+        if (generationLease == null) {
             sendStreamResult(replyTo, correlationId, busyGenerationResult())
             return
         }
@@ -167,9 +215,38 @@ class LlamaRuntimeService : Service() {
                 sendStreamToken(replyTo, correlationId, token)
             }
         } finally {
-            executionGate.endGeneration()
+            executionGate.endGeneration(generationLease)
         }
         sendStreamResult(replyTo, correlationId, result)
+    }
+
+    private fun handleGenerateCancel(correlationId: Int, requestId: String?, replyTo: Messenger) {
+        val decision = executionGate.generationCancelDecision(requestId)
+        if (decision != LlamaRuntimeExecutionGate.GenerationCancelDecision.OWNER) {
+            sendReply(
+                replyTo,
+                correlationId,
+                errorReply(
+                    code = requireNotNull(decision.errorCode),
+                    detail = decision.detail,
+                ),
+            )
+            return
+        }
+        val exactRequestId = requireNotNull(requestId)
+        val cancelled = primaryBridge.cancelGeneration(exactRequestId)
+        sendReply(
+            replyTo,
+            correlationId,
+            if (cancelled) {
+                okReply()
+            } else {
+                errorReply(
+                    code = REMOTE_ERROR_CANCEL_REJECTED,
+                    detail = "cancel_request_no_longer_active",
+                )
+            },
+        )
     }
 
     private fun handleProbe(correlationId: Int, data: Bundle, replyTo: Messenger) {
@@ -270,7 +347,19 @@ class LlamaRuntimeService : Service() {
         )
     }
 
+    private fun invalidRequestIdGenerationResult(): GenerationResult {
+        return GenerationResult(
+            finishReason = GenerationFinishReason.ERROR,
+            tokenCount = 0,
+            firstTokenMs = -1L,
+            totalMs = 0L,
+            cancelled = false,
+            errorCode = REMOTE_ERROR_REQUEST_ID_REQUIRED,
+        )
+    }
+
     private companion object {
         const val LOG_TAG = "LlamaRuntimeService"
+        const val SERVICE_CLOSE_TIMEOUT_MS = 5_000L
     }
 }

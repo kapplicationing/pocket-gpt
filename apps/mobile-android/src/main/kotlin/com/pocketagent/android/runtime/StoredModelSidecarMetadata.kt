@@ -95,8 +95,7 @@ internal object StoredModelSidecarMetadataStore {
             .put("promptProfileId", metadata.promptProfileId ?: JSONObject.NULL)
             .put("artifacts", encodeArtifacts(metadata.artifacts))
             .put("parameters", encodeParameters(metadata.parameters))
-        metadataFile.parentFile?.mkdirs()
-        metadataFile.writeText(json.toString())
+        writeTextAtomically(metadataFile, json.toString())
         readCache[metadataFile.absolutePath] = CachedRead(
             lastModified = metadataFile.lastModified(),
             length = metadataFile.length(),
@@ -123,23 +122,20 @@ internal object StoredModelSidecarMetadataStore {
     }
 
     private fun decodeArtifacts(array: JSONArray): List<InstalledArtifactDescriptor> {
-        return buildList {
-            for (index in 0 until array.length()) {
-                val json = array.optJSONObject(index) ?: continue
-                val role = parseArtifactRole(json.optString("role", "").trim()) ?: continue
-                add(
-                    InstalledArtifactDescriptor(
-                        artifactId = json.optString("artifactId", "").trim(),
-                        role = role,
-                        fileName = json.optString("fileName", "").trim(),
-                        absolutePath = json.optString("absolutePath", "").trim().ifEmpty { null },
-                        expectedSha256 = json.optString("expectedSha256", "").trim().ifEmpty { null },
-                        runtimeCompatibility = json.optString("runtimeCompatibility", "").trim().ifEmpty { null },
-                        fileSizeBytes = json.optLong("fileSizeBytes", -1L).takeIf { it >= 0L },
-                        required = json.optBoolean("required", true),
-                    ),
-                )
-            }
+        return (0 until array.length()).mapNotNull { index ->
+            val json = array.optJSONObject(index) ?: return@mapNotNull null
+            val role = parseArtifactRole(json.optString("role", "").trim())
+                ?: return@mapNotNull null
+            InstalledArtifactDescriptor(
+                artifactId = json.optString("artifactId", "").trim(),
+                role = role,
+                fileName = json.optString("fileName", "").trim(),
+                absolutePath = json.optString("absolutePath", "").trim().ifEmpty { null },
+                expectedSha256 = json.optString("expectedSha256", "").trim().ifEmpty { null },
+                runtimeCompatibility = json.optString("runtimeCompatibility", "").trim().ifEmpty { null },
+                fileSizeBytes = json.optLong("fileSizeBytes", -1L).takeIf { it >= 0L },
+                required = json.optBoolean("required", true),
+            )
         }
     }
 

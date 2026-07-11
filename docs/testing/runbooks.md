@@ -1,6 +1,6 @@
 # Testing Runbooks
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 Use these recipes after choosing the evidence type in
 `docs/testing/test-strategy.md`. Full command syntax stays in
@@ -19,7 +19,7 @@ Use these recipes after choosing the evidence type in
 | Screenshot contract | `python3 tools/devctl/main.py lane screenshot-pack` |
 | One UI repro with artifacts | `maestro-android scoped --flow tmp/<flow>.yaml --device <serial>` |
 | Selector/flow health | `maestro-android lint` or `maestro-android audit-selectors` |
-| Non-generation UI jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario <name> --build` |
+| Non-generation UI jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario <name>` |
 | Composer typing jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build` |
 
 ## Fast Engineer Loop
@@ -182,22 +182,24 @@ ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh
 Non-generation UI journeys:
 
 ```bash
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav --build
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav
-
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario model-sheet
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario model-sheet
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario model-sheet
-
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario drawer-search
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario drawer-search
-ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario drawer-search
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario settings-nav
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario model-sheet
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario drawer-search
 ```
 
-Use `--build` on the first sample for the APK under test. If you start with
-`model-sheet` or `drawer-search`, put `--build` on that first command instead.
-Subsequent samples can omit it only when the installed APK did not change.
+Run only the scenario that matches the changed risk. The gate builds and installs
+one native-enabled `benchmark` APK, captures three samples without rebuilding,
+validates that scenario, device, package, and installed-build identity stayed
+constant, rejects debuggable or unproven builds, and fails when a metric median
+exceeds its target. The machine-readable result is `evaluation.json` in the gate
+artifact root.
+
+Use `perf-interaction.sh` directly only for one diagnostic sample that will not be
+used as acceptance evidence:
+
+```bash
+ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction.sh --scenario settings-nav --build
+```
 
 Compare medians, not one run. Current targets:
 
@@ -208,7 +210,8 @@ Compare medians, not one run. Current targets:
 | p90 | `<= 25 ms` |
 | p99 | `<= 32 ms` |
 
-Artifacts land under `tmp/perf-interaction/...`.
+Artifacts land under `tmp/perf-interaction/...`; each gate root contains three
+sample directories and `evaluation.json`.
 
 ## Perfetto Capture For Worst Jank
 

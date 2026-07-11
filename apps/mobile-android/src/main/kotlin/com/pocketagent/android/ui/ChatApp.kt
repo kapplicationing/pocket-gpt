@@ -168,6 +168,8 @@ fun PocketAgentApp(
     )
     val isOffline = rememberIsOffline()
     val pendingGetReadyActivation by appViewModel.pendingGetReadyActivation.collectAsState()
+    val modelImportRequest by appViewModel.modelImportRequest.collectAsState()
+    val modelImportOperation by provisioningViewModel.modelImportOperation.collectAsState()
     val pendingMeteredWarningVersion by appViewModel.pendingMeteredWarningVersion.collectAsState()
     val pendingRoutingModeSwitch by appViewModel.pendingRoutingModeSwitch.collectAsState()
     val lastDownloadTransitionRefreshKey by appViewModel.lastDownloadTransitionRefreshKey.collectAsState()
@@ -175,6 +177,45 @@ fun PocketAgentApp(
     val defaultGetReadyModelId = remember { resolveDefaultGetReadyModelId(isDebugBuild = BuildConfig.DEBUG) }
     LaunchedEffect(modelLoadingState) {
         viewModel.syncRuntimeModelLoadingState(modelLoadingState)
+    }
+    LaunchedEffect(modelImportOperation) {
+        when (val operation = modelImportOperation) {
+            is ModelImportOperationState.Succeeded -> {
+                val result = operation.result
+                val statusMessage = if (result.isActive) {
+                    context.getString(
+                        R.string.ui_model_import_success_active,
+                        result.modelId,
+                        result.version,
+                    )
+                } else {
+                    context.getString(
+                        R.string.ui_model_import_success_inactive,
+                        result.modelId,
+                        result.version,
+                    )
+                }
+                viewModel.refreshRuntimeReadiness(statusDetailOverride = statusMessage)
+                provisioningViewModel.setStatusMessage(statusMessage)
+                provisioningViewModel.acknowledgeModelImportTerminal(operation.operationId)
+            }
+
+            is ModelImportOperationState.Failed -> {
+                provisioningViewModel.setStatusMessage(
+                    context.getString(R.string.ui_model_import_failure, operation.userMessage),
+                )
+                provisioningViewModel.acknowledgeModelImportTerminal(operation.operationId)
+            }
+
+            is ModelImportOperationState.Cancelled -> {
+                provisioningViewModel.setStatusMessage(context.getString(R.string.ui_model_import_cancelled))
+                provisioningViewModel.acknowledgeModelImportTerminal(operation.operationId)
+            }
+
+            ModelImportOperationState.Idle,
+            is ModelImportOperationState.Running,
+            -> Unit
+        }
     }
     val chatAppLaunchers = rememberChatAppLaunchers(
         context = context,
@@ -436,6 +477,8 @@ fun PocketAgentApp(
         routingMode = runtime.routingMode,
         presetBackingStore = viewModel.presetBackingStore,
         modelRemoveUndoState = modelRemoveUndoState,
+        modelImportRequestActive = modelImportRequest != null ||
+            modelImportOperation !is ModelImportOperationState.Idle,
         actions = modelLibraryActions,
         debugModelLibraryReadyTagEnabled = debugModelLibraryReadyTagEnabled,
         debugModelLibraryStatus = debugModelLibraryStatus,

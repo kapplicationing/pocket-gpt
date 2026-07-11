@@ -13,10 +13,10 @@ tags:
 - runFlow: shared/ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"
 - runFlow: shared/clear-composer-input.yaml
-- inputText: "download flow smoke"
+- inputText: "Reply with exactly: LIFECYCLE_OK"
 - tapOn:
     id: "send_button"
-- assertVisible: "download flow smoke"
+- assertVisible: "Reply with exactly: LIFECYCLE_OK"
 - extendedWaitUntil:
     notVisible: "Cancel"
     timeout: 600000
@@ -24,6 +24,8 @@ tags:
     visible:
       id: "message_bubble_assistant_complete"
     timeout: 600000
+- assertVisible: "^LIFECYCLE_OK$"
+- assertNotVisible: "UI-TOOL-SCHEMA-001"
 - assertNotVisible:
     id: "message_bubble_assistant_pending"
 - assertNotVisible:

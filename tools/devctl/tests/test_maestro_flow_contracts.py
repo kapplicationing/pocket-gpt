@@ -507,6 +507,23 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertNotIn('text: "Get started"', cloud_text)
         self.assertNotIn('visible: "Runtime: Ready"', cloud_text)
 
+    def test_first_run_lifecycle_requires_deterministic_non_tool_reply(self) -> None:
+        flow_path = REPO_ROOT / "tests/maestro/scenario-first-run-download-chat.yaml"
+        text = flow_path.read_text(encoding="utf-8")
+        completion_assertion = 'id: "message_bubble_assistant_complete"'
+        output_assertion = '- assertVisible: "^LIFECYCLE_OK$"'
+
+        self.assertIn('inputText: "Reply with exactly: LIFECYCLE_OK"', text)
+        self.assertIn(completion_assertion, text)
+        self.assertIn(output_assertion, text)
+        self.assertIn('- assertNotVisible: "UI-TOOL-SCHEMA-001"', text)
+        self.assertNotIn('inputText: "download flow smoke"', text)
+        self.assertLess(
+            text.index(completion_assertion),
+            text.index(output_assertion),
+            "The lifecycle flow must prove exact assistant output after terminal completion.",
+        )
+
     def test_dismiss_system_overlays_helper_stays_shared_between_local_and_cloud(self) -> None:
         local_path = REPO_ROOT / "tests/maestro/shared/dismiss-system-overlays.yaml"
         cloud_path = REPO_ROOT / "tests/maestro-cloud/shared/dismiss-system-overlays.yaml"

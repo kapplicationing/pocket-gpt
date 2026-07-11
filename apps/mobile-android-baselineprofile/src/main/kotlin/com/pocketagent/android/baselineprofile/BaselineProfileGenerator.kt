@@ -28,6 +28,7 @@ class BaselineProfileGenerator {
             startCriticalShell()
             openAndCloseSurface("session_drawer_button", "session_search_input")
             openAndCloseSurface("advanced_sheet_button", text = "General")
+            openAndCloseSurface("completion_settings_button", "completion_system_prompt_input")
             openAndCloseSurface("open_model_library", "unified_model_sheet")
         }
     }

@@ -458,24 +458,25 @@ class PerformanceContractAuditTest {
     }
 
     @Test
-    fun rawBenchmarkTapsTranslateThroughCurrentAppViewport() {
+    fun rawBenchmarkTapsUseExactUiAutomatorCenters() {
         val interaction = resolveRepoSource("scripts/dev/perf-interaction.sh").readText()
         val typing = resolveRepoSource("scripts/dev/perf-baseline.sh").readText()
         val harness = resolveRepoSource("scripts/dev/android_perf_harness.py").readText()
+        val tapTag = interaction.substringAfter("tap_tag() {").substringBefore("\n}")
 
         assertTrue(
-            "translated-center" in interaction &&
-                "--window \"\$TAP_GEOMETRY_WINDOW\"" in interaction &&
-                "--package \"\$PACKAGE\"" in interaction &&
-                "translated-center" in typing &&
-                "--window \"\$TAP_GEOMETRY_WINDOW\"" in typing &&
-                "--package \"\$PACKAGE\"" in typing &&
-                "assert_foreground(window_source, package)" in harness &&
-                "mAppBounds=Rect" in harness &&
-                "root.width, root.height" in harness &&
-                "target.left < root.left" in harness &&
+            "translated-center" !in harness &&
+                "translated-center" !in interaction &&
+                "translated-center" !in typing &&
+                "TAP_GEOMETRY_WINDOW" !in interaction &&
+                "TAP_GEOMETRY_WINDOW" !in typing &&
+                "tag_center_from_dump \"\$tag\"" in tapTag &&
+                "tag_center_from_dump \"onboarding_skip\"" in interaction &&
+                "tag_center_from_dump \"onboarding_skip\"" in typing &&
+                "tag_center_from_dump \"composer_input\"" in typing &&
+                "find_node_center" in harness &&
                 "composer_center_from_dump" !in typing,
-            "Raw benchmark taps must translate exact UI-root coordinates through a current, exact-package app viewport and reject mismatched geometry.",
+            "Raw benchmark taps must use exact screen-global UIAutomator node centers without app-viewport translation.",
         )
     }
 
@@ -489,7 +490,7 @@ class PerformanceContractAuditTest {
                 .substringBefore("\n}\n")
         }
         val orderedSteps = listOf(
-            "translated_tag_center_from_dump \"onboarding_skip\"",
+            "tag_center_from_dump \"onboarding_skip\"",
             "adb_shell input tap",
             "onboarding_dismissed=true",
             "sleep 1",

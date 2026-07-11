@@ -37,14 +37,13 @@ ALLOW_DEBUGGABLE=0
 WAIT_TIMEOUT_SECONDS=45
 REMOTE_UI_XML="/sdcard/pocketgpt-perf-window.xml"
 LOCAL_UI_XML="$(mktemp -t pocketgpt-perf-window.XXXXXX.xml)"
-TAP_GEOMETRY_WINDOW="$(mktemp -t pocketgpt-perf-tap-geometry.XXXXXX.txt)"
 OUT_DIR=""
 BENCHMARK_INSTALLED_BY_THIS_RUN=0
 PERF_LOCK_ACQUIRED=0
 
 cleanup() {
   local exit_code=$?
-  rm -f "$LOCAL_UI_XML" "$TAP_GEOMETRY_WINDOW"
+  rm -f "$LOCAL_UI_XML"
   if [[ "$BENCHMARK_INSTALLED_BY_THIS_RUN" -eq 1 ]]; then
     if ! pocketgpt_uninstall_isolated_benchmark \
       "$SERIAL" "$PACKAGE" "$OUT_DIR/cleanup-uninstall.txt"; then
@@ -97,43 +96,6 @@ tag_center_from_dump() {
   python3 "$HARNESS_HELPER" center --xml "$LOCAL_UI_XML" --resource-id "$tag"
 }
 
-translated_tag_center_from_dump() {
-  local tag="$1"
-  adb_shell dumpsys window >"$TAP_GEOMETRY_WINDOW" 2>&1 || return 1
-  python3 "$HARNESS_HELPER" translated-center \
-    --xml "$LOCAL_UI_XML" \
-    --window "$TAP_GEOMETRY_WINDOW" \
-    --package "$PACKAGE" \
-    --resource-id "$tag"
-}
-
-wait_for_app_foreground() {
-  local phase="$1"
-  case "$phase" in
-    launch|fresh-install) ;;
-    *)
-      echo "[perf-baseline] invalid foreground proof phase: $phase" >&2
-      return 1
-      ;;
-  esac
-  local deadline=$((SECONDS + WAIT_TIMEOUT_SECONDS))
-  local focus_file="$OUT_DIR/window-focus-$phase.txt"
-  local proof_file="$OUT_DIR/window-focus-$phase.json"
-  while (( SECONDS < deadline )); do
-    adb_shell dumpsys window >"$focus_file" 2>&1 || true
-    if python3 "$HARNESS_HELPER" assert-foreground \
-      --window "$focus_file" \
-      --package "$PACKAGE" >"$proof_file" 2>/dev/null; then
-      cp "$focus_file" "$TAP_GEOMETRY_WINDOW"
-      return 0
-    fi
-    sleep 1
-  done
-  echo "[perf-baseline] $PACKAGE did not become foreground during phase '$phase'." >&2
-  cat "$focus_file" >&2 2>/dev/null || true
-  return 1
-}
-
 prepare_fresh_install_state() {
   local deadline=$((SECONDS + WAIT_TIMEOUT_SECONDS))
   local coords=""
@@ -142,10 +104,9 @@ prepare_fresh_install_state() {
   wake_and_dismiss_keyguard
   adb_shell am force-stop "$PACKAGE" >/dev/null
   adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
-  wait_for_app_foreground "fresh-install"
   while (( SECONDS < deadline )); do
     if dump_ui; then
-      coords="$(translated_tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
+      coords="$(tag_center_from_dump "onboarding_skip" 2>/dev/null || true)"
       if [[ -n "$coords" ]]; then
         read -r x y <<<"$coords"
         adb_shell input tap "$x" "$y" >/dev/null
@@ -173,7 +134,7 @@ wait_for_composer() {
   while (( SECONDS < deadline )); do
     wake_and_dismiss_keyguard
     if dump_ui && grep -q "composer_input" "$LOCAL_UI_XML"; then
-      coords="$(translated_tag_center_from_dump "composer_input" || true)"
+      coords="$(tag_center_from_dump "composer_input" || true)"
       if [[ -n "$coords" ]]; then
         printf '%s\n' "$coords"
         return 0
@@ -297,7 +258,6 @@ fi
 wake_and_dismiss_keyguard
 adb_shell am force-stop "$PACKAGE" >/dev/null
 adb_shell am start -n "$PACKAGE/$POCKETGPT_MAIN_ACTIVITY_CLASS" >/dev/null
-wait_for_app_foreground "launch"
 read -r COMPOSER_X COMPOSER_Y < <(wait_for_composer)
 adb_shell input tap "$COMPOSER_X" "$COMPOSER_Y" >/dev/null
 sleep 1

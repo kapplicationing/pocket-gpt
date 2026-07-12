@@ -19,5 +19,6 @@ tags:
 - extendedWaitUntil:
     visible: "Send"
     timeout: 180000
+- assertNotVisible: "Preparing response…"
 - assertNotVisible: "UI-RUNTIME-001"
 - takeScreenshot: "ui-05-chat-post-send-maestro"

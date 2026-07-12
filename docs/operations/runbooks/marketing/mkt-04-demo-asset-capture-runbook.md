@@ -1,6 +1,6 @@
 # MKT-04 Demo Asset Capture Runbook (Real Screenshots + Video)
 
-Last updated: 2026-03-10
+Last updated: 2026-07-11
 Owner: Marketing + QA support
 Lifecycle: Ready to execute
 
@@ -11,8 +11,9 @@ Produce real app screenshots/video for launch assets using physical-device captu
 ## Preconditions
 
 1. Connected Android device with adb authorization.
-2. App build installed and runnable on the test device.
-3. Claim-safe storyboard prepared from:
+2. Signed release APK installed and runnable on the explicitly pinned test device.
+3. `release-provenance.json` from the same signed release build is available; the capture script verifies the installed APK checksum against it.
+4. Claim-safe storyboard prepared from:
    - `docs/operations/tickets/mkt-10-claim-freeze-v1.md`
    - `docs/operations/tickets/prod-10-launch-gate-matrix.md`
    - `docs/ux/play-store-listing-spec.md`
@@ -21,18 +22,24 @@ Produce real app screenshots/video for launch assets using physical-device captu
 
 ```bash
 bash scripts/marketing/capture_mobile_demo_assets.sh \
-  --output docs/operations/assets/mkt-04/2026-03-04 \
-  --serial DEVICE_SERIAL_REDACTED \
+  --output docs/operations/assets/mkt-04/2026-07-11-pocketagent-0.1.0 \
+  --serial ANDROID_SERIAL \
+  --release-provenance dist/releases/controlled-mvp-0.1.0/signed-upload/release-provenance.json \
   --record-seconds 30
 ```
 
-If `--serial` is omitted, the script uses the first connected `adb` device.
+Do not capture from an unsigned or unprovenanced build. The script accepts an omitted serial only when exactly one authorized device is attached.
 
 ## Required Asset Set
 
-1. `screenshot-01.png`: useful on-device response state.
-2. `screenshot-02.png`: second workflow state (for example image/tool/session continuity).
-3. `demo.mp4`: 20-30 second interaction clip.
+1. `01-chat-ready.png`
+2. `02-runtime-recovery.png`
+3. `03-session-continuity.png`
+4. `04-prompt-shortcuts.png`
+5. `05-single-image-help.png`
+6. `06-model-library.png`
+7. `07-privacy-diagnostics.png`
+8. `08-demo.mp4`: 20-30 second interaction clip unless `--skip-video` is deliberate and recorded
 
 ## Storyboard Guidance (Claim-Safe)
 

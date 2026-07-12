@@ -10,7 +10,7 @@ Source of truth:
 
 ## Features
 
-- **Offline-first** — all AI processing happens locally, no cloud dependencies
+- **Offline-first inference** — chat generation runs locally; model discovery and downloads may use the network
 - **Streaming responses** — real-time token-by-token display
 - **Model routing** — automatic model selection based on device state
 - **Performance profiles** — BALANCED / FAST / BATTERY modes

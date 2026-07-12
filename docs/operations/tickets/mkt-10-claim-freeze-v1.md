@@ -1,9 +1,9 @@
 # MKT-10 Claim Freeze v1
 
-Last updated: 2026-05-04
+Last updated: 2026-07-11
 Owner: Marketing
 Support: Product, Security
-Status: Ready
+Status: In Progress
 
 ## Objective
 
@@ -38,3 +38,9 @@ The claim set is now defined and publish-safe for the controlled MVP. This ticke
 
 1. Launch copy and listing assets use only publish-safe claim set.
 2. First 7-day scorecard (`MKT-09`) records claim block used per channel.
+
+## Current Closeout
+
+The listing title, short description, full description, seven caption blocks (`CH-01` through `CH-07`), screenshot mapping, and exclusions are now frozen in `docs/ux/play-store-listing-spec.md`. The same copy boundary is carried into `PRIVACY.md`, `SUPPORT.md`, Play metadata, release notes, and the asset manifest.
+
+This ticket remains open only because fresh listing assets have not yet applied those copy blocks and `MKT-09` cannot record a live channel window before rollout. Do not expand copy while those execution steps remain.

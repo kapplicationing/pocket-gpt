@@ -3,8 +3,17 @@ name: Hardware Truth Lane
 on:
   schedule:
     - cron: "0 2 * * *"
+    - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
+      lane:
+        description: "Hardware lane to run"
+        required: true
+        default: "stage2"
+        type: choice
+        options:
+          - stage2
+          - weekly-send-capture
       profile:
         description: "Stage-2 profile to run on attached hardware"
         required: true
@@ -23,6 +32,7 @@ on:
         default: ""
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -83,11 +93,19 @@ jobs:
             exit 1
           fi
 
+          if [[ "${{ github.event.schedule }}" == "0 6 * * 1" ]]; then
+            echo "::error::Required weekly QA-13 send-capture gate could not run: ${{ needs.runner-availability.outputs.reason }}."
+            exit 1
+          fi
+
           echo "::notice::Skipping scheduled hardware truth lane: ${{ needs.runner-availability.outputs.reason }}."
 
   hardware-stage2:
     needs: runner-availability
-    if: needs.runner-availability.outputs.available == 'true'
+    if: >-
+      needs.runner-availability.outputs.available == 'true' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.lane == 'stage2'))
     runs-on: [self-hosted, pocketgpt-android]
     timeout-minutes: 180
     env:
@@ -170,3 +188,228 @@ jobs:
           name: hardware-stage2-${{ env.WORKFLOW_DEVICE }}-${{ env.RUN_DATE }}
           path: scripts/benchmarks/runs/${{ env.RUN_DATE }}/${{ env.WORKFLOW_DEVICE }}/
           if-no-files-found: warn
+
+  weekly-send-capture:
+    needs: runner-availability
+    if: >-
+      needs.runner-availability.outputs.available == 'true' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && inputs.lane == 'weekly-send-capture'))
+    runs-on: [self-hosted, pocketgpt-android]
+    timeout-minutes: 120
+    outputs:
+      packet_report: ${{ steps.packet.outputs.report }}
+      packet_status: ${{ steps.packet.outputs.status }}
+    env:
+      WORKFLOW_DEVICE: ${{ github.event_name == 'schedule' && 'RR8NB087YTF' || inputs.device }}
+      WORKFLOW_DATE: ${{ inputs.run_date }}
+      POCKETGPT_QWEN_3_5_0_8B_Q4_SIDELOAD_PATH: ${{ vars.POCKETGPT_QWEN_3_5_0_8B_Q4_SIDELOAD_PATH }}
+      POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH: ${{ vars.POCKETGPT_QWEN_3_5_2B_Q4_SIDELOAD_PATH }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Bootstrap vendored llama.cpp
+        run: bash scripts/ci/bootstrap_llama_vendor.sh
+
+      - name: Install devctl Python deps
+        run: python3 -m pip install -r tools/devctl/requirements.txt
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Resolve run date
+        run: |
+          set -euo pipefail
+          if [[ -n "${WORKFLOW_DATE}" ]]; then
+            echo "RUN_DATE=${WORKFLOW_DATE}" >> "${GITHUB_ENV}"
+          else
+            echo "RUN_DATE=$(date -u +%F)" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Hardware preflight
+        env:
+          ADB_SERIAL: ${{ env.WORKFLOW_DEVICE }}
+        run: |
+          bash scripts/android/ensure_device.sh
+          bash scripts/android/run_stage_checks.sh
+
+      - name: Locate prior QA-13 artifact
+        id: prior
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          ARTIFACT_NAME: weekly-send-capture-${{ env.WORKFLOW_DEVICE }}
+        with:
+          script: |
+            const response = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: process.env.ARTIFACT_NAME,
+              per_page: 10,
+            });
+            const latest = response.data.artifacts
+              .filter((artifact) => !artifact.expired)
+              .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+            core.setOutput('run_id', latest?.workflow_run?.id ?? '');
+
+      - name: Download prior QA-13 artifact
+        if: steps.prior.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: weekly-send-capture-${{ env.WORKFLOW_DEVICE }}
+          path: tmp/weekly-send-capture-prior
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.prior.outputs.run_id }}
+
+      - name: Run required weekly send-capture gate
+        env:
+          ADB_SERIAL: ${{ env.WORKFLOW_DEVICE }}
+          ANDROID_SERIAL: ${{ env.WORKFLOW_DEVICE }}
+        run: |
+          set -euo pipefail
+          args=(
+            --device "${WORKFLOW_DEVICE}"
+            --run-date "${RUN_DATE}"
+            --reply-timeout-seconds 90
+          )
+          previous_report="$(find tmp/weekly-send-capture-prior -name qa-13-weekly-report.json -print 2>/dev/null | head -n 1 || true)"
+          if [[ -n "${previous_report}" ]]; then
+            args+=(--previous-report "${previous_report}")
+          fi
+          bash scripts/ci/run_weekly_send_capture.sh "${args[@]}"
+
+      - name: Publish QA-13 weekly row
+        id: packet
+        if: always()
+        run: |
+          set -euo pipefail
+          report="$(find "tmp/weekly-send-capture/${RUN_DATE}/${WORKFLOW_DEVICE}" -name qa-13-weekly-report.json -print 2>/dev/null | sort | tail -n 1 || true)"
+          summary="$(find "tmp/weekly-send-capture/${RUN_DATE}/${WORKFLOW_DEVICE}" -name qa-13-weekly-summary.md -print 2>/dev/null | sort | tail -n 1 || true)"
+          status="FAIL"
+          if [[ -n "${report}" ]]; then
+            status="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["status"])' "${report}")"
+          fi
+          echo "report=${report}" >> "${GITHUB_OUTPUT}"
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          if [[ -n "${summary}" ]]; then
+            cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "## QA-13 Weekly Send-Capture Gate" >> "${GITHUB_STEP_SUMMARY}"
+            echo "Required packet was not produced; inspect the hardware preflight and journey logs." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload QA-13 weekly artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: weekly-send-capture-${{ env.WORKFLOW_DEVICE }}
+          path: |
+            tmp/weekly-send-capture/${{ env.RUN_DATE }}/${{ env.WORKFLOW_DEVICE }}/**
+            tmp/devctl-artifacts/**/journey/**
+          if-no-files-found: error
+
+  qa13-issue-routing:
+    needs:
+      - runner-availability
+      - hardware-unavailable
+      - weekly-send-capture
+    if: >-
+      always() &&
+      ((github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && inputs.lane == 'weekly-send-capture'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Reconcile QA-13 blocking issue
+        uses: actions/github-script@v8
+        env:
+          WORKFLOW_DEVICE: ${{ github.event_name == 'schedule' && 'RR8NB087YTF' || inputs.device }}
+          RUNNER_AVAILABLE: ${{ needs.runner-availability.outputs.available }}
+          RUNNER_REASON: ${{ needs.runner-availability.outputs.reason }}
+          LANE_RESULT: ${{ needs.weekly-send-capture.result }}
+          PACKET_STATUS: ${{ needs.weekly-send-capture.outputs.packet_status }}
+          PACKET_REPORT: ${{ needs.weekly-send-capture.outputs.packet_report }}
+        with:
+          script: |
+            const device = process.env.WORKFLOW_DEVICE;
+            const runnerUnavailable = process.env.RUNNER_AVAILABLE !== 'true';
+            const gateFailed = runnerUnavailable ||
+              process.env.LANE_RESULT === 'failure' ||
+              process.env.PACKET_STATUS !== 'PASS';
+            const blockerClass = runnerUnavailable ? 'infra' : 'product-or-harness';
+            const title = `[QA-13] Weekly send-capture gate failing on ${device}`;
+            const eta = new Date(Date.now() + (4 * 60 * 60 * 1000)).toISOString();
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const response = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = response.data.find((issue) => issue.title === title);
+
+            if (!gateFailed) {
+              if (!existing) {
+                core.notice('QA-13 passed and no stale blocking issue exists.');
+                return;
+              }
+              const resolutionBody = [
+                'The required weekly QA-13 send-capture gate is green again.',
+                '',
+                '- Resolution: current packet passed; stale release blocker closed automatically.',
+                `- Device: ${device}`,
+                `- Packet: ${process.env.PACKET_REPORT || 'available in workflow artifacts'}`,
+                `- Workflow: ${runUrl}`,
+              ].join('\n');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: resolutionBody,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                state: 'closed',
+              });
+              return;
+            }
+
+            const body = [
+              'The required weekly QA-13 send-capture gate failed.',
+              '',
+              '- Owner: QA + Engineering',
+              `- Triage update ETA: ${eta}`,
+              `- Blocker class: ${blockerClass}`,
+              `- Runner reason: ${process.env.RUNNER_REASON || '-'}`,
+              `- Lane result: ${process.env.LANE_RESULT || 'not-run'}`,
+              `- Packet status: ${process.env.PACKET_STATUS || 'missing'}`,
+              '- Promotion impact: blocked until the strict send-capture contract is green or explicitly waived.',
+              `- Device: ${device}`,
+              `- Packet: ${process.env.PACKET_REPORT || 'missing'}`,
+              `- Workflow: ${runUrl}`,
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }

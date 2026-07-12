@@ -100,7 +100,7 @@ Cloud suite rules:
 
 1. Keep `cloud-smoke` flows under two minutes and focused on deterministic UI contracts.
 2. Keep benchmark/qualification journeys out of smoke by tagging them separately and running them only from dedicated scripts/jobs.
-3. Prefer stable selectors, but validate them on hosted devices before broad rollout. The current Pocket GPT Android build now exposes selected Compose `testTag` values as Android resource IDs, so hosted smoke flows should prefer `id:` selectors for stable controls that provide them.
+3. Prefer stable selectors, but validate them on hosted devices before broad rollout. The current PocketAgent Android build now exposes selected Compose `testTag` values as Android resource IDs, so hosted smoke flows should prefer `id:` selectors for stable controls that provide them.
 4. Do not duplicate broad local-lane coverage here unless Cloud is adding distinct value, such as hosted-device variance or a clean-install contract.
 5. Keep live Hugging Face downloads out of `cloud-smoke`; hosted smoke should prove the deterministic acquisition UI and blocked states, while large real downloads stay in explicit `live-hf` device runs.
 6. HF cloud flows must use `tests/maestro-cloud/shared/open-model-library-debug.yaml`, not generic onboarding/bootstrap helpers. A missing HF control after this point should be treated as a model-sheet or selector issue; before this change, the same symptom was usually launch/bootstrap navigation flake.

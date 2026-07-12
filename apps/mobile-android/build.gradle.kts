@@ -92,6 +92,67 @@ val composeReportVariant = providers.gradleProperty("pocketgpt.composeReportVari
     }
     .get()
 
+val releaseVersionCode = providers.gradleProperty("pocketagent.releaseVersionCode")
+    .orElse(providers.environmentVariable("POCKETAGENT_RELEASE_VERSION_CODE"))
+    .orElse("1")
+    .get()
+    .trim()
+    .toIntOrNull()
+    ?.takeIf { value -> value in 1..2_100_000_000 }
+    ?: throw GradleException(
+        "PocketAgent release version code must be an integer between 1 and 2100000000. " +
+            "Set pocketagent.releaseVersionCode or POCKETAGENT_RELEASE_VERSION_CODE.",
+    )
+val releaseVersionName = providers.gradleProperty("pocketagent.releaseVersionName")
+    .orElse(providers.environmentVariable("POCKETAGENT_RELEASE_VERSION_NAME"))
+    .orElse("0.1.0")
+    .get()
+    .trim()
+    .takeIf(String::isNotEmpty)
+    ?: throw GradleException(
+        "PocketAgent release version name must not be blank. " +
+            "Set pocketagent.releaseVersionName or POCKETAGENT_RELEASE_VERSION_NAME.",
+    )
+
+data class ReleaseSigningInputs(
+    val storeFilePath: String,
+    val storePassword: String,
+    val keyAlias: String,
+    val keyPassword: String,
+)
+
+val releaseSigningValues = listOf(
+    "POCKETAGENT_RELEASE_KEYSTORE" to providers.environmentVariable("POCKETAGENT_RELEASE_KEYSTORE").orNull,
+    "POCKETAGENT_RELEASE_STORE_PASSWORD" to providers.environmentVariable("POCKETAGENT_RELEASE_STORE_PASSWORD").orNull,
+    "POCKETAGENT_RELEASE_KEY_ALIAS" to providers.environmentVariable("POCKETAGENT_RELEASE_KEY_ALIAS").orNull,
+    "POCKETAGENT_RELEASE_KEY_PASSWORD" to providers.environmentVariable("POCKETAGENT_RELEASE_KEY_PASSWORD").orNull,
+).map { (name, value) -> name to value?.trim().orEmpty() }
+val populatedReleaseSigningValues = releaseSigningValues.filter { (_, value) -> value.isNotEmpty() }
+if (populatedReleaseSigningValues.isNotEmpty() && populatedReleaseSigningValues.size != releaseSigningValues.size) {
+    val missingNames = releaseSigningValues
+        .filter { (_, value) -> value.isEmpty() }
+        .joinToString(", ") { (name, _) -> name }
+    throw GradleException(
+        "PocketAgent release signing is only partially configured. Missing: $missingNames. " +
+            "Provide all four signing variables or none for an explicitly unsigned local artifact.",
+    )
+}
+val releaseSigningInputs = populatedReleaseSigningValues
+    .takeIf { values -> values.size == releaseSigningValues.size }
+    ?.associate { (name, value) -> name to value }
+    ?.let { values ->
+        val storeFilePath = values.getValue("POCKETAGENT_RELEASE_KEYSTORE")
+        if (!file(storeFilePath).isFile) {
+            throw GradleException("PocketAgent release keystore does not exist at the configured path.")
+        }
+        ReleaseSigningInputs(
+            storeFilePath = storeFilePath,
+            storePassword = values.getValue("POCKETAGENT_RELEASE_STORE_PASSWORD"),
+            keyAlias = values.getValue("POCKETAGENT_RELEASE_KEY_ALIAS"),
+            keyPassword = values.getValue("POCKETAGENT_RELEASE_KEY_PASSWORD"),
+        )
+    }
+
 android {
     namespace = "com.pocketagent.android"
     compileSdk = 35
@@ -101,8 +162,8 @@ android {
         applicationId = "com.pocketagent.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -150,9 +211,23 @@ android {
         }
     }
 
+    signingConfigs {
+        releaseSigningInputs?.let { inputs ->
+            create("releaseUpload") {
+                storeFile = file(inputs.storeFilePath)
+                storePassword = inputs.storePassword
+                keyAlias = inputs.keyAlias
+                keyPassword = inputs.keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            releaseSigningInputs?.let {
+                signingConfig = signingConfigs.getByName("releaseUpload")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

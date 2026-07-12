@@ -600,7 +600,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithText("Advanced: Add GGUF from Hugging Face").assertIsDisplayed()
         composeRule.onNodeWithText("Runs as").assertIsDisplayed()
         composeRule.onNodeWithText(
-            "Choose the PocketGPT model family this file is compatible with. This does not load the model.",
+            "Choose the PocketAgent model family this file is compatible with. This does not load the model.",
         ).assertIsDisplayed()
         scrollToTag("model_library_hf_url_input")
         composeRule.onNodeWithTag("model_library_hf_url_input")

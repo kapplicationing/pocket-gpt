@@ -2,6 +2,9 @@
 
 Use this section for the current release plan and promotion contract.
 
+Current posture: the PocketAgent controlled-MVP gate is promoted; the roadmap
+now covers publication closeout and controlled rollout, not new feature work.
+
 ## Current Plan
 
 1. `docs/roadmap/current-release-plan.md`

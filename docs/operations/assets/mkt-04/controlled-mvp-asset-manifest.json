@@ -1,0 +1,94 @@
+{
+  "schema": "pocketagent-play-assets-v1",
+  "release_id": "controlled-mvp-0.1.0",
+  "version_name": "0.1.0",
+  "version_code": 20260711,
+  "overall_status": "capture_required",
+  "reference_pack_decision": {
+    "path": "tests/ui-screenshots/reference/sm-a515f-android13",
+    "status": "rejected_for_listing",
+    "reasons": [
+      "retired Pocket GPT name",
+      "synthetic fixture prompts and responses",
+      "overlapping or incomplete UI states",
+      "stale model-management design"
+    ]
+  },
+  "assets": [
+    {
+      "order": 1,
+      "file": "01-chat-ready.png",
+      "copy_ids": ["CH-01"],
+      "gate_rows": ["S-A"],
+      "status": "capture_required"
+    },
+    {
+      "order": 2,
+      "file": "02-runtime-recovery.png",
+      "copy_ids": ["CH-04"],
+      "gate_rows": ["S-D", "S-G"],
+      "status": "capture_required"
+    },
+    {
+      "order": 3,
+      "file": "03-session-continuity.png",
+      "copy_ids": ["CH-06"],
+      "gate_rows": ["S-C"],
+      "status": "capture_required"
+    },
+    {
+      "order": 4,
+      "file": "04-prompt-shortcuts.png",
+      "copy_ids": ["CH-02"],
+      "gate_rows": ["S-B"],
+      "status": "capture_required"
+    },
+    {
+      "order": 5,
+      "file": "05-single-image-help.png",
+      "copy_ids": ["CH-03"],
+      "gate_rows": ["S-C"],
+      "status": "capture_required"
+    },
+    {
+      "order": 6,
+      "file": "06-model-library.png",
+      "copy_ids": ["CH-04"],
+      "gate_rows": ["S-D", "S-G"],
+      "status": "capture_required"
+    },
+    {
+      "order": 7,
+      "file": "07-privacy-diagnostics.png",
+      "copy_ids": ["CH-05", "CH-07"],
+      "gate_rows": ["S-E"],
+      "status": "capture_required"
+    },
+    {
+      "order": 8,
+      "file": "08-demo.mp4",
+      "copy_ids": ["CH-01", "CH-04"],
+      "gate_rows": ["S-A", "S-D"],
+      "status": "optional_capture_required"
+    },
+    {
+      "order": 9,
+      "file": "play-listing-icon.png",
+      "copy_ids": [],
+      "gate_rows": [],
+      "status": "approval_required"
+    },
+    {
+      "order": 10,
+      "file": "feature-graphic.png",
+      "copy_ids": ["CH-01", "CH-05"],
+      "gate_rows": ["S-A", "S-E"],
+      "status": "approval_required"
+    }
+  ],
+  "approval": {
+    "product": null,
+    "marketing": null,
+    "approved_at_utc": null
+  }
+}

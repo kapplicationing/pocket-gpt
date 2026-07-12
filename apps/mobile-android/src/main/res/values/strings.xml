@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PocketAgent</string>
-    <string name="ui_app_title">Pocket GPT</string>
+    <string name="ui_app_title">PocketAgent</string>
     <string name="ui_sessions_title">Sessions</string>
     <string name="ui_no_sessions_yet">No sessions yet</string>
     <string name="ui_model_status_label">Model: %1$s</string>
@@ -393,7 +393,7 @@
     <string name="a11y_performance_profile">Performance profile %1$s</string>
 
     <string name="ui_onboarding_welcome_headline">Welcome</string>
-    <string name="ui_onboarding_welcome_body">PocketGPT keeps chats, tools, and runtime state local to your device.</string>
+    <string name="ui_onboarding_welcome_body">PocketAgent keeps chats, tools, and runtime state local to your device.</string>
     <string name="ui_onboarding_privacy_headline">Privacy first</string>
     <string name="ui_onboarding_privacy_body">Offline-only runtime flows avoid sending prompts outside your device.</string>
     <string name="ui_onboarding_download_headline">Get started</string>
@@ -463,14 +463,14 @@
     <string name="ui_set_active">Load</string>
     <string name="ui_replace_file">Replace file</string>
     <string name="ui_hf_add_title">Advanced: Add GGUF from Hugging Face</string>
-    <string name="ui_hf_add_subtitle">Paste a public Hugging Face .gguf file URL. PocketGPT checks size, checksum, and runtime compatibility before download.</string>
+    <string name="ui_hf_add_subtitle">Paste a public Hugging Face .gguf file URL. PocketAgent checks size, checksum, and runtime compatibility before download.</string>
     <string name="ui_hf_url_placeholder">https://huggingface.co/owner/repo/resolve/main/model.gguf</string>
     <string name="ui_hf_find_helper">Open a model file ending in .gguf, copy its file URL, then paste it here.</string>
     <string name="ui_hf_find_on_hugging_face">Find GGUF models on Hugging Face</string>
     <string name="ui_hf_target_model_label">Runs as</string>
-    <string name="ui_hf_target_model_hint">Choose the PocketGPT model family this file is compatible with. This does not load the model.</string>
+    <string name="ui_hf_target_model_hint">Choose the PocketAgent model family this file is compatible with. This does not load the model.</string>
     <string name="ui_hf_disabled_missing_url">Paste a Hugging Face file URL first</string>
-    <string name="ui_hf_disabled_missing_target">Choose a PocketGPT model family first</string>
+    <string name="ui_hf_disabled_missing_target">Choose a PocketAgent model family first</string>
     <string name="ui_hf_check_url">Check file</string>
     <string name="ui_hf_checking">Checking…</string>
     <string name="ui_hf_search_title">Search Hugging Face for GGUF files</string>
@@ -507,7 +507,7 @@
     <string name="ui_hf_open_license">Open license</string>
     <string name="ui_hf_candidate_storage_after">Storage after download: %1$s free</string>
     <string name="ui_hf_candidate_storage_warning">This download needs %1$s, but only %2$s is free.</string>
-    <string name="ui_hf_candidate_compatibility">Text-only GGUF compatible with this PocketGPT runtime target</string>
+    <string name="ui_hf_candidate_compatibility">Text-only GGUF compatible with this PocketAgent runtime target</string>
     <string name="ui_hf_candidate_queue_disabled">Queueing download</string>
     <string name="ui_hf_queue_download">Queue download</string>
     <string name="ui_hf_recent_title">Recent checked files</string>

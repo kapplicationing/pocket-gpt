@@ -384,7 +384,7 @@ class HuggingFaceModelAcquisitionTest {
         }.also { error ->
             assertEquals(HuggingFaceAcquisitionBlockReason.COMPANION_ARTIFACT_REQUIRED, error.reason)
             assertEquals(
-                "This model needs extra companion files. PocketGPT only supports single-file text GGUF downloads here.",
+                "This model needs extra companion files. PocketAgent only supports single-file text GGUF downloads here.",
                 error.userMessage,
             )
         }

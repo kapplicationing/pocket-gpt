@@ -124,7 +124,6 @@ internal class OffscreenRuntimeClient(
                 toolOutputs = emptyList(),
             )
         }
-        runtimeGateway.touchKeepAlive()
         val sessionId = when (val creation = runtimeGateway.createRuntimeSession()) {
             is RuntimeSessionCreationResult.Created -> creation.sessionId
             is RuntimeSessionCreationResult.Unavailable -> throw RuntimeSessionUnavailableException(creation)
@@ -195,7 +194,11 @@ internal class OffscreenRuntimeClient(
         }
         val toolCall = toolCalls.single()
         val validation = when (
-            val result = VoiceActionCatalog.validateLegacy(toolCall.name, toolCall.argumentsJson)
+            val result = VoiceActionCatalog.validateLegacy(
+                toolName = toolCall.name,
+                jsonArguments = toolCall.argumentsJson,
+                now = localDateTimeNow(),
+            )
         ) {
             is VoiceActionValidation.Valid -> result
             is VoiceActionValidation.Invalid -> {

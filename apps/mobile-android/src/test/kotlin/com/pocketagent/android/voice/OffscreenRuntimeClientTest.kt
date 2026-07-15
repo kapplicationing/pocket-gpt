@@ -45,7 +45,7 @@ class OffscreenRuntimeClientTest {
         )
 
         val error = assertFailsWith<RuntimeSessionUnavailableException> {
-            client.runVoiceTurn(transcript = "Open Maps", systemPrompt = "voice-system")
+            client.runVoiceTurn(transcript = "Tell me something", systemPrompt = "voice-system")
         }
 
         assertEquals("RUNTIME_REPLACEMENT_IN_PROGRESS", error.errorCode)

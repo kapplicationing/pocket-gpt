@@ -350,6 +350,20 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Free disk before instrumentation emulator
+        run: |
+          set -euo pipefail
+          echo "Disk before instrumentation emulator cleanup:"
+          df -h
+
+          # The API 33 Pixel 6 AVD needs more free space than the hosted runner
+          # currently leaves after Android setup. Remove unrelated toolchains so
+          # emulator startup cannot fail while creating its userdata partition.
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+
+          echo "Disk after instrumentation emulator cleanup:"
+          df -h
+
       - name: Run instrumentation smoke suite on emulator (attempt 1)
         id: instrumented_attempt_1
         continue-on-error: true

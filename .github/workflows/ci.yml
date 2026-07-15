@@ -69,6 +69,7 @@ jobs:
               - "packages/**"
               - "tools/devctl/**"
               - "config/devctl/**"
+              - ".github/workflows/ci.yml"
             lifecycle_high_risk_paths:
               - "apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/**"
               - "apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/**"

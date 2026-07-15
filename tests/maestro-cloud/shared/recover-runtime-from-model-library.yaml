@@ -30,7 +30,8 @@ appId: com.pocketagent.android
     when:
       visible: "Unloaded"
     commands:
-      - tapOn: "Unloaded"
+      - tapOn:
+          id: "open_model_library"
       - extendedWaitUntil:
           visible: "Model library"
           timeout: 20000

@@ -193,20 +193,7 @@ class MainActivity : ComponentActivity() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         lifecycleScope.launch(Dispatchers.IO) {
-            val evicted = when {
-                level >= TRIM_MEMORY_COMPLETE_LEVEL -> runtimeGateway.evictResidentModel("trim_complete")
-                level >= TRIM_MEMORY_BACKGROUND_LEVEL -> runtimeGateway.evictResidentModel("trim_background")
-                level >= TRIM_MEMORY_RUNNING_CRITICAL_LEVEL -> runtimeGateway.evictResidentModel("trim_critical")
-                else -> {
-                    when {
-                        level >= TRIM_MEMORY_RUNNING_LOW_LEVEL -> runtimeGateway.shortenKeepAlive(15_000L)
-                        level >= TRIM_MEMORY_RUNNING_MODERATE_LEVEL -> runtimeGateway.shortenKeepAlive(60_000L)
-                        level >= TRIM_MEMORY_UI_HIDDEN_LEVEL -> runtimeGateway.shortenKeepAlive(120_000L)
-                    }
-                    false
-                }
-            }
-            if (evicted) {
+            if (runtimeGateway.onTrimMemory(level)) {
                 recordAvailableMemoryBudget()
             }
         }
@@ -353,12 +340,6 @@ class MainActivity : ComponentActivity() {
         private const val DOWNLOAD_TASK_DATABASE_NAME = "pocketagent_model_downloads.db"
         private const val DOWNLOAD_TASK_LEGACY_PREFS_NAME = "pocketagent_model_downloads"
         private const val DEBUG_AUTOMATION_LOG_TAG = "PocketGptDebugAutomation"
-        private const val TRIM_MEMORY_RUNNING_MODERATE_LEVEL = 5
-        private const val TRIM_MEMORY_RUNNING_LOW_LEVEL = 10
-        private const val TRIM_MEMORY_RUNNING_CRITICAL_LEVEL = 15
-        private const val TRIM_MEMORY_UI_HIDDEN_LEVEL = 20
-        private const val TRIM_MEMORY_BACKGROUND_LEVEL = 40
-        private const val TRIM_MEMORY_COMPLETE_LEVEL = 80
     }
 }
 

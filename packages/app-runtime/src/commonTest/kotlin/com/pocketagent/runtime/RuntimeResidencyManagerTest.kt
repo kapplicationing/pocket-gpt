@@ -42,6 +42,25 @@ class RuntimeResidencyManagerTest {
     }
 
     @Test
+    fun `critical trim memory queues unload while generation is active`() {
+        val inferenceModule = RecordingInferenceModule()
+        val manager = RuntimeResidencyManager(inferenceModule, nowMs = advancingClock())
+
+        manager.ensureLoaded(modelId = "model-a", slotId = "slot-1", keepAliveMs = 120_000L)
+        manager.onGenerationStarted()
+
+        assertTrue(manager.onTrimMemory(level = 15))
+        assertEquals(0, inferenceModule.unloadCalls)
+        assertEquals(1, manager.queueDepth())
+        assertEquals("slot-1", manager.listResident().single().slotId)
+
+        manager.onGenerationFinished(slotId = "slot-1", keepAliveMs = 120_000L)
+
+        assertEquals(1, inferenceModule.unloadCalls)
+        assertTrue(manager.listResident().isEmpty())
+    }
+
+    @Test
     fun `moderate trim memory shortens keep alive without unloading`() {
         val inferenceModule = RecordingInferenceModule()
         val manager = RuntimeResidencyManager(inferenceModule, nowMs = advancingClock())

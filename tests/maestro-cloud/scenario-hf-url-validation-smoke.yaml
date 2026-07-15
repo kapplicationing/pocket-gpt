@@ -18,6 +18,7 @@ tags:
     visible:
       id: "debug_model_library_ready"
     timeout: 30000
+- runFlow: shared/open-model-library-advanced-sources.yaml
 - extendedWaitUntil:
     visible:
       id: "debug_model_library_status_blocked_invalid_url"

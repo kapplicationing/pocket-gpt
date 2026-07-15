@@ -7,9 +7,8 @@ tags:
 - launchApp:
     clearState: true
 - runFlow: shared/bootstrap-clean-start.yaml
-- runFlow: shared/complete-first-run-onboarding.yaml
+- runFlow: shared/complete-first-run-model-setup.yaml
 - runFlow: shared/assert-post-onboarding-chat-surface.yaml
-- runFlow: shared/bootstrap-launch-default-model.yaml
 - runFlow: shared/ensure-runtime-loaded.yaml
 - assertNotVisible: "UI-STARTUP-001"
 - runFlow: shared/clear-composer-input.yaml

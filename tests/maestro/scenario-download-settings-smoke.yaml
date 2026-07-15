@@ -22,9 +22,24 @@ tags:
     id: "composer_input"
 - runFlow: shared/open-model-library.yaml
 - assertVisible: "Model library"
-- assertVisible: "Search models"
-- assertVisible: "Downloaded models"
+- assertVisible:
+    id: "model_library_tab_my_models"
 - assertVisible: "Refresh"
+- scrollUntilVisible:
+    element:
+      text: "Ready on this device"
+    direction: DOWN
+    timeout: 20000
+- assertVisible: "Ready on this device"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_explore"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "model_library_tab_explore"
+- assertVisible: "Search models"
+- assertVisible: "Available models"
 - scrollUntilVisible:
     element:
       text: "Close"

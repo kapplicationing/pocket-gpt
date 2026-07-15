@@ -5,6 +5,7 @@ tags:
   - hf-candidate
 ---
 - runFlow: shared/open-model-library-debug.yaml
+- runFlow: shared/open-model-library-advanced-sources.yaml
 
 - scrollUntilVisible:
     element:

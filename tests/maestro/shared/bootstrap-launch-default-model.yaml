@@ -1,17 +1,13 @@
 appId: com.pocketagent.android
 ---
 - runFlow: open-model-library.yaml
+- tapOn:
+    id: "model_library_tab_explore"
 - tapOn: "Search models"
 - eraseText
 - inputText: "qwen3-0.6b-q4_k_m"
 - hideKeyboard
 - tapOn: "Model library"
-- scrollUntilVisible:
-    centerElement: true
-    element:
-      id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"
-    direction: DOWN
-    timeout: 60000
 - runFlow:
     when:
       visible:
@@ -35,6 +31,13 @@ appId: com.pocketagent.android
       visible: "Large download on metered network"
     commands:
       - tapOn: "Continue download"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_my_models"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "model_library_tab_my_models"
 - runFlow:
     when:
       visible:
@@ -45,14 +48,6 @@ appId: com.pocketagent.android
             visible: "Refresh"
           commands:
             - tapOn: "Refresh"
-      - runFlow:
-          when:
-            visible:
-              id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
-              enabled: true
-          commands:
-            - tapOn:
-                id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
       - runFlow:
           when:
             visible:
@@ -69,24 +64,11 @@ appId: com.pocketagent.android
         id: "chat_gate_inline_card"
     commands:
       - runFlow: open-model-library.yaml
-      - tapOn: "Search models"
-      - eraseText
-      - inputText: "qwen3-0.6b-q4_k_m"
-      - hideKeyboard
-      - tapOn: "Model library"
       - scrollUntilVisible:
           element:
             id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
           direction: DOWN
           timeout: 60000
-      - runFlow:
-          when:
-            visible:
-              id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
-              enabled: true
-          commands:
-            - tapOn:
-                id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"
       - runFlow:
           when:
             visible:

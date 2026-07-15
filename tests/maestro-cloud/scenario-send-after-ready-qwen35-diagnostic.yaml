@@ -6,6 +6,8 @@ tags:
 ---
 - runFlow: shared/bootstrap-cloud-startup.yaml
 - runFlow: shared/open-model-library.yaml
+- tapOn:
+    id: "model_library_tab_explore"
 - tapOn: "Search models"
 - eraseText
 - inputText: "qwen3.5-0.8b-q4"
@@ -47,28 +49,27 @@ tags:
       visible: "Large download on metered network"
     commands:
       - tapOn: "Continue download"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_my_models"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "model_library_tab_my_models"
 - runFlow:
     when:
       visible: "Model library"
     commands:
       - scrollUntilVisible:
           element:
-            text: "Downloaded models"
-          direction: UP
+            text: "Ready on this device"
+          direction: DOWN
           timeout: 20000
 - runFlow:
     when:
       visible: "Refresh"
     commands:
       - tapOn: "Refresh"
-- runFlow:
-    when:
-      visible:
-        id: 'model_library_set_active_qwen3\.5-0\.8b-q4_q4_0'
-        enabled: true
-    commands:
-      - tapOn:
-          id: 'model_library_set_active_qwen3\.5-0\.8b-q4_q4_0'
 - runFlow:
     when:
       visible:

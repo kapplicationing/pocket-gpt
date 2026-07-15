@@ -11,7 +11,7 @@ Purpose:
 
 Current flow set:
 
-1. `scenario-model-management-split-smoke.yaml` (`cloud-smoke`, `model-management`): launch-default ready-shell contract for opening the unified model library and asserting library-only controls after deterministic startup/bootstrap has already cleared the chat gate.
+1. `scenario-model-management-split-smoke.yaml` (`cloud-smoke`, `model-management`): deterministic debug-entry contract for the unified model library's My models/Explore split. It intentionally does not download or load a runtime model; runtime readiness remains owned by the dedicated runtime/send flows.
 2. `scenario-session-drawer-smoke.yaml` (`cloud-smoke`, `sessions`): clean-install session-shell contract using the `session_drawer_button` resource-id selector.
 3. `scenario-runtime-ready-smoke.yaml` (`cloud-smoke`, `runtime-readiness`): clean-install readiness contract that ends once the runtime is ready and the inline chat gate has cleared.
 4. `scenario-send-after-ready-smoke.yaml` (`cloud-send`, `send`): hosted send contract kept outside the default smoke tag so cloud smoke stays a short startup/runtime proof path instead of replacing strict journey authority. This flow now uses `shared/bootstrap-cloud-startup.yaml` plus `shared/bootstrap-launch-default-model.yaml` so hosted send proof stays pinned to the launch-default `qwen3-0.6b-q4_k_m` path instead of heuristic `Load last used` recovery. Post-send success is assistant completion plus the shell returning to the idle `Send` label; it does not require an enabled send button after the composer has been cleared.
@@ -100,7 +100,7 @@ Cloud suite rules:
 
 1. Keep `cloud-smoke` flows under two minutes and focused on deterministic UI contracts.
 2. Keep benchmark/qualification journeys out of smoke by tagging them separately and running them only from dedicated scripts/jobs.
-3. Prefer stable selectors, but validate them on hosted devices before broad rollout. The current Pocket GPT Android build now exposes selected Compose `testTag` values as Android resource IDs, so hosted smoke flows should prefer `id:` selectors for stable controls that provide them.
+3. Prefer stable selectors, but validate them on hosted devices before broad rollout. The current PocketAgent Android build now exposes selected Compose `testTag` values as Android resource IDs, so hosted smoke flows should prefer `id:` selectors for stable controls that provide them.
 4. Do not duplicate broad local-lane coverage here unless Cloud is adding distinct value, such as hosted-device variance or a clean-install contract.
 5. Keep live Hugging Face downloads out of `cloud-smoke`; hosted smoke should prove the deterministic acquisition UI and blocked states, while large real downloads stay in explicit `live-hf` device runs.
-6. HF cloud flows must use `tests/maestro-cloud/shared/open-model-library-debug.yaml`, not generic onboarding/bootstrap helpers. A missing HF control after this point should be treated as a model-sheet or selector issue; before this change, the same symptom was usually launch/bootstrap navigation flake.
+6. HF cloud flows must use `tests/maestro-cloud/shared/open-model-library-debug.yaml`, then `shared/open-model-library-advanced-sources.yaml`, not generic onboarding/bootstrap helpers. A missing HF control after the explicit Explore → Advanced sources step should be treated as a model-sheet or selector issue; before this change, the same symptom was usually launch/bootstrap navigation flake.

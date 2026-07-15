@@ -119,18 +119,20 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     f"{helper_path.relative_to(REPO_ROOT)} must keep a runtime recovery path.",
                 )
                 self.assertIn('inputText: "qwen3-0.6b-q4_k_m"', helper_chain_text)
-                self.assertIn('id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertIn('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
-                self.assertIn(
-                    'scrollUntilVisible:\n    centerElement: true\n    element:\n      id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"',
-                    helper_chain_text,
+                self.assertIn('id: "model_library_tab_explore"', helper_chain_text)
+                self.assertIn('id: "model_library_tab_my_models"', helper_chain_text)
+                self.assertLess(
+                    helper_chain_text.index('id: "model_library_tab_explore"'),
+                    helper_chain_text.index('tapOn: "Search models"'),
+                    "catalog search must open Explore first.",
                 )
                 self.assertLess(
-                    helper_chain_text.index('id: "model_library_model_qwen3-0.6b-q4_k_m_q4_k_m"'),
-                    helper_chain_text.index('id: "model_library_download_qwen3-0.6b-q4_k_m_q4_k_m"'),
-                    "launch-default helper must scroll to the stable model row before evaluating state-specific actions.",
+                    helper_chain_text.index('id: "model_library_tab_my_models"'),
+                    helper_chain_text.index('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"'),
+                    "launch-default helper must return to My models before using a downloaded model.",
                 )
-                self.assertIn('id: "model_library_set_active_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
+                self.assertNotIn('model_library_set_active_', helper_chain_text)
                 self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', helper_chain_text)
                 self.assertRegex(
                     recovery_text,
@@ -224,12 +226,19 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     "ensure-runtime-loaded must not start with hideKeyboard because Maestro can resolve that to a back press.",
                 )
 
-    def test_cloud_model_management_smoke_uses_unified_library_contract(self) -> None:
+    def test_cloud_model_management_smoke_uses_management_first_library_contract(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro-cloud/scenario-model-management-split-smoke.yaml"
         text = flow_path.read_text(encoding="utf-8")
+        self.assertIn("runFlow: shared/open-model-library-debug.yaml", text)
+        self.assertNotIn("bootstrap-launch-default-model.yaml", text)
         self.assertIn('assertVisible: "Model library"', text)
+        self.assertIn('assertNotVisible: "Use now"', text)
+        self.assertNotIn('assertNotVisible: "Load now"', text)
+        self.assertIn('id: "model_library_tab_my_models"', text)
+        self.assertIn('assertVisible: "Ready on this device"', text)
+        self.assertIn('id: "model_library_tab_explore"', text)
         self.assertIn('assertVisible: "Search models"', text)
-        self.assertIn('assertVisible: "Downloaded models"', text)
+        self.assertIn('assertVisible: "Available models"', text)
         self.assertIn('assertVisible: "Refresh"', text)
         self.assertIn('text: "Close"', text)
         self.assertIn('assertVisible: "Close"', text)
@@ -237,9 +246,37 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertNotIn('id: "refresh_button"', text)
         self.assertLess(
             text.index('assertVisible: "Refresh"'),
-            text.index('text: "Available models"'),
-            "Refresh lives at the top of the model sheet and must be asserted before scrolling to lower sections.",
+            text.index('id: "model_library_tab_explore"'),
+            "The default My models state must be established before discovery is opened.",
         )
+
+    def test_management_first_flow_is_canonical_and_proves_layered_back_navigation(self) -> None:
+        lane_text = (REPO_ROOT / "config/devctl/lanes.yaml").read_text(encoding="utf-8")
+        flow_path = REPO_ROOT / "tests/maestro/scenario-model-library-management-first.yaml"
+        flow_text = flow_path.read_text(encoding="utf-8")
+
+        self.assertIn("tests/maestro/scenario-model-library-management-first.yaml", lane_text)
+        self.assertEqual(3, flow_text.count("- back"))
+        back_segments = flow_text.split("- back")
+        self.assertEqual(4, len(back_segments))
+        self.assertGreaterEqual(flow_text.count('assertVisible: "Model library"'), 2)
+        self.assertIn('assertVisible: "Add from Hugging Face"', back_segments[1])
+        self.assertIn('assertVisible: "Search models"', back_segments[1])
+        self.assertIn('assertVisible: "Active model"', back_segments[2])
+        self.assertIn("retryTapIfNoChange: true", flow_text)
+        self.assertIn('visible: "Hide advanced sources"', flow_text)
+
+    def test_hf_live_download_returns_to_my_models_before_queue_controls(self) -> None:
+        flow_path = REPO_ROOT / "tests/maestro/scenario-hf-live-download-smoke.yaml"
+        text = flow_path.read_text(encoding="utf-8")
+
+        self.assertLess(
+            text.index('id: "model_library_tab_my_models"'),
+            text.index('text: "Download queue"'),
+        )
+        self.assertNotIn('visible: "Loaded"', text)
+        self.assertIn('id: "composer_input"', text)
+        self.assertIn('id: "chat_gate_inline_card"', text)
 
     def test_cloud_send_after_ready_waits_for_enabled_send_button(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro-cloud/scenario-send-after-ready-smoke.yaml"
@@ -263,15 +300,18 @@ class MaestroFlowContractsTest(unittest.TestCase):
         self.assertIn('id: "create_session_button"', text)
         self.assertIn('assertVisible: "New chat"', text)
 
-    def test_download_settings_smoke_uses_unified_model_library_path(self) -> None:
+    def test_download_settings_smoke_uses_management_first_model_library_path(self) -> None:
         flow_path = REPO_ROOT / "tests/maestro/scenario-download-settings-smoke.yaml"
         text = flow_path.read_text(encoding="utf-8")
         self.assertIn("- runFlow: shared/bootstrap-to-ready.yaml", text)
         self.assertIn('assertVisible:\n    id: "composer_input"', text)
         self.assertIn('- runFlow: shared/open-model-library.yaml', text)
         self.assertIn('assertVisible: "Model library"', text)
+        self.assertIn('id: "model_library_tab_my_models"', text)
+        self.assertIn('assertVisible: "Ready on this device"', text)
+        self.assertIn('id: "model_library_tab_explore"', text)
         self.assertIn('assertVisible: "Search models"', text)
-        self.assertIn('assertVisible: "Downloaded models"', text)
+        self.assertIn('assertVisible: "Available models"', text)
         self.assertIn('assertVisible: "Refresh"', text)
         self.assertIn('text: "Close"', text)
         self.assertIn('assertVisible: "Close"', text)
@@ -429,6 +469,8 @@ class MaestroFlowContractsTest(unittest.TestCase):
                     if flow_path.parent.name == "shared"
                     else "runFlow: shared/complete-first-run-onboarding.yaml"
                 )
+                if flow_path.name == "scenario-first-run-download-chat.yaml":
+                    expected_onboarding_ref = "runFlow: shared/complete-first-run-model-setup.yaml"
                 self.assertIn(expected_onboarding_ref, text)
                 self.assertIn("assert-post-onboarding-chat-surface.yaml", text)
                 if flow_path.name == "scenario-first-run-download-chat.yaml":
@@ -436,19 +478,9 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 elif flow_path.parent.name != "shared":
                     self.assertIn("bootstrap-launch-default-model.yaml", text)
                 if flow_path.name == "scenario-first-run-download-chat.yaml":
-                    self.assertIn("runFlow: shared/bootstrap-launch-default-model.yaml", text)
+                    self.assertIn("runFlow: shared/complete-first-run-model-setup.yaml", text)
                     self.assertIn("runFlow: shared/ensure-runtime-loaded.yaml", text)
-                    self.assertLess(
-                        text.index("assert-post-onboarding-chat-surface.yaml"),
-                        text.index("runFlow: shared/bootstrap-launch-default-model.yaml"),
-                        "first-run lifecycle must settle the chat surface before running the default-model bootstrap.",
-                    )
-                    pre_bootstrap = text.split("runFlow: shared/bootstrap-launch-default-model.yaml", 1)[0]
-                    self.assertNotIn(
-                        'tapOn:\n    id: "send_button"',
-                        pre_bootstrap,
-                        "first-run lifecycle must not depend on the composer Setup tap before bootstrap; use the model-library path.",
-                    )
+                    self.assertNotIn("runFlow: shared/bootstrap-launch-default-model.yaml", text)
                     self.assertNotIn(
                         'notVisible:\n            id: "chat_gate_inline_card"',
                         text,
@@ -465,8 +497,11 @@ class MaestroFlowContractsTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', bootstrap_text)
-        self.assertGreaterEqual(bootstrap_text.count("enabled: true"), 5)
+        self.assertGreaterEqual(bootstrap_text.count("enabled: true"), 3)
         self.assertNotIn('text: "Downloaded models"', bootstrap_text)
+        self.assertNotIn("model_library_set_active_", bootstrap_text)
+        self.assertIn('id: "model_library_tab_explore"', bootstrap_text)
+        self.assertIn('id: "model_library_tab_my_models"', bootstrap_text)
         self.assertIn('id: "chat_gate_inline_card"', bootstrap_text)
         self.assertIn("runFlow: wait-runtime-transition-idle.yaml", bootstrap_text)
         self.assertIn('inputText: "qwen3-0.6b-q4_k_m"\n- hideKeyboard', bootstrap_text)
@@ -483,8 +518,11 @@ class MaestroFlowContractsTest(unittest.TestCase):
             REPO_ROOT / "tests/maestro-cloud/shared/bootstrap-launch-default-model.yaml"
         ).read_text(encoding="utf-8")
         self.assertIn('id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"', cloud_bootstrap_text)
-        self.assertGreaterEqual(cloud_bootstrap_text.count("enabled: true"), 5)
+        self.assertGreaterEqual(cloud_bootstrap_text.count("enabled: true"), 3)
         self.assertNotIn('text: "Downloaded models"', cloud_bootstrap_text)
+        self.assertNotIn("model_library_set_active_", cloud_bootstrap_text)
+        self.assertIn('id: "model_library_tab_explore"', cloud_bootstrap_text)
+        self.assertIn('id: "model_library_tab_my_models"', cloud_bootstrap_text)
         self.assertIn('id: "chat_gate_inline_card"', cloud_bootstrap_text)
         self.assertIn("runFlow: wait-runtime-transition-idle.yaml", cloud_bootstrap_text)
         self.assertNotIn('id: "refresh_button"', cloud_bootstrap_text)
@@ -640,11 +678,28 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 text = flow_path.read_text(encoding="utf-8")
                 self.assertIn("clearState: true", text)
                 self.assertIn("runFlow: shared/bootstrap-clean-start.yaml", text)
-                self.assertIn("runFlow: shared/complete-first-run-onboarding.yaml", text)
+                onboarding_helper = (
+                    "shared/complete-first-run-model-setup.yaml"
+                    if flow_path.name == "scenario-first-run-download-chat.yaml"
+                    else "shared/complete-first-run-onboarding.yaml"
+                )
+                self.assertIn(f"runFlow: {onboarding_helper}", text)
                 self.assertLess(
                     text.index("shared/bootstrap-clean-start.yaml"),
-                    text.index("shared/complete-first-run-onboarding.yaml"),
+                    text.index(onboarding_helper),
                 )
+
+    def test_first_run_model_setup_uses_transactional_onboarding_contract(self) -> None:
+        helper_path = REPO_ROOT / "tests/maestro/shared/complete-first-run-model-setup.yaml"
+        text = helper_path.read_text(encoding="utf-8")
+
+        self.assertIn('id: "onboarding_setup_download_start"', text)
+        self.assertIn('id: "onboarding_setup_start_chat"', text)
+        self.assertIn('visible: "Large download on metered network"', text)
+        self.assertIn('visible: "Allow PocketAgent to send you notifications?"', text)
+        self.assertIn("timeout: 600000", text)
+        self.assertNotIn('id: "unified_model_sheet"', text)
+        self.assertNotIn("bootstrap-launch-default-model.yaml", text)
 
 
 if __name__ == "__main__":

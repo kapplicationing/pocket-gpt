@@ -13,4 +13,4 @@ appId: com.pocketagent.android
     timeout: 30000
 - assertVisible: "Model library"
 - assertVisible:
-    id: "model_library_add_hugging_face"
+    id: "model_library_tab_my_models"

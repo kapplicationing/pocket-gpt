@@ -14,6 +14,7 @@ appId: com.pocketagent.android
       id: "debug_model_library_ready"
     timeout: 30000
 - assertVisible: "Model library"
+- runFlow: open-model-library-advanced-sources.yaml
 - assertVisible:
     id: "model_library_add_hugging_face"
 - extendedWaitUntil:

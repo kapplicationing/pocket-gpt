@@ -19,6 +19,7 @@ tags:
 - runFlow: shared/bootstrap-clean-start.yaml
 - runFlow: shared/complete-first-run-onboarding.yaml
 - runFlow: shared/open-model-library.yaml
+- runFlow: shared/open-model-library-advanced-sources.yaml
 
 - assertVisible: "Model library"
 - assertVisible:
@@ -48,54 +49,60 @@ tags:
       - tapOn: "Continue download"
 - scrollUntilVisible:
     element:
+      id: "model_library_tab_my_models"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "model_library_tab_my_models"
+- scrollUntilVisible:
+    element:
       text: "Download queue"
     direction: DOWN
     timeout: 60000
 - scrollUntilVisible:
     element:
-      id: "model_library_download_queue_pause"
+      text: "Pause"
     direction: DOWN
     timeout: 120000
-- tapOn:
-    id: "model_library_download_queue_pause"
+- tapOn: "Pause"
 - scrollUntilVisible:
     element:
-      id: "model_library_download_queue_resume"
+      text: "Resume"
     direction: DOWN
     timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_resume"
+- tapOn: "Resume"
 - scrollUntilVisible:
     element:
-      id: "model_library_download_queue_pause"
+      text: "Pause"
     direction: DOWN
     timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_cancel"
+- tapOn: "Cancel"
 - scrollUntilVisible:
     element:
-      id: "model_library_download_queue_retry"
+      text: "Retry"
     direction: DOWN
     timeout: 60000
-- tapOn:
-    id: "model_library_download_queue_retry"
+- tapOn: "Retry"
 - scrollUntilVisible:
     element:
-      id: "model_library_download_queue_pause"
+      text: "Pause"
     direction: DOWN
     timeout: 120000
 - extendedWaitUntil:
     notVisible:
-      id: "model_library_download_queue_pause"
+      text: "Pause"
     timeout: 900000
 - scrollUntilVisible:
     element:
-      text: "unsloth/Qwen3-0.6B-GGUF / Qwen3-0.6B-Q4_K_M.gguf"
+      id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
     direction: DOWN
     timeout: 60000
-- assertVisible: "unsloth/Qwen3-0.6B-GGUF / Qwen3-0.6B-Q4_K_M.gguf"
-- tapOn: "Load"
+- tapOn:
+    id: "model_library_load_qwen3-0.6b-q4_k_m_q4_k_m"
 - extendedWaitUntil:
-    visible: "Loaded"
+    visible:
+      id: "composer_input"
     timeout: 180000
+- assertNotVisible:
+    id: "chat_gate_inline_card"
 - takeScreenshot: "hf-live-download-loaded"

@@ -1,0 +1,54 @@
+appId: com.pocketagent.android
+---
+- runFlow:
+    when:
+      visible:
+        id: "provisioning_bootstrap_loading"
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "provisioning_bootstrap_loading"
+          timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "onboarding_next"
+    timeout: 60000
+- tapOn:
+    id: "onboarding_next"
+- tapOn:
+    id: "onboarding_next"
+- extendedWaitUntil:
+    visible:
+      id: "onboarding_setup_download_start"
+    timeout: 30000
+- tapOn:
+    id: "onboarding_setup_download_start"
+- runFlow:
+    when:
+      visible: "Large download on metered network"
+    commands:
+      - tapOn: "Continue download"
+- runFlow:
+    when:
+      visible:
+        id: "permission_allow_button"
+    commands:
+      - tapOn:
+          id: "permission_allow_button"
+- runFlow:
+    when:
+      visible: "Allow PocketAgent to send you notifications?"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "onboarding_setup_start_chat"
+    timeout: 600000
+- tapOn:
+    id: "onboarding_setup_start_chat"
+- assertNotVisible:
+    id: "onboarding_setup_card"
+- assertNotVisible:
+    id: "onboarding_setup_download_start"
+- assertNotVisible:
+    id: "onboarding_setup_start_chat"

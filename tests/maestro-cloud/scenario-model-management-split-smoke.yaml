@@ -3,22 +3,26 @@ tags:
   - cloud-smoke
   - model-management
 ---
-- runFlow: shared/bootstrap-cloud-startup.yaml
-- runFlow: shared/bootstrap-launch-default-model.yaml
-- assertVisible:
-    id: "open_model_library"
-- takeScreenshot: "cloud-model-management-shell-ready"
-- runFlow: shared/open-model-library.yaml
+- runFlow: shared/open-model-library-debug.yaml
 - takeScreenshot: "cloud-model-management-library-opened"
 - assertVisible: "Model library"
-- assertVisible: "Search models"
-- assertVisible: "Downloaded models"
+- assertVisible:
+    id: "model_library_tab_my_models"
 - assertVisible: "Refresh"
 - scrollUntilVisible:
     element:
-      text: "Available models"
+      text: "Ready on this device"
     direction: DOWN
     timeout: 20000
+- assertVisible: "Ready on this device"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_explore"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "model_library_tab_explore"
+- assertVisible: "Search models"
 - assertVisible: "Available models"
 - scrollUntilVisible:
     element:
@@ -26,6 +30,6 @@ tags:
     direction: DOWN
     timeout: 20000
 - assertVisible: "Close"
-- assertNotVisible: "Load now"
+- assertNotVisible: "Use now"
 - assertNotVisible: "Offload"
 - takeScreenshot: "cloud-model-management-unified-library"

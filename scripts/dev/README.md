@@ -86,6 +86,129 @@ Examples:
 
 For runtime tuning analysis after repeated device runs, use `docs/testing/runtime-tuning-debugging.md`. It explains how to read `RUNTIME_TUNING|...` diagnostics lines, where the generated `runtime-log-signals.{json,md}` artifacts land, and how to correlate them with benchmark artifacts under `scripts/benchmarks/runs/...` or `devctl` lane artifacts under `tmp/devctl-artifacts/...`.
 
+### Production hands-free setup
+
+Users do not copy voice files or enable a debug override. In Advanced, turning
+on **Hands-free Offas** starts one guided setup. Android asks for notification
+and microphone access and opens the assistant picker; PocketAgent requires its
+own `PocketAgentVoiceInteractionService` to be the selected assistant. If the
+voice files are missing, the same flow downloads about 60 MB of pinned upstream
+ASR and KWS artifacts, verifies their hashes and required contents, publishes
+them atomically, and enables listening.
+
+While listening, Android shows its microphone privacy indicator. PocketAgent
+also keeps an ongoing private notification with **Talk now** and **Stop
+listening** controls. Device qualification contributes to support guidance and
+rollout confidence; it is not an availability gate in production builds.
+
+### Developer voice model provisioning
+
+For debug qualification and fixture work only, install an integrity-verified ASR
+bundle and the dedicated single-phrase Offas wake model into an already-installed
+debuggable build:
+
+```bash
+bash scripts/dev/provision-voice-models.sh \
+  --device <serial> \
+  --asr-dir /path/to/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17 \
+  --kws-dir /path/to/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01
+```
+
+The command replaces complete model directories atomically, verifies every
+device file, and replaces the upstream example keyword list with the one
+supported phrase: `Offas` (pronounced "off us"). This helper is not the user
+setup path.
+
+### Release-semantic physical voice proof
+
+The `voiceProof` build type is non-debuggable, profileable, debug-signed, and
+uses the isolated `com.pocketagent.android.voiceproof` application id. It proves
+the production code path without replacing or clearing the normal package.
+
+Build and select its real Android assistant service:
+
+```bash
+DEVICE=<serial>
+PACKAGE=com.pocketagent.android.voiceproof
+APK=apps/mobile-android/build/outputs/apk/voiceProof/mobile-android-voiceProof.apk
+
+./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true \
+  :apps:mobile-android:assembleVoiceProof
+adb -s "${DEVICE}" install -r "${APK}"
+adb -s "${DEVICE}" shell pm grant "${PACKAGE}" android.permission.POST_NOTIFICATIONS
+adb -s "${DEVICE}" shell pm grant "${PACKAGE}" android.permission.RECORD_AUDIO
+adb -s "${DEVICE}" shell cmd role add-role-holder \
+  --user 0 android.app.role.ASSISTANT "${PACKAGE}"
+adb -s "${DEVICE}" shell settings get secure assistant
+```
+
+Exercise one-tap verified model setup and capture its logs:
+
+```bash
+adb -s "${DEVICE}" logcat -c
+adb -s "${DEVICE}" shell am start -n \
+  "${PACKAGE}/com.pocketagent.android.voice.VoiceProofSetupActivity"
+adb -s "${DEVICE}" logcat -d | rg 'VOICE_PROOF_SETUP|VOICE_MODEL_SETUP'
+```
+
+Do not continue until the log contains
+`VOICE_MODEL_SETUP|phase=ready|integrity=verified`, the selected assistant value
+names `PocketAgentVoiceInteractionService`, and the device visibly shows both
+the ongoing listening notification and Android microphone indicator.
+
+Then run the same-device acoustic proof:
+
+```bash
+adb -s "${DEVICE}" shell am start -n \
+  "${PACKAGE}/com.pocketagent.android.voice.VoiceProofAcousticWakeActivity"
+adb -s "${DEVICE}" logcat -d | \
+  rg 'VOICE_PROOF_ACOUSTIC|KWS_WAKE_DETECTED|PocketAgentVoice'
+adb -s "${DEVICE}" shell dumpsys activity services "${PACKAGE}" | \
+  rg 'OffasListenerService' || true
+```
+
+The proof activity plays "Off us. Stop listening." through the real phone
+speaker. A retained pass must show acoustic playback, KWS wake detection, and no
+remaining `OffasListenerService` after the spoken stop. The build and playback
+logs alone are not a pass.
+
+### Always-on wake soak
+
+First stop the listener and capture a matching unplugged 24-hour whole-phone
+baseline without rebuilding or changing battery statistics:
+
+```bash
+bash scripts/dev/voice-wake-soak.sh \
+  --device <serial> \
+  --mode baseline
+```
+
+Then turn on hands-free Offas in the production candidate, confirm PocketAgent's
+assistant service is selected and the listener is running, and capture the
+paired always-on run using the baseline artifact:
+
+```bash
+bash scripts/dev/voice-wake-soak.sh \
+  --device <serial> \
+  --baseline-metrics tmp/voice-wake-soak/<baseline-run>/metrics.env
+```
+
+Use a short run only to validate the harness:
+
+```bash
+bash scripts/dev/voice-wake-soak.sh \
+  --device <serial> \
+  --duration-minutes 3 \
+  --sample-seconds 30
+```
+
+Artifacts land under `tmp/voice-wake-soak/`. Pairing prevents whole-phone idle
+drain from being mislabeled as incremental wake-listener cost. A 24-hour PASS
+covers only this paired soak; it does not replace wake recall/noise, latency,
+routing, call, Doze, or multi-device support evidence. It changes support
+guidance and rollout confidence, not whether production users can turn the
+feature on. Do not use `--allow-charging` for battery claims.
+
 ## UI Smoothness Benchmarks
 
 Use benchmark-variant wrappers for frame-budget evidence. Do not use `debug` for

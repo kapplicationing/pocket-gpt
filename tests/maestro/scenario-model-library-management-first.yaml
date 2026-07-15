@@ -1,0 +1,72 @@
+appId: com.pocketagent.android
+tags:
+  - smoke
+  - model-management
+  - model-center
+---
+- runFlow: shared/open-model-library-debug.yaml
+- assertVisible:
+    id: "model_library_tab_my_models"
+- scrollUntilVisible:
+    element:
+      text: "Ready on this device"
+    direction: DOWN
+    timeout: 20000
+- assertVisible: "Ready on this device"
+- assertNotVisible:
+    id: "model_library_add_hugging_face"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_explore"
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: "model_library_tab_explore"
+- scrollUntilVisible:
+    element:
+      id: "model_library_advanced_sources_toggle"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "model_library_advanced_sources_toggle"
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 1000
+- extendedWaitUntil:
+    visible: "Hide advanced sources"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "model_library_add_hugging_face"
+    direction: DOWN
+    timeout: 20000
+- back
+- assertVisible: "Model library"
+- assertNotVisible:
+    id: "model_library_add_hugging_face"
+- scrollUntilVisible:
+    element:
+      id: "model_library_advanced_sources_toggle"
+    direction: UP
+    timeout: 20000
+- assertVisible: "Add from Hugging Face"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_explore"
+    direction: UP
+    timeout: 20000
+- assertVisible: "Search models"
+- back
+- assertVisible: "Model library"
+- scrollUntilVisible:
+    element:
+      id: "model_library_tab_my_models"
+    direction: UP
+    timeout: 20000
+- assertVisible:
+    id: "model_library_tab_my_models"
+- assertVisible: "Active model"
+- takeScreenshot: "model-library-management-first"
+- back
+- extendedWaitUntil:
+    notVisible: "Model library"
+    timeout: 10000

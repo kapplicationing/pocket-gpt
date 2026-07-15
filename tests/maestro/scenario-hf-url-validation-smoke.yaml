@@ -5,6 +5,7 @@ tags:
   - hf-validation
 ---
 - runFlow: shared/open-model-library-debug.yaml
+- runFlow: shared/open-model-library-advanced-sources.yaml
 
 - assertVisible: "Model library"
 - assertVisible:

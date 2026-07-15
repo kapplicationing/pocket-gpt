@@ -22,7 +22,7 @@ maestro-android doctor
 maestro-android devices --json
 maestro-android lane smoke --device <serial>
 maestro-android scoped --flow tmp/repro.yaml
-maestro-android device probe --device <serial>
+maestro-android device --device <serial> probe
 maestro-android cloud probe --flow <path>
 ```
 

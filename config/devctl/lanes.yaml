@@ -127,6 +127,7 @@ lanes:
       - tests/maestro/scenario-c.yaml
       - tests/maestro/scenario-activation-send-smoke.yaml
       - tests/maestro/scenario-typing-jank-smoke.yaml
+      - tests/maestro/scenario-model-library-management-first.yaml
       - tests/maestro/scenario-hf-url-validation-smoke.yaml
 
   journey:

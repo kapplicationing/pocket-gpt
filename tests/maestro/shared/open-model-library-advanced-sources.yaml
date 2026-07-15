@@ -1,0 +1,21 @@
+appId: com.pocketagent.android
+---
+- tapOn:
+    id: "model_library_tab_explore"
+- scrollUntilVisible:
+    element:
+      id: "model_library_advanced_sources_toggle"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "model_library_advanced_sources_toggle"
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 1000
+- extendedWaitUntil:
+    visible: "Hide advanced sources"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "model_library_add_hugging_face"
+    direction: DOWN
+    timeout: 20000

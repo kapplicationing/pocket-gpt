@@ -160,7 +160,7 @@ class MaestroFlowContractsTest(unittest.TestCase):
                 self.assertRegex(
                     recovery_text,
                     re.compile(
-                        r'visible: "Unloaded"\s*\n\s*commands:\s*\n\s*- tapOn: "Unloaded"\s*\n\s*- extendedWaitUntil:\s*\n\s*visible: "Model library"\s*\n\s*timeout: 20000\s*\n\s*- runFlow: bootstrap-launch-default-model\.yaml',
+                        r'visible: "Unloaded"\s*\n\s*commands:\s*\n\s*- tapOn:\s*\n\s*id: "open_model_library"\s*\n\s*- extendedWaitUntil:\s*\n\s*visible: "Model library"\s*\n\s*timeout: 20000\s*\n\s*- runFlow: bootstrap-launch-default-model\.yaml',
                     ),
                     "Unloaded recovery must finish the default-model bootstrap after opening Model Library.",
                 )

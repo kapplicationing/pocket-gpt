@@ -552,10 +552,18 @@ class MaestroFlowContractsTest(unittest.TestCase):
         output_assertion = '- assertVisible: "^LIFECYCLE_OK$"'
 
         self.assertIn('inputText: "Reply with exactly: LIFECYCLE_OK"', text)
+        self.assertIn('- hideKeyboard', text)
+        self.assertIn('id: "send_button"\n      enabled: true', text)
+        self.assertIn('id: "message_bubble_user"', text)
         self.assertIn(completion_assertion, text)
         self.assertIn(output_assertion, text)
         self.assertIn('- assertNotVisible: "UI-TOOL-SCHEMA-001"', text)
         self.assertNotIn('inputText: "download flow smoke"', text)
+        self.assertLess(
+            text.index('id: "message_bubble_user"'),
+            text.index(completion_assertion),
+            "The lifecycle flow must prove the send interaction before waiting for completion.",
+        )
         self.assertLess(
             text.index(completion_assertion),
             text.index(output_assertion),

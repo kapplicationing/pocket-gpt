@@ -13,8 +13,18 @@ tags:
 - assertNotVisible: "UI-STARTUP-001"
 - runFlow: shared/clear-composer-input.yaml
 - inputText: "Reply with exactly: LIFECYCLE_OK"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "send_button"
+      enabled: true
+    timeout: 30000
 - tapOn:
     id: "send_button"
+- extendedWaitUntil:
+    visible:
+      id: "message_bubble_user"
+    timeout: 30000
 - assertVisible: "Reply with exactly: LIFECYCLE_OK"
 - extendedWaitUntil:
     notVisible: "Cancel"

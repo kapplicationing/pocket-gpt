@@ -10,7 +10,7 @@ Source of truth:
 
 ## Features
 
-- **Offline-first** — all AI processing happens locally, no cloud dependencies
+- **Offline-first inference** — chat generation runs locally; model discovery and downloads may use the network
 - **Streaming responses** — real-time token-by-token display
 - **Model routing** — automatic model selection based on device state
 - **Performance profiles** — BALANCED / FAST / BATTERY modes
@@ -18,9 +18,13 @@ Source of truth:
 - **Prompt-first local tools** — validated local tool flows entered from prompt shortcuts
 - **Memory** — persistent context across sessions
 - **Single-image Q&A** — one attached image can stay in the same chat thread
-- **Voice activation (limited beta)** — controlled/closed-track voice surface, not a broad public launch claim
+- **Voice** — editable local English dictation, read-aloud through an installed Android voice reported as offline-capable, opt-in hands-free “Offas” activation, and confirmed alarms, timers, app launch, media volume, and flashlight actions
 
-Launch scope note: public launch claims stay bounded to the core chat surface, prompt-first local tools, and single-image attach/Q&A. Voice remains a limited beta until evidence, privacy wording, and device-tier language are ready for wider promotion.
+Voice is available to normal users in production builds from `Advanced` settings;
+it is not debug-only or device-allowlisted. The frozen Play Store headline claim
+set remains bounded to core chat, prompt-first local tools, and single-image
+Q&A until retained 24-hour and multi-OEM evidence supports broader hands-free
+reliability and battery promises.
 
 Current controlled-MVP claim surface:
 

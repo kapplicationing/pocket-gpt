@@ -34,6 +34,7 @@ Source files (5):
 - `message_bubble_user`
 - `open_model_library`
 - `provisioning_bootstrap_loading`
+- `read_aloud_button`
 - `session_drawer_button`
 - `session_row_active`
 - `session_search_input`
@@ -48,6 +49,8 @@ Source files (1):
 - `completion_settings_button`
 - `composer_input`
 - `send_button`
+- `voice_dictation_button`
+- `voice_dictation_status`
 
 ## ModelLibrary
 
@@ -88,11 +91,10 @@ Source files (27):
 - `debug_model_library_task_present`
 - `debug_model_library_task_status`
 - `model_library_add_hugging_face`
-- `model_library_download_queue`
-- `model_library_download_queue_cancel`
-- `model_library_download_queue_pause`
-- `model_library_download_queue_resume`
-- `model_library_download_queue_retry`
+- `model_library_advanced_sources`
+- `model_library_advanced_sources_toggle`
+- `model_library_browse_models`
+- `model_library_browse_models_card`
 - `model_library_download_qwen3-0.6b-q4_k_m_q4_k_m`
 - `model_library_hf_candidate_card`
 - `model_library_hf_check_disabled_reason`
@@ -129,6 +131,8 @@ Source files (27):
 - `model_library_hf_target_model`
 - `model_library_hf_url_input`
 - `model_library_load_qwen3-0.6b-q4_k_m_q4_k_m`
+- `model_library_tab_explore`
+- `model_library_tab_my_models`
 - `model_search_input`
 - `model_sheet_status_message`
 - `remove_button_${model.modelId}_${version.version}`
@@ -144,8 +148,10 @@ Source files (1):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/OnboardingScreen.kt`
 
 ### testTag
+- `onboarding_continue_in_background`
 - `onboarding_get_started`
-- `onboarding_next`
+- `onboarding_setup_card`
+- `onboarding_setup_choose_model`
 - `onboarding_skip`
 
 ## RecoveryBanners
@@ -167,7 +173,7 @@ Source files (2):
 
 ## RuntimeStatus
 
-Source files (41):
+Source files (42):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/ui/ChatStatusHeader.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/GpuProbeService.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/AppRuntimeHost.kt`
@@ -189,6 +195,7 @@ Source files (41):
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RemoteLlamaCppRuntimeBridge.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ProvisioningAggregateState.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/StoredModelSidecarMetadata.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ModelImportIdentityValidator.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/IpcSendMonitor.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/RemoteRuntimeTransport.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/runtime/ProvisioningRuntimeBindings.kt`
@@ -237,11 +244,24 @@ Source files (1):
 
 ## VoiceBeta
 
-Source files (4):
+Source files (13):
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/PocketAgentVoiceInteractionService.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/OffasVoiceStack.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/AssistActivity.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceProcessExitReconciler.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/OffscreenRuntimeClient.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoicePlaybackController.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/DeterministicVoiceActionParser.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/AndroidLocalToolRuntime.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceDictationController.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceModelInstaller.kt`
 - `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceActivation.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceModelSetupWorker.kt`
+- `apps/mobile-android/src/main/kotlin/com/pocketagent/android/voice/VoiceActionCatalog.kt`
+
+### Literal text
+- `Opening PocketAgent voice…`
+- `PocketAgent voice could not open. Try again from the app.`
 
 ## String Resources (launch surfaces)
 
@@ -256,6 +276,7 @@ Source files (4):
 - `a11y_retry` = "Retry"
 - `a11y_send_button` = "Send"
 - `a11y_send_state_cancelling` = "Cancelling"
+- `a11y_send_state_dictating` = "Finish dictation before sending."
 - `a11y_send_state_disabled` = "Disabled"
 - `a11y_send_state_enabled` = "Ready to send"
 - `a11y_send_state_runtime_not_ready` = "Model not ready"
@@ -280,7 +301,7 @@ Source files (4):
 - `ui_advanced_unlocked_body` = "You completed the first value flow. Advanced controls and tools are now available."
 - `ui_advanced_unlocked_title` = "Advanced controls unlocked"
 - `ui_available_models` = "Available models"
-- `ui_available_models_subtitle` = "Downloads stream progress inline and switch to loadable cards as soon as the model is installed."
+- `ui_available_models_subtitle` = "Downloads keep their progress here, then move to My models when they are ready to use."
 - `ui_chat_gate_blocked_model_missing` = "A verified model is not active yet. Finish the model library flow to continue chatting."
 - `ui_chat_gate_blocked_runtime_check` = "Runtime checks need attention before sending. Refresh checks and retry."
 - `ui_chat_gate_blocked_tap_send_to_setup` = "Tap Send to set up your first model."
@@ -294,6 +315,7 @@ Source files (4):
 - `ui_diag_runtime` = "Runtime"
 - `ui_diagnostics_export_hint` = "Diagnostics export includes runtime tuning recommendations and recent benchmark samples."
 - `ui_diagnostics_section_title` = "Diagnostics"
+- `ui_dictation_models_missing` = "Offline dictation needs the local voice pack. Open Advanced → Hands-free Offas to install it."
 - `ui_download_complete_different_model_loaded` = "%1$s is ready. Switch to it from the model list when needed."
 - `ui_downloaded_models` = "Downloaded models"
 - `ui_downloaded_models_subtitle` = "Load a downloaded model into memory, replace local files, or remove versions you no longer need."
@@ -317,7 +339,7 @@ Source files (4):
 - `ui_hf_candidate_model_card` = "Model card: %1$s"
 - `ui_hf_candidate_prompt_profile` = "Prompt profile: %1$s"
 - `ui_hf_open_model_card` = "Open model card"
-- `ui_hf_target_model_hint` = "Choose the PocketGPT model family this file is compatible with. This does not load the model."
+- `ui_hf_target_model_hint` = "Choose the PocketAgent model family this file is compatible with. This does not load the model."
 - `ui_hf_target_model_label` = "Runs as"
 - `ui_load_button_disabled_already_loaded` = "Already loaded"
 - `ui_local_tools_title` = "Local tools"
@@ -350,7 +372,7 @@ Source files (4):
 - `ui_model_download_pause` = "Pause"
 - `ui_model_download_paused` = "Download paused."
 - `ui_model_download_queue` = "Download queue"
-- `ui_model_download_queue_subtitle` = "Downloads from sources outside the catalog stay visible here until installed."
+- `ui_model_download_queue_subtitle` = "Keep active, paused, and failed downloads visible until they are installed or resolved."
 - `ui_model_download_queuing` = "Queuing\u2026"
 - `ui_model_download_resume` = "Resume"
 - `ui_model_download_resumed` = "Download resumed."
@@ -378,6 +400,7 @@ Source files (4):
 - `ui_model_import_cancelled` = "Model import cancelled."
 - `ui_model_import_failure` = "Model import failed: %1$s"
 - `ui_model_import_in_progress` = "Importing model file. This can take a while for large GGUF files."
+- `ui_model_import_in_progress_named` = "Importing %1$s. This can take a while for large GGUF files."
 - `ui_model_import_success` = "Imported and verified metadata for %1$s."
 - `ui_model_import_success_active` = "Imported %1$s (%2$s): verified and active."
 - `ui_model_import_success_inactive` = "Imported %1$s (%2$s): verified, activation pending."
@@ -387,8 +410,23 @@ Source files (4):
 - `ui_model_installed_version_row` = "%1$s • version %2$s"
 - `ui_model_installed_versions_hint` = "Each required model keeps one active version. To change it, set another installed version active."
 - `ui_model_installed_versions_section` = "Installed versions"
+- `ui_model_library_advanced_sources` = "Advanced sources"
+- `ui_model_library_advanced_sources_body` = "Add a compatible GGUF model from a Hugging Face file URL."
+- `ui_model_library_browse_action` = "Browse models"
+- `ui_model_library_browse_body` = "Browse the catalog for a model that fits your device, or use an advanced source."
+- `ui_model_library_browse_title` = "Add a model"
+- `ui_model_library_hide_advanced_sources` = "Hide advanced sources"
+- `ui_model_library_in_use` = "In use"
+- `ui_model_library_ready_models` = "Ready on this device"
+- `ui_model_library_ready_models_subtitle` = "Choose a downloaded model when you want to use it in chat."
+- `ui_model_library_ready_to_use` = "Ready to use"
+- `ui_model_library_show_advanced_sources` = "Add from Hugging Face"
+- `ui_model_library_starting` = "Starting"
 - `ui_model_library_subtitle` = "Import, download, activate, and remove verified model versions. Use runtime controls separately for load and offload actions."
+- `ui_model_library_tab_explore` = "Explore"
+- `ui_model_library_tab_my_models` = "My models"
 - `ui_model_library_title` = "Model library"
+- `ui_model_library_use_now` = "Use now"
 - `ui_model_not_provisioned` = "Not provisioned"
 - `ui_model_operation_already_in_progress` = "A model operation is already in progress"
 - `ui_model_path_origin_discovered_recovered` = "discovered recovery"
@@ -492,7 +530,7 @@ Source files (4):
 - `ui_models_title` = "Models"
 - `ui_more_models` = "More models…"
 - `ui_native_runtime_missing_hint` = "This build is missing the native runtime engine. Install a full app build, then reopen and refresh runtime checks."
-- `ui_no_downloaded_models_body` = "Import a local GGUF or download one from the catalog below."
+- `ui_no_downloaded_models_body` = "Browse models to download one, or import a local GGUF file."
 - `ui_no_downloaded_models_title` = "No downloaded models yet"
 - `ui_onboarding_download_body` = "Download the recommended model to start chatting. You can add more models later."
 - `ui_onboarding_download_headline` = "Get started"
@@ -504,7 +542,7 @@ Source files (4):
 - `ui_onboarding_privacy_body` = "Offline-only runtime flows avoid sending prompts outside your device."
 - `ui_onboarding_privacy_headline` = "Privacy first"
 - `ui_onboarding_skip` = "Skip"
-- `ui_onboarding_welcome_body` = "PocketGPT keeps chats, tools, and runtime state local to your device."
+- `ui_onboarding_welcome_body` = "PocketAgent keeps chats, tools, and runtime state local to your device."
 - `ui_onboarding_welcome_headline` = "Welcome"
 - `ui_open_advanced_controls` = "Open advanced controls"
 - `ui_open_model_library` = "Open model library"
@@ -524,6 +562,7 @@ Source files (4):
 - `ui_privacy_item_2` = "Offline-only policy blocks network activity in runtime flows."
 - `ui_privacy_item_3` = "Diagnostics export redacts sensitive keys before sharing."
 - `ui_privacy_title` = "Privacy and data controls"
+- `ui_read_aloud_not_ready` = "Read aloud is still getting ready. Try again in a moment."
 - `ui_ready` = "Ready"
 - `ui_refresh_runtime_checks` = "Refresh"
 - `ui_releasing_runtime_memory` = "Releasing runtime memory…"
@@ -560,23 +599,32 @@ Source files (4):
 - `ui_switch_model_body` = "Routing now prefers %1$s. Load %2$s into memory now?"
 - `ui_switch_model_title` = "Switch model now?"
 - `ui_tab_model` = "Model"
-- `ui_voice_activation_assistant_missing` = "Default assistant is not set. Assistant gesture capture-once stays unavailable."
-- `ui_voice_activation_assistant_ready` = "Default assistant is set. Assistant gesture can capture once."
-- `ui_voice_activation_assistant_unavailable` = "Default assistant role control is unavailable on this Android version."
+- `ui_voice_activation_assistant_missing` = "Select PocketAgent as Android’s assistant to keep hands-free listening available."
+- `ui_voice_activation_assistant_ready` = "PocketAgent is the active Android assistant."
+- `ui_voice_activation_assistant_required` = "Select PocketAgent in Android’s assistant picker to continue."
+- `ui_voice_activation_assistant_unavailable` = "Android’s assistant picker is unavailable on this phone."
 - `ui_voice_activation_battery_missing` = "Battery guidance is still recommended for reliable background listening."
 - `ui_voice_activation_battery_ready` = "Battery setup looks good for background listening."
 - `ui_voice_activation_battery_settings` = "Open battery settings"
-- `ui_voice_activation_beta_ready` = "Limited beta ready on this device."
-- `ui_voice_activation_beta_setup_required` = "Setup required before always-on listening can start."
-- `ui_voice_activation_microphone_missing` = "Microphone permission is required before voice beta can start."
-- `ui_voice_activation_microphone_ready` = "Microphone permission is ready."
-- `ui_voice_activation_microphone_required` = "Microphone permission is required for voice beta."
-- `ui_voice_activation_models_missing` = "Voice beta needs local files in the app storage folder named offas-voice-models before always-on listening can start."
-- `ui_voice_activation_models_ready` = "Local voice model files found."
-- `ui_voice_activation_models_root` = "Voice model root: %1$s"
+- `ui_voice_activation_beta_ready` = "Ready to listen."
+- `ui_voice_activation_beta_setup_required` = "Finish the one-time Android and voice-pack setup."
+- `ui_voice_activation_microphone_missing` = "Allow microphone access for hands-free Offas."
+- `ui_voice_activation_microphone_ready` = "Microphone access allowed."
+- `ui_voice_activation_microphone_required` = "Allow microphone access to use hands-free Offas."
+- `ui_voice_activation_models_missing` = "Voice pack not installed. Turning this on uses the internet once to download and verify about 60 MB."
+- `ui_voice_activation_models_ready` = "Local voice pack installed and verified."
+- `ui_voice_activation_notifications_missing` = "Allow notifications for visible listening status and Stop control."
+- `ui_voice_activation_notifications_ready` = "Listening notification and Stop control ready."
+- `ui_voice_activation_notifications_required` = "Allow notifications so hands-free listening always has a visible status and Stop control."
 - `ui_voice_activation_open_app_settings` = "Open app settings"
 - `ui_voice_activation_set_assistant` = "Set as default assistant"
+- `ui_voice_activation_setup_downloading` = "Downloading local voice files: %1$d%%"
+- `ui_voice_activation_setup_installing` = "Verifying and installing local voice files…"
+- `ui_voice_activation_setup_queued` = "Voice setup queued. Turn this switch off to cancel."
+- `ui_voice_activation_setup_started` = "Downloading and verifying local voice files…"
 - `ui_voice_activation_status_line` = "Listener state: %1$s"
-- `ui_voice_activation_subtitle` = "Limited beta. Say &quot;%1$s&quot; for hands-free commands after setup is complete."
-- `ui_voice_activation_title` = "Voice beta"
-- `ui_voice_activation_toggle` = "Enable always-on listening (beta)"
+- `ui_voice_activation_subtitle` = "Say &quot;%1$s&quot; (pronounced “off us”) to call PocketAgent. When this is on, the microphone stays active and speech is processed locally. PocketAgent shows an ongoing listening notification; supported Android versions also show a microphone indicator. Spoken requests are not added to chat history."
+- `ui_voice_activation_title` = "Hands-free Offas"
+- `ui_voice_activation_toggle` = "Turn on hands-free Offas"
+- `ui_voice_activation_wake_model_missing` = "Offas wake-word files are missing. Turn this on to download and verify the local voice pack."
+- `ui_voice_activation_wake_model_ready` = "Offas wake-word detection is ready."

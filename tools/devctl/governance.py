@@ -94,9 +94,11 @@ LAUNCH_READINESS_TICKETS: dict[str, str] = {
     "PROD-11": "docs/operations/tickets/prod-11-pilot-support-incident-playbook.md",
     "PROD-12": "docs/operations/tickets/prod-12-human-required-gate-split.md",
     "PROD-13": "docs/operations/tickets/prod-13-play-store-submission-readiness.md",
+    "PROD-14": "docs/operations/tickets/prod-14-generative-ai-safety-and-reporting.md",
     "SEC-02": "docs/operations/tickets/sec-02-privacy-claim-parity-audit.md",
     "MKT-08": "docs/operations/tickets/mkt-08-proof-asset-capture-and-listing-finalization.md",
     "MKT-10": "docs/operations/tickets/mkt-10-claim-freeze-v1.md",
+    "UX-13": "docs/operations/tickets/ux-13-stuck-send-timeout-recovery.md",
 }
 
 LAUNCH_READINESS_DOCS: dict[str, str] = {

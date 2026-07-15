@@ -1,39 +1,49 @@
-# Risk Register (Phase 0)
+# Controlled-MVP Risk Register
 
-| ID | Risk | Severity | Likelihood | Mitigation | Owner |
-|---|---|---|---|---|---|
-| R-001 | Mid-tier devices fail memory targets with 2B | High | Medium | Default 0.8B on constrained devices, enforce routing caps | AI Runtime |
-| R-002 | Thermal throttling degrades UX in sustained sessions | High | High | Session-aware token caps, thermal downgrade policy | Mobile Platform |
-| R-003 | Android acceleration path fragmented by OEM drivers | High | High | Keep robust baseline runtime fallback, device qualification list | Android |
-| R-004 | Android OEM/runtime variance blocks optimization timeline | Medium | Medium | Keep baseline runtime path stable and isolate optional acceleration tracks | Android |
-| R-005 | Privacy claims diverge from implementation | Critical | Medium | PolicyModule enforcement, privacy test checklist, docs audits | Security |
-| R-006 | Tool injection/execution abuse | Critical | Medium | strict JSON schema, allowlist tools, no shell execution | Platform |
-| R-007 | Model download/package strategy fails app-store constraints | High | Medium | on-demand model packs, preflight checks, progressive downloads | Product/Platform |
-| R-008 | Benchmark protocol inconsistency across testers | Medium | Medium | fixed scenario templates and standardized run environment | QA |
-| R-009 | MVP scope creep into non-MVP features | Medium | High | explicit non-goals and backlog gate review | Product |
-| R-010 | Legal/licensing assumptions change | High | Low | periodic license review and release checklist | Product/Legal |
+Last updated: 2026-07-11
 
-## Risk Review Cadence
+This register tracks residual product and release risk after the controlled-MVP
+gate reached `Promote`. It does not duplicate closed implementation tickets.
 
-1. Weekly review during Phase 0 and Phase 1.
-2. Track mitigation status and residual risk.
-3. Update go/no-go recommendation with unresolved high risks.
+## Active Risks
 
-## Stage-6 Review Update (2026-03-04)
+| ID | Risk | Severity | Likelihood | Current control | Residual action | Owner |
+|---|---|---|---|---|---|---|
+| R-001 | Mid-tier devices exceed memory or latency targets | High | Medium | Constrained-device defaults, routing caps, runtime profiles, memory telemetry | Set expansion thresholds and qualify the next device tiers | AI Runtime + QA |
+| R-002 | Sustained sessions throttle or feel stalled | High | Medium | Soak evidence, thermal downgrade policy, token caps, performance profiles | Track first-use and long-prefill latency in the controlled cohort | Mobile Platform + QA |
+| R-003 | GPU/acceleration behavior varies across OEM drivers | High | High | Capability probe, disabled unsupported toggle, robust CPU/native fallback | Keep GPU claims device-bounded and expand qualification deliberately | Android |
+| R-004 | Privacy or marketing claims exceed implemented controls | Critical | Low | `SEC-02` verified-only publish rule and claim freeze | Exclude partial `P-04` controls and audit every final asset/copy block | Product + Security + Marketing |
+| R-005 | Prompt-first tools accept unsafe or malformed requests | Critical | Low | Strict schema, allowlists, no shell execution, adversarial tests | Preserve schema and injection regression coverage | Platform |
+| R-006 | Model acquisition fails because of storage, provider, artifact, or store constraints | High | Medium | In-app download/import, preflight checks, checksum/compatibility validation, manifest fallback | Validate the final release bundle and monitor provider/storage failures | Product + Platform |
+| R-007 | One-time launch evidence drifts after promotion | High | Medium | Fixed evidence ledger, generated readiness report, completed `QA-13` weekly send-capture gate | Keep the hardware runner available and triage every fail-closed weekly packet | QA |
+| R-008 | Incomplete assets, approval, signing, hardware, or Play setup delays publication | High | High | Completed `PROD-11`, prepared metadata/build package, `MKT-08`, `MKT-10`, `PROD-13`, publication checklist | Obtain the real operator inputs, approve fresh assets, and install-validate the signed bundle | Product + Release Ops |
+| R-009 | Scope expands beyond verified controlled-MVP claims | High | Medium | Locked release scope and `PROD-10` claim map | Reject general voice, broad image analysis, and unverified privacy-control claims | Product |
+| R-010 | Model or dependency licensing assumptions change | High | Low | Release checklist and dependency/license review | Recheck selected release models and bundle before submission | Product + Legal |
+| R-011 | AI human-proxy usability evidence is overgeneralized beyond the controlled MVP | High | Medium | Explicit proxy disclosure and scope boundary | Require human-moderated evidence before broader non-proxy claims/expansion | Product + Research |
+| R-012 | Generative-AI output lacks Play-required in-app reporting and evidenced restricted-content prevention | Critical | High | `PROD-14` blocks upload and forbids a decorative/external-only workaround | Approve the intake/data contract, implement product controls, run adversarial and E2E proof, then update Privacy/Data Safety | Product + Security + Android |
 
-Evidence reviewed:
+## Recently Reduced Engineering Risks
 
-1. `docs/operations/evidence/index.md` (WP-04..WP-07 historical summaries)
-2. `docs/operations/execution-board.md`
+| Area | Current state | Evidence boundary |
+|---|---|---|
+| Model import interruption/corruption | Reduced by cancellable copy, unique temp files, durable metadata commit/rollback, content-addressed publication, recovery cleanup, and focused tests | Keep OEM document-provider and novel GGUF cases in regression coverage |
+| Wrong or malformed GGUF import | Reduced by model identity validation and bounded metadata parsing | Compatibility remains limited to supported PocketAgent runtime targets |
+| Concurrent generation/load/unload/cancel ownership | Reduced by the serialized runtime operation coordinator, lifecycle drain, cancellation mapping, and native/runtime tests | Keep recurrence proof when lifecycle or bridge code changes |
+| Local chat/model data entering Android backup or OEM transfer | Reduced by `android:allowBackup="false"`, Android 12+ cloud/device-transfer exclusions, and manifest/rules contract coverage | Re-audit OEM transfer behavior and every backup/data-extraction configuration change |
+| Setup/readiness metadata drift | Reduced by self-healing provisioning metadata and recovery UI | Continue manifest-outage and device-path evidence |
 
-Risk posture notes:
+## Release Impact
 
-1. `R-002` (thermal throttling): reduced likelihood for current tested device class due to QA-06 30.6-minute soak PASS with no crash/OOM/ANR signatures; residual OEM variability remains.
-2. `R-005` (privacy claims divergence): mitigation evidence improved via diagnostics redaction/policy rejection regressions (QA-03 rerun PASS).
-3. `R-006` (tool injection/execution abuse): mitigation evidence improved via WP-05 closeout contract stability and adversarial coverage.
-4. `R-001` and `R-003` remain active medium/high launch-watch items until broader multi-device Stage-6 evidence expands beyond current executed hardware.
+1. No active risk currently reverses the `PROD-10` `Promote` decision.
+2. `R-008` and `R-012` keep publication readiness blocked until the Play policy
+   controls, final package, and real operator metadata exist.
+3. `R-001`, `R-002`, `R-003`, and `R-011` constrain rollout size and broader
+   claims even after initial publication.
 
-Go/no-go impact:
+## Review Cadence
 
-1. No new blocker risk introduced by current Stage-6 QA evidence set.
-2. Residual high risks are tracked and require continued monitoring through WP-07 closure.
+1. Review before the final bundle is approved.
+2. Review at the end of each 7-day controlled rollout window.
+3. Add a new risk only when it changes release, rollout, or claim decisions.
+4. Remove or merge mitigated risks instead of accumulating historical status
+   prose; git history is the archive.

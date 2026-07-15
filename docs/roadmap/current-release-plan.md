@@ -1,148 +1,166 @@
 # Current Release Plan
 
-Last updated: 2026-05-04
+Last updated: 2026-07-11
 
-This is the single current-release planning document.
+This is the single planning view for the current PocketAgent release. Mutable
+ticket status lives only in `docs/operations/execution-board.md`; generate the
+current decision snapshot with `bash scripts/dev/launch-readiness.sh`.
 
-Mutable status is tracked only in `docs/operations/execution-board.md`.
+## Outcome
 
-## Objective
+Publish PocketAgent to a controlled Play Store track without adding features or
+widening claims.
 
-Ship the controlled Play Store MVP for PocketAgent with complete machine-verifiable evidence, moderation-backed usability evidence, and claim-safe release/governance closure.
+The product is past controlled-MVP implementation. The remaining release work
+is Play generative-AI policy closure, direct timeout-to-retry closure, final
+asset capture/approval, signed build/device proof, and Play Console execution.
 
-## Baseline
+## Current Position
 
-1. Foundational package work through WP-12 is closed; WP-09 and WP-13 drive current release risk.
-2. Build policy is single-build with download manager enabled by default.
-3. The controlled-MVP gate is now promoted from current evidence; the remaining work is publication/package execution, not launch-evidence unblock work.
-4. Local `main` is already fast-forwarded to the same tip as `codex/launch-readiness-implementation`; the remaining branch-closeout step is publication from local `main` to `origin/main`, not an internal merge between those two local refs.
-5. The freshest local authoritative evidence currently retained in the repo workspace is the S906N `android-instrumented` artifact root at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, plus the fresh S22 physical provisioning canary at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`. Regenerate the repo-side program snapshot with `bash scripts/dev/launch-readiness.sh` when you need a current publication decision view. Hosted/default evidence is now current and green on the required targeted surfaces: account 1 `send-after-ready` passes at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, and account 2 model-management passes at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`. Strict `journey` still has a preserved current-window S22 pass at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/`, with the caveat that the first token lands only at the 180s boundary and still carries `Prefill...`/slow-state context, while the A51 remains diagnostic-only at `tmp/devctl-artifacts/2026-05-04/A51_TCPIP/journey/20260504-004041/`. The disclosed `AI human-proxy` packet now also lands on `promote` for the controlled MVP.
-6. `docs/testing/generated/launch-flow-truth.md` is the selector/copy/runtime-state authority for automated QA flow maintenance and agent-assisted deterministic QA tooling.
-7. AI/agent outputs are valid for machine-verifiable reruns, artifact inspection, and failure classification.
-8. If human moderators are unavailable, a disclosed `AI human-proxy` operating mode may close the controlled-MVP moderation leg by using the same workflow script, setup bundle, and reporting utilities as human moderation.
-9. `docs/architecture/android-performance-contract.md` is mandatory for UI/runtime hot-path launch work; benchmark-only evidence is required when risky hot paths move.
+The 2026-07-11 repository snapshot reports:
 
-## Current Execution Graph
+1. Controlled-MVP gate: `promoted`
+2. `PROD-10` decision: `Promote`
+3. Required rows passing: `8/8`
+4. Publication readiness: `blocked`
+5. Board blockers: `3`
 
-### Stream A: Deterministic Technical Evidence
+The code baseline on `main` is synchronized with `origin/main` at this
+checkpoint. The July 11 hardening milestone is published and adds durable model
+imports, model/GGUF validation, serialized runtime ownership, cancellation and
+close recovery, cloud-backup and Android 12+ transfer exclusions, and
+interaction-performance gates.
+The release-closeout payload is isolated on `codex/release-closeout` for review;
+it does not include the engineer-owned runtime/CI worktree changes. After that
+payload merges, recheck the live branch, worktree, and GitHub Actions state
+immediately before building a release artifact.
 
-Goal:
+## Closed For The Controlled MVP
 
-Restore and preserve current-window machine-verifiable evidence.
+1. Core offline chat, streaming, model management, prompt-first tools, memory,
+   single-image Q&A, runtime status, and recovery behavior are implemented.
+2. Required technical and usability rows in `PROD-10` pass.
+3. The disclosed AI human-proxy WP-13 packet supplies the controlled-MVP
+   moderation leg and lands on `promote`.
+4. `SEC-02` closes privacy claim parity for the verified claim set.
+5. The July Hugging Face/CI stack and the July 11 import/runtime hardening are on
+   `main` and `origin/main`.
+6. Branch hygiene for the release baseline is closed.
+7. `QA-13` has the required weekly hardware send-capture gate and fail-closed
+   issue routing.
+8. `PROD-11` has public/private support paths, incident rules, and the rollout
+   reporting template.
+9. Release identity, claim-safe copy, metadata worksheets, build automation,
+   adaptive icon, and draft store brand graphics are prepared in-repo.
 
-Current work:
+## Active Release Work
 
-1. Preserve the current authoritative `android-instrumented` pass.
-2. Preserve the publishable current-window direct S22 physical canary evidence while wireless Maestro remains harness-class only.
-3. Preserve the now-green hosted/default send and model-management pass roots.
-4. Preserve the current-window S22 strict-journey pass and treat emulator/A51 strict reruns as diagnostic-only unless they add new authority.
-5. Keep the Samsung canary narrow and supporting only.
-6. Keep one primary non-pass classification on any future rerun: `product defect`, `harness/bootstrap failure`, `cloud infra failure`, or `device transport failure`.
+### 1. Add required generative-AI safety and reporting
 
-Dependency rule:
+Close `PROD-14` with restricted-content prevention and an accessible in-app
+report/flag flow that reaches a developer-controlled intake without leaving the
+app. Define the collected payload, retention/deletion, abuse controls,
+moderation loop, privacy notice, and Play Data Safety answers before building
+the product path.
 
-1. This is the critical stream.
-2. Final human measurement and publication wait on this stream.
-3. For the controlled MVP, this stream is now closed and preserved; future work is evidence preservation, not blocker discovery.
+### 2. Apply frozen public claims
 
-### Stream B: Human-Required Usability Closure
+Close `MKT-10` using only the verified surface:
 
-Goal:
+1. offline/local chat,
+2. prompt-first local tools,
+3. single-image Q&A,
+4. on-device inference by default,
+5. no hidden cloud upload in MVP workflows,
+6. privacy-safe diagnostics and runtime transparency.
 
-Collect the minimum moderation-backed evidence that automation cannot replace.
+Exclude general-availability voice, broad image/document analysis, rich direct
+tool launching, and unverified retention/reset/per-tool privacy controls.
 
-Current work:
+### 3. Produce claim-safe assets
 
-1. Prepare the WP-13 packet, facilitator materials, and metric templates.
-2. Run final moderated or proxy collection only after Stream A is materially stable.
-3. Treat older AI-moderated packets as pre-screening evidence only; use the approved `AI human-proxy` bundle when fallback closure is needed.
-4. If human moderators are unavailable, allow `AI human-proxy` fallback closure for the controlled MVP only when the session is disclosed, the bundle/setup path is used, and current machine-verifiable evidence is already in hand.
+Close `MKT-08` with approved screenshots/video tied to the frozen claim set.
+Assets must show current PocketAgent UI and must not imply unsupported scope.
 
-Dependency rule:
+### 4. Close direct timeout-to-retry recovery
 
-1. Prep can run in parallel with Stream A.
-2. Final measurement should not run while deterministic failures still dominate the experience.
-3. `AI human-proxy` sessions depend on the small-discovery-path setup bundle before their outputs are treated as comparable moderation-backed input.
-4. For the controlled MVP, this stream is now closed by the disclosed promote-level proxy packet.
+Close `UX-13` only when the user can retry immediately after a send timeout
+without refreshing runtime state and without losing session context. The
+pre-fix probe failed this contract; `18fe52bf` now restores retryable runtime
+readiness, but the exact two-send regression still must be retained and pass.
 
-### Stream C: Release Governance And Submission Prep
+### 5. Produce and validate the release package
 
-Goal:
+Close `PROD-13` by selecting the version code/name and Play track, producing the
+final reproducible bundle, installing it on the selected canary, recording the
+artifact identifier/checksum, and completing rollback notes.
 
-Prepare the decision package and store package without widening scope.
+### 6. Complete Play Console metadata and publish
 
-Current work:
+Record and apply:
 
-1. `PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, `PROD-13`
-2. Claim/copy freeze against verified behavior only
-3. Rollout and submission package prep
-4. Keep README and any outward-facing copy constrained to offline chat, prompt-first tools, single-image Q&A, and privacy-first local behavior, with voice still limited-beta only.
+1. privacy-policy URL,
+2. support contact/path,
+3. Data Safety answers,
+4. content rating,
+5. category,
+6. selected track and rollout percentage,
+7. approved listing copy and assets.
 
-Dependency rule:
+Upload only after the publication checklist and launch snapshot agree.
 
-1. Prep can run in parallel with Streams A and B.
-2. Final closeout depends on current evidence from Stream A and measured values from Stream B.
+## Release Sequence
 
-### Stream D: Branch Hygiene And Publication
+1. Review and merge `codex/release-closeout` without pulling in unrelated
+   engineer-owned changes.
+2. Close `PROD-14` and `UX-13`, then close `MKT-10` and `MKT-08` against verified behavior.
+3. Provide the existing upload key, connected physical canary, and enrolled
+   Play developer account.
+4. Build and install-validate the final release bundle from a clean, reviewed
+   baseline.
+5. Complete Play Console metadata.
+6. Regenerate `bash scripts/dev/launch-readiness.sh` and confirm `Promote`,
+   `8/8`, no blockers, and no new required action.
+7. Upload and publish to the selected controlled track.
+8. Record publication date, track, version, artifact identifiers, rollout
+   owner, and rollback plan.
 
-Goal:
+## Post-Rollout Work
 
-Keep the launch stack publication-safe without inventing missing merge work.
+`MKT-09` does not block initial controlled-MVP publication. Start it with the
+real cohort after rollout and use its 7-day scorecard to decide whether to keep,
+iterate, stop, or expand.
 
-Current work:
+Before broader expansion:
 
-1. Recognize that local `main` and `codex/launch-readiness-implementation` already match.
-2. Keep already-subsumed older `codex/*` branches out of the closeout discussion.
-3. Keep `cursor/cloud-agent-1775007300791-5ig66` separate unless a specific change is deliberately extracted.
-4. Audit `origin/main..main` and publish `main` only after the publication checklist is intentionally closed from a clean worktree.
+1. Decide the hard time-to-first-useful-answer threshold for advisory row
+   `A-01`.
+2. Expand Android device/OEM qualification.
+3. Replace or augment the disclosed proxy packet with human-moderated evidence
+   when the rollout is no longer a controlled-MVP cohort.
+4. Decide whether retention/reset/per-tool privacy controls enter the next
+   product scope.
+5. Keep voice available as a production opt-in, while withholding broad wake,
+   battery, and background-reliability promises until retained 24-hour and
+   multi-OEM evidence supports them.
 
-Dependency rule:
+## Stop Rules
 
-1. Audit can run in parallel immediately.
-2. Final publication waits on Streams A-C.
+Do not publish if any of these becomes true:
 
-## Release Phases
+1. A required `PROD-10` row is no longer passing.
+2. A new `UX-S0` or `UX-S1` blocker appears.
+3. The final bundle cannot be reproduced or installed on the selected canary.
+4. Listing copy or assets exceed the verified claim set.
+5. Required support, policy, or Play Console metadata is missing.
+6. The release worktree includes unrelated or unreviewed changes.
 
-### Phase 1: Preserve the promoted evidence set
+## Canonical Interfaces
 
-1. Preserve the existing `android-instrumented` proof.
-2. Preserve the direct S22 physical canary and the current hosted/default targeted pass set.
-3. Keep the Samsung canary as supporting OEM/runtime confirmation only.
-
-### Phase 2: Finish publication and governance closure
-
-1. Carry the current `AI human-proxy` packet as the closed moderation-backed leg for the controlled MVP.
-2. Close support/readiness, listing assets, claim application, and submission-package steps against verified behavior only.
-3. Keep any broader public-launch or non-proxy expansion work out of this closeout phase.
-
-### Phase 3: Run the release decision and publish
-
-1. Publish the already-promoted controlled-MVP decision package and operator checklist.
-2. Push local `main` to `origin/main` only when the working tree is clean and the intended publish payload is explicit.
-3. Upload the final release package to the selected Play track only after the checklist is intentionally closed.
-
-## Required pre-promotion signals
-
-1. Unit and required device lanes pass.
-2. Latest evidence IDs exist for `android-instrumented`, the current hosted/default targeted cloud surface, and `journey`, plus direct S22 physical canary artifacts while wireless Maestro remains harness-class.
-3. WP-13 usability packet has measured values (no placeholders).
-4. If the packet is `AI human-proxy`, it is explicitly disclosed as proxy-derived and tied to the approved bundle/setup path.
-5. No open high-severity UX blockers in required launch workflows.
-6. Claim rows in launch-gate matrix map to evidence IDs and remain privacy-compliant.
-7. For risky UI/runtime hot-path changes, performance-contract audits are clean and benchmark-variant evidence is captured.
-
-## Interfaces
-
-- Active status board: `docs/operations/execution-board.md`
-- Active ticket specs: `docs/operations/tickets/`
-- Evidence inventory and retention policy: `docs/operations/evidence/index.md`
-- Launch policy + decision artifacts: `docs/operations/tickets/prod-09-soft-gate-pilot-policy.md`, `docs/operations/tickets/prod-10-launch-gate-matrix.md`
-- Full launch execution split: `docs/operations/play-store-launch-program.md`
-
-## Roadmap From Here
-
-1. Preserve the `AI human-proxy` fallback bundle/setup path and the current promote-level packet.
-2. Execute `PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, and `PROD-13` against the promoted evidence set.
-3. Capture/finalize claim-safe listing assets and support/publication paperwork.
-4. Publish the controlled-MVP decision package.
-5. Push `main` only after the publication checklist is intentionally closed and the worktree is clean.
+- Mutable status: `docs/operations/execution-board.md`
+- Generated readiness decision: `bash scripts/dev/launch-readiness.sh`
+- Launch gate: `docs/operations/tickets/prod-10-launch-gate-matrix.md`
+- Publication checklist: `docs/operations/publication-closeout-checklist.md`
+- Submission readiness: `docs/operations/play-store-submission-readiness.md`
+- Verified privacy claims: `docs/operations/tickets/sec-02-privacy-claim-parity-audit.md`
+- Feature and claim boundaries: `docs/product/feature-catalog.md`

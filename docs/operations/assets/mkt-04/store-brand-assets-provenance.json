@@ -1,0 +1,27 @@
+{
+  "schema": "pocketagent-store-brand-assets-v1",
+  "generated_at_utc": "2026-07-11T11:41:57+00:00",
+  "source": "PocketAgent adaptive launcher mark and frozen claim-safe copy",
+  "approval_status": "product_and_marketing_approval_required",
+  "font": {
+    "family": "Open Sans",
+    "file": "scripts/marketing/assets/fonts/OpenSans-Variable.ttf",
+    "sha256": "36643644f318a812aab2d2ed3bb98f8cf0872527f835fe9398d95fe6b9adb878",
+    "license": "scripts/marketing/assets/fonts/OpenSans-OFL.txt",
+    "license_sha256": "fbbbcfef55318de350562559b671360de6d597112ecc5c73881b05092db89602"
+  },
+  "assets": [
+    {
+      "file": "play-listing-icon.png",
+      "width": 512,
+      "height": 512,
+      "sha256": "bfbae6cc11100add1e08990085c1bc762113e2cb5639b645352d8032b1cbc714"
+    },
+    {
+      "file": "feature-graphic.png",
+      "width": 1024,
+      "height": 500,
+      "sha256": "8b9858e241efd6f09688f6f8508668b09091f0d19d660b1d16a9b9b88cefbb27"
+    }
+  ]
+}

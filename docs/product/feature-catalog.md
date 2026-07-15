@@ -1,67 +1,70 @@
-# Feature Catalog and Feasibility Bands
+# PocketAgent Feature Catalog
 
-Last updated: 2026-04-26
+Last updated: 2026-07-12
 
-This catalog lists current and possible features based on known technical constraints (mobile RAM/thermal limits, model/runtime maturity, and privacy requirements).
+This catalog separates what is implemented from what PocketAgent may claim in
+the controlled-MVP release. The controlled-MVP product gate is promoted; store
+publication remains blocked on `PROD-14` policy controls, `UX-13` direct retry,
+approved assets, and signed package/device/Play execution.
 
-## Band A: MVP-Critical (Build Now)
+## Controlled-MVP Product Surface
 
-| Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
-|---|---|---|---|---|
-| Offline text chat | core assistant utility | first-token latency, memory/OOM | Implemented | Implemented (WP-11 gate complete with device evidence) |
-| In-app model provisioning + readiness recovery | enables normal-user runtime setup without shell commands | file import UX, artifact verification strictness | Implemented (WP-12 policy reused in app path) | Implemented (release-gated; unified `Model library` import/download/recovery + refresh checks) |
-| Streaming responses | perceived speed and UX quality | runtime callback reliability | Implemented | Implemented (instrumented + Maestro flows validated) |
-| Model routing (`Qwen3 0.6B` / `Qwen3 1.7B` / `Llama 3.2 1B` / `Qwen 3.5 0.8B`) | battery and thermal control | device-state signal quality | Implemented | Implemented (advanced controls + routing override validated) |
-| Runtime performance profiles (`BATTERY`/`BALANCED`/`FAST`) | explicit speed vs battery control with deterministic runtime presets | profile tuning must not break timeout/recovery UX | Implemented (`PerformanceRuntimeConfig` contract) | Implemented (advanced controls profile selector + persisted restore) |
-| GPU acceleration toggle (capability-gated) | allows supported devices to opt into faster decode path | OpenCL/Hexagon backend packaging + runtime capability detection on device | Implemented | Implemented (toggle disabled when unsupported, persisted when supported) |
-| Runtime telemetry readout labels | faster triage for regressions and support | label correctness and user-facing clarity | Implemented | Implemented (first-token/total/prefill/decode/decode-rate/peak-rss in advanced details) |
-| Simple-first first-session lane | improves first-run clarity and reduces setup/control overload | must keep deterministic recovery + no dead-end setup path; launch still needs current-window lane evidence beyond the local authoritative onboarding contract | Implemented | Implemented (`Get ready` workflow via the blocked `Setup` button, unified `Model library` recovery/import surface, advanced/tools not treated as the primary first-session happy path; authoritative onboarding instrumentation now exists in the local lane set) |
-| Prompt-first local tools | practical daily utility without exposing a richer direct-tool launch surface | strict validation/sandboxing; launch claims must stay prompt-first even though deeper runtime/controller paths exist | Implemented (WP-05 closed) | Implemented (prompt shortcuts prefill composer; validated success/failure paths) |
-| Memory v1 | continuity across sessions | retrieval quality + retention policy | Implemented (file-backed + pruning) | Implemented (session restore/switch continuity validated) |
-| Single-image attach + Q&A | multimodal differentiation without expanding to broad document/photo analytics claims | image path latency and correctness; launch claims stay bounded to one attached image in-thread; claim-safe packaging requires the matching multimodal companion artifact (`mmproj`) in setup/provisioning evidence | Implemented (WP-06 closed; companion-artifact sync understood in local setup/preflight path) | Implemented (single-image attach success/failure UX validated) |
-| Offline policy-aware network enforcement | trust and privacy claim integrity | strict runtime boundary wiring | Implemented (ENG-17) | Implemented (runtime startup checks + UX messaging) |
-| Resilience and startup guards | reduce crash/startup failure support load | guard correctness across OEM behavior | Implemented (WP-07 resilience closeout) | Implemented (runtime error banners + startup status) |
-| Runtime backend transparency | support/debug can identify runtime path quickly | backend identity correctness | Implemented | Implemented (backend chip + advanced-sheet backend details) |
-| Structured UI error contracts | deterministic support and triage | stable error-code mapping | Implemented | Implemented (`UI-STARTUP-001`, `UI-IMG-VAL-001`, `UI-TOOL-SCHEMA-001`, `UI-RUNTIME-001`) |
+| Feature | Product state | Public claim boundary | Remaining watch item |
+|---|---|---|---|
+| Offline streaming text chat | Implemented and required gate passed | On-device inference by default; no hidden cloud upload in MVP workflows | First-use latency and sustained thermals on older devices |
+| Simple-first setup and recovery | Implemented through `Get ready` plus `Model library` recovery | A normal user can download, import, activate, refresh, and recover models in-app | Keep setup and manifest-outage recovery in recurring device evidence |
+| Dynamic Hugging Face discovery and URL download | Implemented | Supported public single-file text GGUF downloads only | Storage, checksum, compatibility, and provider availability |
+| Local GGUF import | Implemented with cancellable copy, content-addressed publication, durable metadata, rollback, GGUF identity checks, and bounded metadata parsing | Import only models compatible with a supported PocketAgent runtime target | OEM document-provider behavior and genuinely novel GGUF variants |
+| Model routing | Implemented for the supported catalog, including Qwen3 0.6B, Qwen3 1.7B, Llama 3.2 1B, and Qwen 3.5 0.8B | Automatic or user-selected routing within qualified device/model limits | Broader device and model qualification |
+| Runtime performance profiles | Implemented with `BATTERY`, `BALANCED`, and `FAST` presets | User-selectable local performance policy | Benchmark before widening device-tier claims |
+| Capability-gated GPU acceleration | Implemented with unsupported controls disabled | Acceleration is available only where the packaged backend and device probe qualify it | OEM driver fragmentation |
+| Runtime ownership, cancellation, and recovery | Implemented with serialized operation ownership, request/session cancellation, lifecycle drain, and typed recovery mapping | A timed-out or cancelled operation can recover without corrupting the runtime contract | Recurring send-capture and older-device timeout thresholds |
+| Runtime telemetry and backend visibility | Implemented in advanced details | First-token, total, prefill, decode, decode rate, peak RSS, and backend status are diagnostic surfaces | Keep labels and redaction aligned with runtime fields |
+| Prompt-first local tools | Implemented behind strict schema and allowlists | Tools are entered through prompt shortcuts; do not market a richer direct-tool launcher | Injection and schema-regression coverage |
+| Session memory and continuity | Implemented with file-backed retention and pruning | Chats and session context can persist locally | Retention/reset/per-tool controls are not a publishable claim yet |
+| Single-image attach and Q&A | Implemented | One attached image can be used in the same conversation | Requires compatible multimodal model plus companion `mmproj`; no broad image/document analysis claim |
+| Local-first network policy | Implemented and privacy parity verified | On-device inference by default and no hidden cloud upload in MVP workflows | Model discovery/download is an explicit network action |
+| Startup, provisioning, and runtime recovery | Implemented, including stale-metadata repair and structured error mapping | Deterministic status and recovery guidance | Continue OEM and interruption coverage |
+| Local-data backup and transfer controls | Implemented with cloud backup disabled, Android 12+ data-extraction exclusions, and a manifest/rules contract test | Cloud backup is disabled; supported app-data domains are excluded from Android 12+ transfer rules, while manufacturer D2D behavior remains device-dependent | Recheck whenever backup/data-extraction configuration changes |
+| Generative-AI safety and reporting | Not implemented; `PROD-14` blocks Play upload | No publishable claim until restricted-content prevention and in-app developer reporting pass end to end | Requires approved intake/data contract, privacy/Data Safety update, adversarial tests, and moderation ownership |
 
-## Band B: Near-Term Expansion (Post-MVP)
+## Production Opt-In, Qualification In Progress
 
-| Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
-|---|---|---|---|---|
-| Expanded Android device-tier coverage | market expansion within Android install base | OEM variance and runtime compatibility qualification | Planned | Planned |
-| Voice activation and hands-free command path (limited beta only) | keeps voice in scope for controlled cohorts without turning it into a broad public launch promise | microphone permission and local voice-model install are the only hard blockers for always-on listening; assistant-role setup and OEM battery guidance remain advisory/support follow-up; public positioning must stay Advanced-only and non-headline | Implemented (limited-beta path) | Implemented (Advanced-only toggle + blocker/advisory guidance + bounded device-action tools); user-visible but not a general launch claim |
-| Strict tool schema/runtime contract | stronger safety guarantees behind the prompt-first tool surface | parser/runtime contract coverage; should not be marketed as richer direct-tool UX on its own | Implemented | Implemented (runtime/UI contract retained behind prompt-first entry) |
-| Rich diagnostics dashboards | faster QA and regression triage | safe redaction + metrics consistency | Planned | Planned |
-| Better image workflows | broader use cases (documents/photos) | model quality on edge cases | Planned | Planned |
+| Feature | Product state | Claim and support boundary |
+|---|---|---|
+| Hands-free Offas and bounded device actions | Available to normal users in production builds after one guided opt-in; no debug flag or device allowlist | Do not promise universal wake, battery, or background reliability until retained 24-hour Samsung, Pixel, and aggressive-background-OEM qualification exists |
+| Composer dictation and assistant read-aloud | Implemented with editable English local transcription, in-app voice-pack installation, and Android TTS voices reported as offline | Publish English/TTS/device support tiers from retained evidence; do not turn one-device proof into a universal claim |
 
-## Band C: Voice Expansion (Post-Limited-Beta)
+## Post-MVP Expansion
 
-| Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
-|---|---|---|---|---|
-| Offline STT | natural input modality | model size/latency on-device | Planned | Planned |
-| Offline/Hybrid TTS | hands-free output and accessibility | voice quality vs power usage | Planned | Planned |
-| Voice conversation mode | stronger assistant UX | interruption handling + latency budgets | Planned | Planned |
-| Wake/quick actions | fast invocation | OS policy restrictions and battery impact | Research | Research |
+| Feature | State | Promotion dependency |
+|---|---|---|
+| Expanded Android device-tier coverage | Planned | Device qualification, thermal/latency evidence, and support capacity |
+| Human-moderated usability replacement for the proxy packet | Planned | Required before using broader non-proxy expansion claims |
+| User-facing retention, reset, and per-tool privacy controls | Planned | Implementation plus `SEC-02` evidence parity |
+| Rich diagnostics dashboards | Planned | Safe redaction and stable metric semantics |
+| Broader image/document workflows | Planned | Model quality, latency, and claim evidence |
+| Persistent interruptible voice conversation and qualified hands-free support tiers | Planned | Text/voice continuity plus on-device quality, power, interruption, privacy, language, and multi-OEM evidence |
 
-## Band D: Advanced/Long-Term
+## Research / Long-Term
 
-| Feature | Why It Matters | Constraints | Engine Status | In-App UX Status |
-|---|---|---|---|---|
-| Bounded multi-step workflows | higher task completion | safety and predictability | Research | Research |
-| Optional encrypted sync | multi-device continuity | explicit consent and privacy boundaries | Research | Research |
-| Pro model tiers (`4B`/`9B`) | quality for capable devices | thermals + sustained UX | Research | Research |
-| Domain packs/adapters | personalization and specialization | quality assurance + policy controls | Research | Research |
+1. Wake and quick-action expansion under Android policy constraints
+2. Bounded multi-step workflows
+3. Optional encrypted multi-device sync
+4. Larger model tiers such as 4B and 9B
+5. Domain packs and adapters
 
-## Out of Scope for Current MVP
+## Explicitly Out Of Scope For The Controlled MVP
 
-1. Broad video analytics workflows
-2. On-device training/fine-tuning
+1. Broad video, document, or multi-image analytics
+2. On-device training or fine-tuning
 3. Unbounded autonomous agent loops
-4. Cloud-dependent default path
+4. A cloud-dependent default inference path
+5. Universal hands-free wake, battery, or background-reliability claims
 
-## Feature Prioritization Rules
+## Prioritization Rules
 
-1. Must improve daily utility for ICP users.
-2. Must preserve local-first privacy guarantees.
-3. Must pass benchmark, reliability, and UI acceptance gates.
-4. Must not destabilize current stage commitments.
+1. Improve daily utility for the target user.
+2. Preserve the verified local-first privacy boundary.
+3. Pass narrow risk proof before broad device or release gates.
+4. Do not widen the release claim set without matching evidence.

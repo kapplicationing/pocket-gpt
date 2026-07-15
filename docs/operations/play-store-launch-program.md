@@ -1,13 +1,13 @@
 # PocketAgent Play Store Launch Program
 
-Last updated: 2026-07-06
+Last updated: 2026-07-11
 Owner: Product + Tech Lead
 
 Mutable status stays in `docs/operations/execution-board.md`.
 Program learnings stay in `docs/operations/historical/launch-program-learnings.md`.
 Retained evidence baselines stay in `docs/operations/evidence/evidence-ledger.json`.
 
-Current status note: the controlled-MVP launch gate can advance. Publication readiness is separate and remains owned by the active execution board and generated launch readiness report. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker was cleared in the May launch-gate evidence set. Current CI/nightly status must be read from GitHub Actions; fixed baselines are retained in the evidence ledger.
+Current status note: the controlled-MVP launch gate can advance. Publication readiness is separate and blocked. In addition to assets/signing/device/Play setup, `PROD-14` must add Play-required in-app AI-output reporting and evidenced restricted-content prevention with matching privacy/Data Safety behavior. The retained provisioning `SIGILL` class is no longer the live issue, the later setup/provisioning blocker was narrowed to missing multimodal projector (`mmproj`) sync in `devctl` preflight and fixed, and the last live hosted send blocker was cleared in the May launch-gate evidence set. Current CI/nightly status must be read from GitHub Actions; fixed baselines are retained in the evidence ledger.
 
 The freshest preserved May launch evidence remains the promoted controlled-MVP evidence set: S906N `android-instrumented` at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/android-instrumented/20260503-213837/`, S22 provisioning at `tmp/s22-physical-canary/20260504-004030-real-runtime-provisioning/`, hosted account 1 `send-after-ready` at `tmp/maestro-cloud-targeted/20260504T-send-after-ready-account1-default64-contractfix/status.json`, hosted account 2 model-management at `tmp/maestro-cloud-targeted/20260504T-model-management-account2-runtime-ready-helper/status.json`, and strict journey at `tmp/devctl-artifacts/2026-05-03/S906N_TCPIP/journey/20260503-234734/journey-report.json` with `phase=completed`, `placeholder_visible=false`, and `first_token_ms=180222`. Keep that long-prefill shape as rollout/perf caution, not as a blocker. The disclosed `AI human-proxy` WP-13 packet lands on `promote` for the controlled MVP.
 
@@ -25,12 +25,12 @@ Superpower-context canon for the active program:
 2. QA agents and subagents are valid for machine-verifiable reruns, artifact inspection, blocker summaries, and the disclosed `AI human-proxy` fallback path when run through the approved bundle/setup flow.
 3. `docs/architecture/android-performance-contract.md` is mandatory for UI/runtime hot-path launch work; performance evidence is measured on `benchmark` only.
 
-Branch/merge note for the active program:
+Branch baseline for the active program:
 
-1. `codex/launch-readiness-implementation` is still the preserved name for the launch integration lineage, but local `main` is already at the same tip.
-2. The live branch-hygiene gap is local `main` versus `origin/main`, not `main` versus `codex/launch-readiness-implementation`.
-3. Older `codex/*` branches appear subsumed into local `main`; `cursor/cloud-agent-1775007300791-5ig66` remains intentionally separate and should not be merged wholesale into launch closeout.
-4. Safe merge-back/publication now means auditing `origin/main..main`, validating the final gate state, and then pushing `main` from a clean worktree, rather than inventing another internal merge step.
+1. At the final July 11 refresh, `codex/release-closeout` was rebased onto `origin/main` at `f8f7e5ab`.
+2. The release-closeout payload modifies no engineer-owned runtime/CI files; those commits remain intact as the branch base.
+3. Release packaging must run after that payload is reviewed and merged, from clean `main`; `scripts/release/build-controlled-mvp.sh` rechecks that `HEAD` matches the local `origin/main` ref before producing artifacts.
+4. Any later release change creates a new review/build baseline. Do not carry unrelated historical branches into the publication payload.
 
 ## Objective
 
@@ -41,7 +41,7 @@ Ship the current PocketAgent MVP to the Play Store without expanding product sco
 1. Core launch surface stays locked.
 2. Image attach remains in scope, but external claims stay bounded to single-image/contextual Q&A rather than broader image-analysis promises.
 3. Tools stay prompt-first at launch; richer direct-tool/runtime depth is an implementation detail, not the user-facing claim surface.
-4. Voice stays in scope only as a limited beta for controlled cohorts and closed-track handling; it is not part of the broad public Play Store claim set in the current launch window.
+4. Voice ships as an explicit production opt-in for compatible users. It remains outside the current headline Play Store claim set until retained Samsung, Pixel, aggressive-background-OEM, and 24-hour evidence supports broad hands-free reliability and battery claims.
 5. Setup stays simple-first: `Get ready` is the primary blocked-state setup action, while the unified `Model library` is the advanced import/download/recovery surface.
 
 This program is complete only when:
@@ -49,8 +49,9 @@ This program is complete only when:
 1. required technical gates are green with current evidence,
 2. moderation-backed WP-13 usability evidence is complete,
 3. privacy, claim, support, and release-governance work is closed,
-4. the Play Store submission package is ready for rollout,
-5. and the remaining physical-device canary work is reduced to final brush rather than active blocker discovery.
+4. generative-AI restricted-content prevention and in-app developer reporting pass end to end,
+5. the Play Store submission package is ready for rollout,
+6. and the remaining physical-device canary work is reduced to final brush rather than active blocker discovery.
 
 ## Critical Path
 
@@ -58,8 +59,9 @@ This program is complete only when:
 2. Preserve the current hosted/default targeted pass roots and the S22 physical canary substitute as the publication evidence set.
 3. Preserve the current-window strict `journey` proof and treat its near-timeout first-token behavior as perf/risk context only.
 4. Carry the disclosed `AI human-proxy` packet truthfully and only replace it with human-moderated evidence if promotion needs stronger non-proxy closure.
-5. Finalize the Play Store submission package and decision package from the promoted evidence set.
-6. Keep `main` synchronized with `origin/main`; live release action should verify the current SHA through GitHub Actions rather than relying on this mutable status note.
+5. Close `PROD-14` with the approved intake/data contract, restricted-content controls, in-app reporting, and privacy/Data Safety parity.
+6. Finalize the Play Store submission package and decision package from the promoted evidence set.
+7. Keep `main` synchronized with `origin/main`; live release action should verify the current SHA through GitHub Actions rather than relying on this mutable status note.
 
 ## Current Evidence Anchors
 
@@ -142,7 +144,7 @@ Current work:
 1. `PROD-11`, `MKT-08`, `MKT-09`, `MKT-10`, `PROD-13`
 2. Claim/copy freeze against verified behavior only
 3. Launch decision memo and rollout recommendation
-4. README and outward-facing copy remain bounded to offline chat, prompt-first tools, single-image Q&A, and privacy-first local behavior, with voice still limited-beta only
+4. README and support copy may describe production opt-in voice accurately; frozen listing assets remain bounded to offline chat, prompt-first tools, single-image Q&A, and privacy-first local behavior until the voice qualification claim gate is met
 
 ### Stream D: Branch Hygiene And Publication
 
@@ -208,7 +210,7 @@ Responsibilities:
 
 1. Keep the promoted evidence set and publication checklist aligned.
 2. Approve the exact release bundle, track, and claim-safe listing package.
-3. Publish only from a clean worktree after reviewing `origin/main..main`.
+3. Publish only from a clean reviewed `main` whose `HEAD` matches `origin/main`.
 
 ### QA / Evidence Owner
 
@@ -227,7 +229,7 @@ Own copy, assets, and package readiness.
 Responsibilities:
 
 1. Apply only the frozen claim set to listing copy and proof assets.
-2. Close `MKT-08`, `MKT-10`, and `PROD-13` from the promoted evidence state.
+2. Close `PROD-14`, `MKT-08`, `MKT-10`, and `PROD-13` from the promoted evidence state.
 3. Keep any broader public-launch or non-proxy expansion work out of this closeout.
 
 ### Support / Operations Owner
@@ -236,7 +238,7 @@ Own support-readiness and rollout notes.
 
 Responsibilities:
 
-1. Close `PROD-11` with the current contact path, support metadata, and rollout/incident notes.
+1. Keep the completed `PROD-11` contact path, support metadata, and rollout/incident notes current.
 2. Record the chosen track, release identifiers, and rollback plan.
 3. Keep operator-facing closeout steps in `docs/operations/publication-closeout-checklist.md`.
 
@@ -250,15 +252,15 @@ Responsibilities:
 
 ### Phase 2: Prepare The Publication Package
 
-1. Finalize support metadata, release versioning, rollout notes, and claim-safe listing assets.
+1. Preserve the completed support metadata, release versioning, and rollout notes; finish `PROD-14` policy controls and claim-safe listing assets.
 2. Keep release copy, screenshots, and videos tied to the frozen claim set.
 3. Record the final package inputs in the submission checklist.
 
 ### Phase 3: Publish Cleanly
 
 1. Confirm `bash scripts/dev/launch-readiness.sh` still reports `Promote`.
-2. Clean the worktree or isolate non-publication work before pushing `main`.
-3. Push `main`, upload the selected release bundle, and publish to the chosen Play track.
+2. Review and merge `codex/release-closeout`, then confirm clean `main` matches `origin/main`.
+3. Produce the signed artifact, upload the selected bundle, and publish to the chosen Play track.
 
 ## Internal Contracts That Must Be Stable
 
@@ -270,6 +272,7 @@ Responsibilities:
 6. Evidence authority split: cloud-first is the default machine-verifiable execution path, but `android-instrumented`, current hosted/default targeted proofs, and strict `journey` remain the retained gate roots and are not replaced by unrelated smoke alone.
 7. Older AI-moderated outputs remain deterministic QA support only; disclosed `AI human-proxy` outputs may satisfy the moderation-backed WP-13 leg for the controlled MVP when they use the approved bundle/setup path.
 8. Performance-contract audits and benchmark-only evidence are part of launch-readiness expectations for risky UI/runtime hot-path changes.
+9. Generative-AI policy contract: restricted-content prevention and in-app reporting to a developer-controlled intake must pass before upload, with report data reflected in Privacy and Data Safety.
 
 ## Required Output Artifacts
 
@@ -285,7 +288,7 @@ Responsibilities:
 2. Review board blockers against the closeout ownership areas and keep publication/package work separate from new engineering work.
 3. Run cloud-first machine-verifiable evidence only when a new blocker appears; otherwise preserve the promoted artifact roots.
 4. Keep machine-verifiable evidence and moderation-backed evidence on separate tracks.
-5. Before publishing `main`, confirm the publication checklist is closed, audit `origin/main..main`, and verify that no unrelated visible branch needs deliberate extraction.
+5. Before uploading a release artifact, confirm the publication checklist is closed and the clean reviewed `main` matches `origin/main`.
 
 ## Completion Rule
 
@@ -296,5 +299,6 @@ The program is complete when:
 3. journey send-capture is clean,
 4. WP-13 contains measured values,
 5. privacy/claim/support/asset work is closed,
-6. `PROD-13` is ready for submission,
-7. and the chosen publication worktree is clean enough to push intentionally.
+6. `PROD-14` safety/reporting controls are done,
+7. `PROD-13` is ready for submission,
+8. and the chosen publication worktree is clean, reviewed, and matches `origin/main`.

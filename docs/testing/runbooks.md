@@ -1,6 +1,6 @@
 # Testing Runbooks
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 Use these recipes after choosing the evidence type in
 `docs/testing/test-strategy.md`. Full command syntax stays in
@@ -18,6 +18,9 @@ Use these recipes after choosing the evidence type in
 | Strict send/runtime journey | `python3 tools/devctl/main.py lane journey` |
 | Screenshot contract | `python3 tools/devctl/main.py lane screenshot-pack` |
 | One UI repro with artifacts | `maestro-android scoped --flow tmp/<flow>.yaml --device <serial>` |
+| Release-semantic physical voice proof | Build and run the isolated `voiceProof` package below |
+| Physical voice support qualification | `bash scripts/dev/voice-device-qualification.sh --device <serial> --fixture-dir <model-dir>` |
+| Always-on wake/battery soak | `bash scripts/dev/voice-wake-soak.sh --device <serial> --mode baseline`, then the paired always-on run |
 | Selector/flow health | `maestro-android lint` or `maestro-android audit-selectors` |
 | Non-generation UI jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-interaction-gate.sh --scenario <name> --runtime-state <state> --download-state <state> --voice-state <state>` |
 | Composer typing jank | `ANDROID_SERIAL=<serial> bash scripts/dev/perf-baseline.sh --build` |
@@ -90,6 +93,101 @@ Rules:
 3. Use `--no-build --no-install` only when code and APK did not change.
 4. Stop after two failed reruns on the same hypothesis.
 5. Promote recurring risks into `tests/maestro/` after the fix.
+
+## Physical Voice Proof And Support Qualification
+
+Hands-free Offas is a production opt-in feature, not a debug override or a
+device-allowlisted feature. The shipped setup path starts from one switch,
+requests Android notification and microphone access, requires PocketAgent's
+`VoiceInteractionService` to be selected as the assistant, then downloads and
+hash-verifies the pinned ASR and KWS bundles when they are missing. Android keeps
+the microphone use visible through its privacy indicator and the ongoing private
+notification with Talk now and Stop listening controls.
+
+Use the isolated `voiceProof` build for non-debuggable, release-semantic physical
+proof without disturbing the normal package:
+
+```bash
+DEVICE=<serial>
+PACKAGE=com.pocketagent.android.voiceproof
+APK=apps/mobile-android/build/outputs/apk/voiceProof/mobile-android-voiceProof.apk
+
+./gradlew --no-daemon -Ppocketgpt.enableNativeBuild=true \
+  :apps:mobile-android:assembleVoiceProof
+adb -s "${DEVICE}" install -r "${APK}"
+adb -s "${DEVICE}" shell pm grant "${PACKAGE}" android.permission.POST_NOTIFICATIONS
+adb -s "${DEVICE}" shell pm grant "${PACKAGE}" android.permission.RECORD_AUDIO
+adb -s "${DEVICE}" shell cmd role add-role-holder \
+  --user 0 android.app.role.ASSISTANT "${PACKAGE}"
+adb -s "${DEVICE}" shell settings get secure assistant
+adb -s "${DEVICE}" logcat -c
+adb -s "${DEVICE}" shell am start -n \
+  "${PACKAGE}/com.pocketagent.android.voice.VoiceProofSetupActivity"
+```
+
+Wait for `VOICE_MODEL_SETUP|phase=ready|integrity=verified`, confirm the selected
+assistant value names `PocketAgentVoiceInteractionService`, and visibly confirm
+the listening notification and Android microphone indicator. Then exercise the
+real phone speaker, microphone, KWS, command parser, and durable voice stop:
+
+```bash
+adb -s "${DEVICE}" shell am start -n \
+  "${PACKAGE}/com.pocketagent.android.voice.VoiceProofAcousticWakeActivity"
+adb -s "${DEVICE}" logcat -d | \
+  rg 'VOICE_PROOF|VOICE_MODEL_SETUP|KWS_WAKE_DETECTED|PocketAgentVoice'
+adb -s "${DEVICE}" shell dumpsys activity services "${PACKAGE}" | \
+  rg 'OffasListenerService' || true
+```
+
+The acoustic activity says "Off us. Please stop listening." through the device speaker.
+A useful retained result includes the non-debuggable build identity, selected
+assistant service, verified model-setup log, wake-detection log, visible system
+indicators, and the listener absent after the spoken stop. Merely building or
+playing the probe is not a pass.
+
+Use the debug instrumentation qualifier separately for deterministic component
+and tool evidence. It verifies exact developer fixture hashes, transfers only
+the minimum runtime set, and runs real TTS, Sherpa, speaker-to-microphone,
+composer-draft, and Android Clock tests:
+
+Use the official Sherpa ASR directory after acquiring it through the approved
+model source:
+
+```bash
+bash scripts/dev/voice-device-qualification.sh \
+  --device <serial> \
+  --fixture-dir <path>/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17 \
+  --kws-fixture-dir <path>/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01
+```
+
+Use `--no-build --no-install` only when the installed app and test APKs match the
+source being qualified. This is a qualification lane, not a state-preserving
+workflow: the connected instrumentation runner may uninstall the debug app during
+teardown. Its results inform supported-device guidance and reliability claims;
+they do not enable or disable the production hands-free switch.
+
+For honest incremental battery evidence, first stop the listener and capture an
+unplugged, screen-off 24-hour baseline:
+
+```bash
+bash scripts/dev/voice-wake-soak.sh --device <serial> --mode baseline
+```
+
+Then turn on hands-free Offas in the production candidate, verify PocketAgent is
+the selected assistant and the listener is running, and capture a matching
+24-hour run:
+
+```bash
+bash scripts/dev/voice-wake-soak.sh \
+  --device <serial> \
+  --baseline-metrics tmp/voice-wake-soak/<baseline-run>/metrics.env
+```
+
+A short `--duration-minutes 3 --sample-seconds 30` run proves only that the
+harness collects data. A PASS does not replace recall/noise, latency, audio-route,
+call, Doze, or multi-device support evidence. A qualification result changes
+support guidance and rollout confidence, not feature availability. Never treat
+whole-phone drain from an unpaired run as incremental listener cost.
 
 Legacy fallback:
 

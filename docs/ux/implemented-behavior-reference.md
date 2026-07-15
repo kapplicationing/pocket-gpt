@@ -1,6 +1,6 @@
 # Implemented UX Behavior Reference
 
-Last updated: 2026-04-26  
+Last updated: 2026-07-12
 Owner: Product + Android
 
 ## Purpose
@@ -16,35 +16,51 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 5. Send flow still parses model-emitted tool calls in the runtime path.
 6. Direct typed tool execution path (`runTool` + typed tool results) exists in ViewModel/controller code and test contracts, but is not currently bound to a primary user action or treated as a launch claim.
 
-## Voice Activation (Limited Beta)
+## Composer Voice (Production Opt-In)
+
+1. The composer exposes foreground dictation:
+   - tapping the microphone requests permission when needed
+   - local English ASR publishes an in-composer partial transcript
+   - tap-to-stop drains the recognizer before committing final words
+   - final text is appended to the editable draft and never auto-sent
+2. Send is disabled while recognition is checking, listening, or finalizing.
+3. Dictation is bound to the chat where it started; a result is discarded with visible guidance if the active chat changes.
+4. Composer dictation and always-on listening cannot own the microphone together.
+5. Dictation stops without committing partial text when the app moves to the background.
+6. Complete assistant messages expose read-aloud and stop controls.
+7. Read-aloud uses an installed English Android TTS voice only when Android marks that voice as not requiring a network connection.
+8. Playback stops when the active chat changes or the app moves to the background, and cannot start during dictation.
+9. Composer dictation uses the verified local voice pack installed by the in-app Hands-free Offas setup; users do not copy model files into app storage.
+
+## Voice Activation (Production Opt-In)
 
 1. `Advanced` settings include a voice activation section with:
    - enable toggle
    - blocker/advisory readiness copy
    - listener-status line
    - setup/help CTAs for assistant role, battery settings, and app settings
-2. Voice activation is a limited-beta surface for controlled cohorts, not the default onboarding or broad public launch path.
-3. Always-on listening is blocked only when:
-   - microphone permission is missing
-   - local voice model files under `offas-voice-models` are missing
-4. Assistant-role setup and battery-optimization guidance are advisory/support CTAs:
-   - assistant role enables assistant-gesture capture-once on supported Android versions
-   - battery guidance improves background reliability but does not gate the toggle
-5. The settings surface keeps blocker state and advisory follow-up separate:
-   - microphone/model blockers render as setup-required status
-   - assistant-role and battery guidance remain visible as follow-up support, not launch blockers
-   - OEM battery guidance only renders when battery follow-up is actually still needed
-6. Voice enable feedback is immediate and supportable:
-   - blocked microphone/model enables surface snackbar guidance
-   - start failures surface the stored inline error message and the same message is used for immediate feedback
-7. Current voice device-action tool allowlist is intentionally narrow:
+2. Voice activation is available to users in production builds. It is not gated by a debug flag, device allowlist, or controlled-cohort switch.
+3. The first enable is one guided transaction: request visible notifications, request microphone access, select PocketAgent as Android's assistant, download and verify about 60 MB of pinned local voice files when missing, then enable listening automatically if all prerequisites still pass.
+4. Setup runs as durable constrained work with visible progress. It survives leaving the settings surface, and turning the switch off cancels queued or active setup.
+5. Always-on listening requires:
+   - notification access so listening state and Stop remain visible
+   - microphone access
+   - PocketAgent selected as Android's assistant
+   - a verified local voice pack
+6. Battery-optimization guidance improves background reliability but does not hide the feature or act as a device allowlist.
+7. Voice enable feedback is immediate and supportable:
+   - missing prerequisites open the relevant Android setup surface or show concrete recovery copy
+   - setup progress remains visible
+   - listener start failures surface the stored inline error message and immediate feedback
+8. Current voice device-action tool allowlist is intentionally narrow:
    - `alarm_set`
    - `timer_set`
    - `app_open`
    - `volume_set`
    - `flashlight_toggle`
-8. Public launch copy must stay bounded to the core chat surface, prompt-first tools, and single-image attach/Q&A until voice evidence, privacy wording, and device-tier language are ready.
-9. Voice is user-visible and supportable as limited beta; it must not be described in launch canon as merely planned or hidden.
+9. Phone mutations use typed schemas, deterministic parsing, source-aware preview and confirmation, and lock-screen visibility policy; model-originated actions always require confirmation.
+10. A normal hands-free question runs locally in a temporary ephemeral session and is not added to normal chat history.
+11. The frozen public listing does not make cross-device battery or wake-reliability promises until retained Samsung, Pixel, aggressive-background-OEM, and 24-hour evidence exists. That qualification boundary controls support claims, not whether compatible users can turn the feature on.
 
 ## Privacy Section Behavior
 
@@ -126,6 +142,9 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 7. Follow-up completion emits first-session telemetry and cue state.
 8. Stage/unlock flags are persisted across app restarts.
 9. Authoritative local onboarding proof now exists in the `android-instrumented` lane; current launch hold is about current-window evidence closure, not about the first-session contract being absent from the codebase.
+10. The final onboarding page now owns the simple-first setup transaction instead of opening Model Library after enqueue.
+11. Its user-visible phases are download, check, finish, start, and send-ready; only byte transfer displays determinate progress.
+12. The normal completion action appears only after the target model is loaded and the chat send-readiness gate is ready; general smoke tests retain an explicit `Set up later` bypass.
 
 ## Runtime Telemetry Labels in UI
 
@@ -176,18 +195,26 @@ Capture implemented user-facing behavior that is easy to miss when reading only 
 
 1. The app uses one unified `Model library` bottom sheet rather than separate runtime/library tabs.
 2. Entry points into that surface include the top-bar model chip, the blocked composer `Setup` path, and runtime error/recovery actions such as `Open model library` or `Fix model library`.
-3. The sheet includes explicit sections for:
+3. The default `My models` view includes:
    - `Active model`
-   - `Downloaded models`
-   - `Available models`
-4. Import path remains available in all builds and writes versioned model records.
-5. Download path is available in the primary app build and supports queue/pause/resume/retry.
-6. Active downloads can be cancelled from the unified sheet; cancellation also cleans temporary files.
-7. Manual download completion result is `verified, activation pending`; it does not by itself prove the runtime is loaded.
-8. The `Get ready` path can auto-activate and load the matching version when a pending activation is set.
-9. Active version removal is guarded; the cleanup flow can clear the sole installed version when it is safe to do so.
-10. Runtime unlock is only confirmed after activation + refresh startup checks.
-11. Single-image attach is only claim-safe when the selected model packaging includes the required multimodal companion artifact (`mmproj`) and setup/provisioning evidence covers that companion sync, not just the primary model file.
+   - every active, paused, or recoverable download (including catalog downloads)
+   - `Ready on this device` model cards
+4. `Explore` contains catalog search and available models. Hugging Face URL/search/history is behind its `Advanced sources` disclosure.
+5. A downloaded-but-not-loaded model is labeled `Ready to use`; its `Use now` action persists that version as active and loads it. The stable action selector remains `model_library_load_<modelId>_<version>`.
+6. System Back closes `Advanced sources` first, then returns `Explore` to `My models`; the next Back dismisses the sheet. Swipe, scrim tap, and explicit Close dismiss the sheet immediately.
+7. Import path remains available in all builds and writes versioned model records.
+8. Download path is available in the primary app build and supports queue/pause/resume/retry.
+9. Active downloads can be cancelled from the unified sheet; cancellation also cleans temporary files.
+10. Manual download completion result is `verified, activation pending`; it does not by itself prove the runtime is loaded.
+11. The `Get ready` path can auto-activate and load the matching version when a pending activation is set.
+12. Active version removal is guarded; the cleanup flow can clear the sole installed version when it is safe to do so.
+13. Runtime unlock is only confirmed after activation + refresh startup checks.
+14. Single-image attach is only claim-safe when the selected model packaging includes the required multimodal companion artifact (`mmproj`) and setup/provisioning evidence covers that companion sync, not just the primary model file.
+15. Pending simple-first activation survives ViewModel recreation. An already-terminal matching task, or an already-installed target without a scheduler task, is reconciled on return before activation/load continues.
+16. Scheduler interruption reschedules background work; it is not presented as user cancellation.
+17. The target intent is recorded before either an existing-model load or a new download, and clears only when that exact model reaches send-ready or the user abandons it for another choice.
+18. Retryable transport failures remain queued for automatic retry instead of showing a false terminal failure; only terminal failure/cancel states require recovery.
+19. The simple-first start request and the manager enqueue path both serialize duplicate starts, so rapid taps cannot create parallel large downloads.
 
 ## Manifest Outage Behavior
 

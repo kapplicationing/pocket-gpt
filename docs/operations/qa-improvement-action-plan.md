@@ -387,7 +387,7 @@ Expose a small machine-readable status panel in the app or debug build for:
 1. runtime state
 2. active model state
 3. vision readiness
-4. voice beta readiness
+4. production voice readiness and qualification state
 5. tool/runtime availability
 
 Why:

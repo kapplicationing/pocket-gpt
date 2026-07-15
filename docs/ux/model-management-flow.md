@@ -1,6 +1,6 @@
 # Model Management and Runtime Readiness Flow
 
-Last updated: 2026-03-10
+Last updated: 2026-07-11
 Owner: Runtime + Android
 Lifecycle: Phase-2 implemented (versioned install + downloads + activation control)
 
@@ -75,11 +75,16 @@ Provisioning readiness (`RuntimeProvisioningSnapshot`) is separate:
 
 ### Simple-first `Get ready` action
 
-1. Refresh manifest.
-2. Pick default `Qwen3 0.6B (Q4)` version.
-3. Enqueue download.
-4. On completion, activate if needed and refresh runtime checks.
-5. If manifest/download is unavailable, import path remains available.
+1. Onboarding presents the product-default lightweight starter model in plain language.
+2. `Download & start chatting` records durable download-and-use intent before starting work.
+3. The onboarding surface stays visible through `Downloading your AI`, `Checking the download`, `Finishing setup`, and `Starting your AI`.
+4. Transfer progress shows bytes and ETA only while bytes are moving; verification, install, and runtime startup use phase status instead of a fake percentage.
+5. On completion, the app activates the version if needed, loads it, and refreshes runtime checks.
+6. `Start chatting` appears only when the loaded model also passes the send-readiness gate.
+7. Users may continue in the background; the durable intent still completes activation and load after recreation.
+8. Setup failure stays actionable in onboarding with retry and `Choose another model`; Model Library remains the expert recovery path.
+9. Retryable network interruptions stay queued and resume automatically; only exhausted or explicit failures ask the user to retry.
+10. If manifest/download is unavailable, local import remains available.
 
 ### A) Local import
 
@@ -95,12 +100,15 @@ Provisioning readiness (`RuntimeProvisioningSnapshot`) is separate:
 
 ### B) Download manager
 
-1. Open model library and refresh manifest.
-2. Start download for model/version.
-3. Task states: `Queued -> Downloading -> Verifying -> InstalledInactive/Completed`.
-4. Checksum and runtime compatibility are hard gates.
-5. Provenance metadata is retained; policy enforcement is determined by version verification policy (`INTEGRITY_ONLY` or `PROVENANCE_STRICT`).
-6. Pause/resume/retry/cancel are supported in-app.
+1. Model Library opens on `My models`: current runtime model, every active/recoverable download, and models already ready on the device.
+2. Choose `Explore` to search the official catalog and start a download for a model/version.
+3. `Advanced sources` inside Explore reveals the Hugging Face URL/search flow; it is not the default starting point.
+4. Task states: `Queued -> Downloading -> Verifying -> InstalledInactive/Completed`.
+5. Checksum and runtime compatibility are hard gates.
+6. A normal catalog or advanced-source download never replaces the current chat model automatically. Once installed, it moves to `My models` as `Ready to use`; `Use now` persists that version as active and loads it into the runtime.
+7. Provenance metadata is retained; policy enforcement is determined by version verification policy (`INTEGRITY_ONLY` or `PROVENANCE_STRICT`).
+8. Pause/resume/retry/cancel are supported in-app.
+9. WorkManager or OS interruption reschedules a transfer; only an explicit user action records `Cancelled`.
 
 ### C) Runtime controls
 
@@ -114,7 +122,7 @@ Provisioning readiness (`RuntimeProvisioningSnapshot`) is separate:
 
 1. Zero-active-model state stays blocked until provisioning + refresh checks succeed.
 2. Checksum/runtime mismatch never installs a version.
-3. Duplicate active non-terminal enqueue returns existing task ID.
+3. Concurrent duplicate active non-terminal enqueue returns the same task ID.
 4. One active task per model/version.
 5. Active version removal is guarded and only allowed through the cleanup flow when it can safely clear the sole installed version.
 6. Bundled catalog fallback remains available when remote fetch fails.

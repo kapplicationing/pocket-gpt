@@ -1,38 +1,65 @@
 # Documentation Drift Register
 
-Last updated: 2026-04-26  
+Last updated: 2026-07-12
 Owner: Product + Engineering
 
-This is the evergreen tracker for doc/code drift. Replace point-in-time audit notes with this register.
+This is the evergreen tracker for doc/code drift. Current code and fresh
+first-failure artifacts outrank historical status notes.
 
 ## Current Baseline
 
-1. Baseline includes current runtime refactor (`StreamChatRequestV2`, transcript projection, phase-driven status updates).
-2. Tool UX is prompt-first in UI. The legacy parser path exists but is disabled by default.
-3. Advanced controls/tools are available by default; first-session events are still tracked for telemetry.
-4. Current launch-scope lock is narrower than total implementation capability: prompt-first tools, single-image attach/Q&A, and limited-beta voice for controlled cohorts.
+1. The canonical public/product name is **PocketAgent**. `PocketGPT` and
+   `pocket-gpt` are repository/history identifiers only.
+2. The controlled-MVP product gate is promoted (`PROD-10: Promote`, required
+   rows `8/8`); publication remains blocked on release-package execution.
+3. Tool UX is prompt-first. Deeper parser/runtime capability is not the public
+   launch surface.
+4. Public image claims are limited to single-image Q&A with compatible
+   multimodal companion packaging.
+5. Voice is a production opt-in available in release builds with no device
+   allowlist. Retained multi-OEM and 24-hour qualification is still required
+   before broad wake, background-reliability, or battery claims.
+6. The July 11 runtime baseline includes durable/cancellable imports, model and
+   GGUF validation, serialized runtime ownership, cancellation/close recovery,
+   cloud-backup and Android 12+ transfer exclusions, and interaction-performance gates.
+7. `main` and `origin/main` contain the July 11 hardening baseline. No obsolete
+   local launch branch or unpublished code delta is part of the release plan.
 
 ## Active Drift Risks
 
-| ID | Area | Risk | Severity | Owner | Next Action |
+| ID | Area | Risk | Severity | Owner | Next action |
 |---|---|---|---|---|---|
-| DR-001 | Streaming contract docs | Runtime stream phase contract can drift when event types change | High | Engineering | Keep `docs/governance/docs-accuracy-manifest.json` synchronized with `MvpRuntimeFacade.kt` |
-| DR-002 | Tool UX docs | Prompt shortcuts can be mistaken for direct tool execution | High | Product + Android | Keep `docs/ux/implemented-behavior-reference.md` aligned with `ToolDialog.kt` + `ChatApp.kt` + `ChatViewModel.kt` |
-| DR-003 | Privacy claims | User-control claims can exceed current in-app controls | High | Product + Security | Keep `docs/security/privacy-model.md` bounded to implemented controls |
-| DR-004 | Test process duplication | Command/process guidance can split across multiple docs | Medium | Engineering + QA | Keep one playbook (`docs/testing/test-strategy.md`) and move task details to runbooks |
-| DR-005 | Evidence-note sprawl | Historical notes accumulate after decisions are stable | Medium | Product Ops | Prune superseded notes not referenced by active roadmap/PRD/ticket artifacts |
-| DR-006 | Voice scope and launch-claim drift | Docs can describe voice as either post-MVP or generally available instead of limited-beta/closed-track | High | Product + Release Ops | Keep launch-facing docs explicit that voice is in locked scope only as limited beta until evidence/privacy parity supports wider claims |
+| DR-001 | Streaming/runtime contracts | Phase, cancellation, timeout, and ownership docs can drift when runtime events change | High | Engineering | Keep `docs/governance/docs-accuracy-manifest.json` aligned with runtime facade, coordinator, and send reducers |
+| DR-002 | Tool UX | Prompt shortcuts can be mistaken for a rich direct-tool launcher | High | Product + Android | Keep launch copy and implemented behavior bounded to prompt-first entry |
+| DR-003 | Privacy claims | Retention/reset/per-tool claims can exceed current UI controls | High | Product + Security | Publish only `SEC-02` verified rows; keep `P-04` internal-only |
+| DR-004 | Testing guidance | Commands and evidence policy can split across docs | Medium | Engineering + QA | Keep `docs/testing/test-strategy.md` and `docs/testing/runbooks.md` canonical |
+| DR-005 | Evidence notes | Preserved evidence can be mistaken for current live CI/device state | High | Product Ops + QA | Use the evidence ledger for fixed baselines and regenerate launch readiness; use live CI for moving state |
+| DR-006 | Voice scope | Docs can confuse shipped availability with support qualification or imply debug/cohort gating | High | Product + Release Ops | Say production opt-in for availability; reserve broad reliability and battery claims for retained Samsung, Pixel, aggressive-background-OEM, and 24-hour evidence |
+| DR-008 | Publication status | A promoted product gate can be mistaken for Play Store publication readiness | High | Product + Release Ops | Keep `gate=promoted` separate from `publication=blocked` until the final package and metadata are complete |
 
 ## Completed This Cycle
 
-1. Replaced date-stamped sync audit with this register.
-2. Synced streaming/tool/privacy/routing docs to current code paths.
-3. Consolidated testing process docs into one playbook + one runbook index.
-4. Pruned superseded evidence notes that were not referenced by active planning/incident artifacts.
-5. Redesigned docs governance to include feature-doc-code contract checks and report freshness checks.
+1. Rebuilt the feature catalog around implemented, production-opt-in,
+   qualification-in-progress, post-MVP, and claim-safe states.
+2. Replaced stale May branch/publication guidance with the synchronized July 11
+   baseline and a store-publication-only closeout plan.
+3. Pruned resolved pilot, privacy-claim, and gate-policy questions from the open
+   questions log.
+4. Replaced the Phase-0 risk register with current controlled-MVP residual and
+   publication risks.
+5. Added the July 11 durable-import, runtime-ownership, backup/transfer, and performance
+   milestone to current product/program truth.
+6. Established PocketAgent as the canonical public/product name.
+7. Closed `DR-007`: customer-facing app strings, listing copy, support/privacy
+   pages, release metadata, launcher resources, and draft store graphics now use
+   PocketAgent. Historical QA screenshots remain unchanged and are explicitly
+   rejected for listing use; technical `pocketgpt` identifiers remain for
+   compatibility.
 
 ## Update Rule
 
-1. Add a register entry when a doc mismatch is discovered.
-2. Close entry only after doc and code are both updated and governance checks pass.
-3. Keep the table short; move closed historical details to git history.
+1. Add an entry when current code/evidence and a maintained document disagree.
+2. Close it only after both sides agree and governance checks pass.
+3. Keep active rows short; use git history, not this table, as the archive.
+4. Never copy a moving SHA, CI result, or temporary artifact into multiple status
+   docs when a canonical generator or ledger already exists.

@@ -1,3 +1,5 @@
+@file:Suppress("LongMethod", "MaxLineLength")
+
 package com.pocketagent.android.ui
 
 import androidx.compose.foundation.clickable
@@ -44,6 +46,7 @@ import com.pocketagent.android.ui.state.CompletionSettings
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
 import com.pocketagent.runtime.DEFAULT_CHAT_MAX_TOKENS
+import com.pocketagent.runtime.MAX_APP_CONTEXT_TOKENS
 import kotlin.math.roundToInt
 
 @Composable
@@ -240,7 +243,7 @@ private fun CompletionCommonSettingsSection(
             label = stringResource(id = R.string.ui_completion_max_tokens_label),
             description = stringResource(id = R.string.ui_completion_max_tokens_desc),
             value = maxTokens.toFloat(),
-            valueRange = DEFAULT_CHAT_MAX_TOKENS.toFloat()..8192f,
+            valueRange = DEFAULT_CHAT_MAX_TOKENS.toFloat()..MAX_APP_CONTEXT_TOKENS.toFloat(),
             valueLabel = maxTokens.toString(),
             onValueChange = { onMaxTokensChanged(it.roundToInt()) },
             onValueChangeFinished = onValueChangeFinished,

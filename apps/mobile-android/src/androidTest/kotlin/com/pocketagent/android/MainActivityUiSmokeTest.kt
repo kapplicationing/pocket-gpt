@@ -202,9 +202,9 @@ class MainActivityUiSmokeTest {
         composeRule.onNodeWithText("Open model library").performClick()
         composeRule.onNodeWithText("Model library").assertIsDisplayed()
         composeRule.captureScreenshotIfEnabled("ui-10-model-provisioning-sheet")
-        composeRule.onNodeWithText("Downloaded models").assertIsDisplayed()
-        composeRule.onNodeWithText("Qwen 3.5 0.8B (Q4)").assertIsDisplayed()
-        composeRule.onNodeWithText("Qwen3 1.7B Instruct (Q4_K_M)").assertIsDisplayed()
+        composeRule.onNodeWithText("Ready on this device").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Qwen 3.5 0.8B (Q4)").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Qwen3 1.7B Instruct (Q4_K_M)").performScrollTo().assertIsDisplayed()
         assertFalse(
             composeRule.onAllNodesWithText("Downloads are disabled in this build. Use local import for now.")
                 .fetchSemanticsNodes()

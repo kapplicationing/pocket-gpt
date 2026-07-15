@@ -1,3 +1,5 @@
+@file:Suppress("MaxLineLength")
+
 package com.pocketagent.android.ui
 
 import android.util.Log
@@ -125,16 +127,20 @@ internal fun ChatViewModel.setOnboardingPageInternal(page: Int) {
 }
 
 internal fun ChatViewModel.completeOnboardingInternal() {
+    val completedReadySetup = sendFlow.isRuntimeReadyForSend(_uiState.value.runtime)
     _uiState.update { state ->
         state.copy(
             activeSurface = ModalSurface.None,
             onboardingPage = ONBOARDING_LAST_PAGE,
-            firstSessionStage = if (sendFlow.isRuntimeReadyForSend(state.runtime)) {
+            firstSessionStage = if (completedReadySetup) {
                 FirstSessionStage.READY_TO_CHAT
             } else {
                 FirstSessionStage.GET_READY
             },
         )
+    }
+    if (completedReadySetup) {
+        recordFirstSessionEventOnce(TELEMETRY_EVENT_GET_READY_COMPLETED)
     }
     recordFirstSessionEventOnce(TELEMETRY_EVENT_SIMPLE_FIRST_ENTERED)
     persistState()

@@ -1,3 +1,5 @@
+@file:Suppress("MaxLineLength")
+
 package com.pocketagent.android.runtime
 
 import android.content.Context
@@ -38,6 +40,12 @@ class RuntimeTuningStoreTest {
         )
 
         assertEquals(baseConfig, resolved)
+    }
+
+    @Test
+    fun `persisted recommendation cannot exceed current context policy`() {
+        assertEquals(4096, cappedRecommendedContextTokens(recommended = 8192, base = 4096))
+        assertEquals(2048, cappedRecommendedContextTokens(recommended = null, base = 2048))
     }
 }
 

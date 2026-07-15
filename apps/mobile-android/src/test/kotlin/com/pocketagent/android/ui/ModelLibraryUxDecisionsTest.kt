@@ -1,20 +1,104 @@
 package com.pocketagent.android.ui
 
 import com.pocketagent.android.runtime.ProvisionedModelState
+import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
+import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
+import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.runtime.RuntimeLoadedModel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ModelLibraryUxDecisionsTest {
+    @Test
+    fun `only a live load request marks a model as switching`() {
+        val requestedModel = RuntimeLoadedModel(modelId = "qwen3.5-0.8b-q4", modelVersion = "q4_0")
+        val loading = ModelLoadingState.Loading(
+            requestedModel = requestedModel,
+            loadedModel = null,
+            lastUsedModel = null,
+            progress = null,
+            stage = "Loading model",
+            timestampMs = 1L,
+        )
+        val failed = ModelLoadingState.Error(
+            requestedModel = requestedModel,
+            loadedModel = null,
+            lastUsedModel = requestedModel,
+            message = "Out of memory",
+            code = "LOAD_FAILED",
+            detail = null,
+            timestampMs = 2L,
+        )
+        val offloading = ModelLoadingState.Offloading(
+            loadedModel = null,
+            lastUsedModel = requestedModel,
+            reason = null,
+            queued = false,
+            timestampMs = 3L,
+        )
+
+        assertEquals(requestedModel, loading.switchingRequestedModel())
+        assertNull(failed.switchingRequestedModel())
+        assertNull(offloading.switchingRequestedModel())
+    }
+
+    @Test
+    fun `back closes advanced sources before leaving explore`() {
+        val nextState = resolveModelLibraryBackNavigation(
+            ModelLibraryNavigationState(
+                selectedSection = ModelLibrarySection.EXPLORE,
+                advancedSourcesExpanded = true,
+            ),
+        )
+
+        assertEquals(
+            ModelLibraryNavigationState(selectedSection = ModelLibrarySection.EXPLORE),
+            nextState,
+        )
+    }
+
+    @Test
+    fun `back returns explore to my models before dismissing the library`() {
+        assertEquals(
+            ModelLibraryNavigationState(),
+            resolveModelLibraryBackNavigation(
+                ModelLibraryNavigationState(selectedSection = ModelLibrarySection.EXPLORE),
+            ),
+        )
+        assertNull(resolveModelLibraryBackNavigation(ModelLibraryNavigationState()))
+    }
+
+    @Test
+    fun `management downloads keep catalog transfers and recovery tasks visible`() {
+        val tasks = listOf(
+            downloadTask("catalog-transfer", DownloadTaskStatus.DOWNLOADING, updatedAtEpochMs = 4L),
+            downloadTask("retry-needed", DownloadTaskStatus.FAILED, updatedAtEpochMs = 3L),
+            downloadTask("installed", DownloadTaskStatus.INSTALLED_INACTIVE, updatedAtEpochMs = 2L),
+            downloadTask("completed", DownloadTaskStatus.COMPLETED, updatedAtEpochMs = 1L),
+        )
+
+        assertEquals(
+            listOf("catalog-transfer", "retry-needed"),
+            managementDownloadTasks(tasks).map { task -> task.taskId },
+        )
+    }
+
     @Test
     fun `provisioned default version is ready when not loaded`() {
         val model = provisionedModel(
             modelId = "qwen3.5-0.8b-q4",
             activeVersion = "q4_0",
-            installedVersions = listOf(versionDescriptor(modelId = "qwen3.5-0.8b-q4", version = "q4_0", isActive = true)),
+            installedVersions = listOf(
+                versionDescriptor(
+                    modelId = "qwen3.5-0.8b-q4",
+                    version = "q4_0",
+                    isActive = true,
+                ),
+            ),
         )
 
         val badge = resolveDownloadedModelBadge(
@@ -32,7 +116,13 @@ class ModelLibraryUxDecisionsTest {
         val model = provisionedModel(
             modelId = "qwen3-1.7b-q4_k_m",
             activeVersion = "q4_k_m",
-            installedVersions = listOf(versionDescriptor(modelId = "qwen3-1.7b-q4_k_m", version = "q4_k_m", isActive = true)),
+            installedVersions = listOf(
+                versionDescriptor(
+                    modelId = "qwen3-1.7b-q4_k_m",
+                    version = "q4_k_m",
+                    isActive = true,
+                ),
+            ),
         )
 
         val badge = resolveDownloadedModelBadge(
@@ -50,7 +140,13 @@ class ModelLibraryUxDecisionsTest {
         val model = provisionedModel(
             modelId = "qwen3.5-0.8b-q4",
             activeVersion = "q4_0",
-            installedVersions = listOf(versionDescriptor(modelId = "qwen3.5-0.8b-q4", version = "q4_0", isActive = true)),
+            installedVersions = listOf(
+                versionDescriptor(
+                    modelId = "qwen3.5-0.8b-q4",
+                    version = "q4_0",
+                    isActive = true,
+                ),
+            ),
         )
 
         val badge = resolveDownloadedModelBadge(
@@ -68,7 +164,13 @@ class ModelLibraryUxDecisionsTest {
         val model = provisionedModel(
             modelId = "qwen3.5-0.8b-q4",
             activeVersion = "q4_0",
-            installedVersions = listOf(versionDescriptor(modelId = "qwen3.5-0.8b-q4", version = "q4_0", isActive = true)),
+            installedVersions = listOf(
+                versionDescriptor(
+                    modelId = "qwen3.5-0.8b-q4",
+                    version = "q4_0",
+                    isActive = true,
+                ),
+            ),
         )
 
         val plan = resolveRemoveVersionPlan(
@@ -87,7 +189,13 @@ class ModelLibraryUxDecisionsTest {
         val model = provisionedModel(
             modelId = "qwen3.5-0.8b-q4",
             activeVersion = "q4_0",
-            installedVersions = listOf(versionDescriptor(modelId = "qwen3.5-0.8b-q4", version = "q4_0", isActive = true)),
+            installedVersions = listOf(
+                versionDescriptor(
+                    modelId = "qwen3.5-0.8b-q4",
+                    version = "q4_0",
+                    isActive = true,
+                ),
+            ),
         )
 
         val plan = resolveRemoveVersionPlan(
@@ -299,5 +407,26 @@ private fun versionDescriptor(
         fileSizeBytes = 1L,
         importedAtEpochMs = 1L,
         isActive = isActive,
+    )
+}
+
+private fun downloadTask(
+    taskId: String,
+    status: DownloadTaskStatus,
+    updatedAtEpochMs: Long,
+): DownloadTaskState {
+    return DownloadTaskState(
+        taskId = taskId,
+        modelId = "model-$taskId",
+        version = "q4",
+        downloadUrl = "https://example.test/$taskId.gguf",
+        expectedSha256 = "a".repeat(64),
+        provenanceIssuer = "issuer",
+        provenanceSignature = "signature",
+        runtimeCompatibility = "android-arm64-v8a",
+        status = status,
+        progressBytes = 50L,
+        totalBytes = 100L,
+        updatedAtEpochMs = updatedAtEpochMs,
     )
 }

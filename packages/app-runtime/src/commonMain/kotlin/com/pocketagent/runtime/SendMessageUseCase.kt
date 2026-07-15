@@ -120,22 +120,28 @@ internal class SendMessageUseCase(
         } else {
             conversationModule.listTurns(request.sessionId).map { turn -> turn.toInteractionMessage() }
         }
-        val memorySnippets = resolveMemorySnippets(
-            sessionId = request.sessionId,
-            latestUserText = latestUserText,
-            transcriptMessages = transcriptMessages,
-        )
-        requirePolicyEvent(
-            eventType = "memory.write_user_turn",
-            failureMessage = "Policy module rejected memory write event type.",
-        )
-        memoryModule.saveMemoryChunk(
-            MemoryChunk(
-                id = "mem-${System.currentTimeMillis()}",
-                content = latestUserText,
-                createdAtEpochMs = System.currentTimeMillis(),
-            ),
-        )
+        val memorySnippets = if (executionContext.memoryRetention == RuntimeMemoryRetention.RETAIN) {
+            resolveMemorySnippets(
+                sessionId = request.sessionId,
+                latestUserText = latestUserText,
+                transcriptMessages = transcriptMessages,
+            )
+        } else {
+            emptyList()
+        }
+        if (executionContext.memoryRetention == RuntimeMemoryRetention.RETAIN) {
+            requirePolicyEvent(
+                eventType = "memory.write_user_turn",
+                failureMessage = "Policy module rejected memory write event type.",
+            )
+            memoryModule.saveMemoryChunk(
+                MemoryChunk(
+                    id = "mem-${System.currentTimeMillis()}",
+                    content = latestUserText,
+                    createdAtEpochMs = System.currentTimeMillis(),
+                ),
+            )
+        }
 
         val contextBudget = routingModule.selectContextBudget(request.taskType, executionContext.deviceState)
         val promptCharBudget = when (request.taskType) {

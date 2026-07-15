@@ -65,6 +65,12 @@ import com.pocketagent.android.ui.state.resolveChatGateState
 import com.pocketagent.android.ui.theme.PocketTheme
 import com.pocketagent.android.voice.VoiceActivationController
 import com.pocketagent.android.voice.VoiceActivationUiState
+import com.pocketagent.android.voice.VoiceDictationController
+import com.pocketagent.android.voice.VoiceDictationIssue
+import com.pocketagent.android.voice.VoicePlaybackController
+import com.pocketagent.android.voice.VoicePlaybackIssue
+import com.pocketagent.android.voice.VoicePlaybackPhase
+import com.pocketagent.android.voice.appendDictationToDraft
 import com.pocketagent.core.ModelPreset
 import com.pocketagent.core.RoutingMode
 import com.pocketagent.inference.ModelCatalog
@@ -168,12 +174,24 @@ fun PocketAgentApp(
         voiceController ?: VoiceActivationController(context.applicationContext)
     }
     val voiceState by resolvedVoiceController.observe().collectAsState()
+    val voiceChatActions = rememberVoiceChatActions(
+        context = context,
+        alwaysOnListeningEnabled = voiceState.settings.enabled,
+        activeSessionId = { viewModel.activeSessionIdFlow.value },
+        onTranscriptReady = { transcript ->
+            viewModel.onComposerChanged(
+                appendDictationToDraft(viewModel.composerFlow.value.text, transcript),
+            )
+        },
+    )
     val sessionDeleteUndoState = rememberSessionDeleteUndoState(
         snackbarHostState = snackbarHostState,
         onCommitDelete = viewModel::deleteSession,
     )
     val isOffline = rememberIsOffline()
     val pendingGetReadyActivation by appViewModel.pendingGetReadyActivation.collectAsState()
+    val getReadySetupFailure by appViewModel.getReadySetupFailure.collectAsState()
+    val getReadySetupRequestInFlight by appViewModel.getReadySetupRequestInFlight.collectAsState()
     val modelImportRequest by appViewModel.modelImportRequest.collectAsState()
     val modelImportOperation by provisioningViewModel.modelImportOperation.collectAsState()
     val pendingMeteredWarningVersion by appViewModel.pendingMeteredWarningVersion.collectAsState()
@@ -286,14 +304,21 @@ fun PocketAgentApp(
             modelLibraryActions.refreshAll()
         }
     }
-    val runGetReadyFlow: () -> Unit = {
-        scope.launch {
-            modelLibraryActions.runGetReadyFlow()
+    val runGetReadyFlow: (Boolean) -> Unit = { openModelLibraryOnDownload ->
+        if (appViewModel.tryBeginGetReadySetupRequest()) {
+            scope.launch {
+                try {
+                    modelLibraryActions.runGetReadyFlow(openModelLibraryOnDownload)
+                } finally {
+                    appViewModel.finishGetReadySetupRequest()
+                }
+            }
         }
     }
+    val startOnboardingDownload: () -> Unit = { runGetReadyFlow(false) }
     val onBlockedAction: (ChatGatePrimaryAction) -> Unit = { action ->
         when (action) {
-            ChatGatePrimaryAction.GET_READY -> runGetReadyFlow()
+            ChatGatePrimaryAction.GET_READY -> runGetReadyFlow(true)
             ChatGatePrimaryAction.OPEN_MODEL_SETUP -> openModelSheet()
             ChatGatePrimaryAction.REFRESH_RUNTIME_CHECKS -> refreshAction()
             ChatGatePrimaryAction.NONE -> Unit
@@ -363,23 +388,56 @@ fun PocketAgentApp(
     DownloadTransitionHandler(
         downloadsFlow = provisioningViewModel.downloadsFlow,
         pendingGetReadyActivation = pendingGetReadyActivation,
-        loadedModelId = modelLoadingState.loadedModel?.modelId,
+        pendingGetReadyTargetIsInstalled = pendingGetReadyActivation?.let { (modelId, version) ->
+            provisioningSnapshot?.models
+                ?.firstOrNull { model -> model.modelId == modelId }
+                ?.installedVersions
+                ?.any { installedVersion -> installedVersion.version == version }
+                ?: false
+        } == true,
+        pendingMeteredWarningTarget = pendingMeteredWarningVersion?.let { version ->
+            version.modelId to version.version
+        },
+        setupRequestInFlight = getReadySetupRequestInFlight,
+        setupFailureMessage = getReadySetupFailure,
+        loadedModel = modelLoadingState.loadedModel,
+        activeModelLoadRequest = (modelLoadingState as? ModelLoadingState.Loading)?.requestedModel,
+        sendReady = chatGateState.isReady,
         lastDownloadTransitionRefreshKey = lastDownloadTransitionRefreshKey,
         readinessRefreshSequence = readinessRefreshSequence,
         onRefreshSnapshot = provisioningViewModel::refreshSnapshot,
         onSetStatusMessage = provisioningViewModel::setStatusMessage,
         onActivateVersion = modelLibraryActions::activateVersion,
         onLoadModel = { modelId, version ->
-            modelLibraryActions.loadModelVersion(modelId, version, closeOnSuccess = false)
+            modelLibraryActions.loadModelVersion(
+                modelId = modelId,
+                version = version,
+                closeOnSuccess = false,
+                userInitiated = false,
+            )
         },
         onShowBusyModelOperationFeedback = {
             snackbarHostState.showSnackbar(context.getString(R.string.ui_model_operation_already_in_progress))
         },
+        readPendingGetReadyActivation = { appViewModel.pendingGetReadyActivation.value },
+        readLoadedModel = { provisioningViewModel.modelLoadingState.value.loadedModel },
+        readActiveModelLoadRequest = {
+            (provisioningViewModel.modelLoadingState.value as? ModelLoadingState.Loading)?.requestedModel
+        },
+        readPendingMeteredWarningTarget = {
+            appViewModel.pendingMeteredWarningVersion.value?.let { version ->
+                version.modelId to version.version
+            }
+        },
+        onTryBeginGetReadySetupRequest = appViewModel::tryBeginGetReadySetupRequest,
+        onFinishGetReadySetupRequest = appViewModel::finishGetReadySetupRequest,
         onClearPendingGetReadyActivation = { appViewModel.setPendingGetReadyActivation(null) },
+        onSetGetReadySetupFailure = appViewModel::setGetReadySetupFailure,
         onIncrementReadinessRefreshSequence = appViewModel::incrementReadinessRefreshSequence,
         onRefreshRuntimeReadiness = viewModel::refreshRuntimeReadiness,
         onSetLastDownloadTransitionRefreshKey = appViewModel::setLastDownloadTransitionRefreshKey,
         onOpenModelSheet = openModelSheet,
+        keepPendingGetReadyFailure = activeSurface is ModalSurface.Onboarding,
     )
 
     LaunchedEffect(activeSurface) {
@@ -475,6 +533,13 @@ fun PocketAgentApp(
                             chatGateState.status == ChatGateStatus.READY,
                         onAttachImage = chatAppLaunchers.launchImageAttachmentPicker,
                         onBlockedAction = onBlockedAction,
+                        dictationController = voiceChatActions.dictationController,
+                        onToggleDictation = voiceChatActions::toggleDictation,
+                        onDictationIssue = { issue ->
+                            scope.launch {
+                                snackbarHostState.showSnackbar(context.getString(dictationIssueMessage(issue)))
+                            }
+                        },
                     )
                 },
             ) { innerPadding ->
@@ -495,6 +560,13 @@ fun PocketAgentApp(
                     onRegenerateMessage = viewModel::regenerateResponse,
                     onCopiedToClipboard = {
                         scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.ui_copied_to_clipboard)) }
+                    },
+                    playbackController = voiceChatActions.playbackController,
+                    onReadAloud = voiceChatActions::togglePlayback,
+                    onPlaybackIssue = { issue ->
+                        scope.launch {
+                            snackbarHostState.showSnackbar(context.getString(playbackIssueMessage(issue)))
+                        }
                     },
                     modifier = Modifier
                         .fillMaxSize()
@@ -526,6 +598,11 @@ fun PocketAgentApp(
         voiceState = voiceState,
         provisioningViewModel = provisioningViewModel,
         defaultGetReadyModelId = defaultGetReadyModelId,
+        pendingGetReadyActivation = pendingGetReadyActivation,
+        getReadySetupFailure = getReadySetupFailure,
+        getReadySetupRequestInFlight = getReadySetupRequestInFlight,
+        modelLoadingState = modelLoadingState,
+        onboardingSendReady = chatGateState.isReady,
         presetBackingStore = viewModel.presetBackingStore,
         pendingRoutingModeSwitch = pendingRoutingModeSwitch,
         pendingMeteredWarningVersion = pendingMeteredWarningVersion,
@@ -538,7 +615,12 @@ fun PocketAgentApp(
         onResetPresetMappings = onResetPresetMappings,
         onPerformanceProfileSelected = viewModel::setPerformanceProfile,
         onKeepAlivePreferenceSelected = viewModel::setKeepAlivePreference,
-        onVoiceActivationChanged = chatAppLaunchers.toggleVoiceActivation,
+        onVoiceActivationChanged = { enabled ->
+            if (enabled) {
+                voiceChatActions.dictationController.cancel()
+            }
+            chatAppLaunchers.toggleVoiceActivation(enabled)
+        },
         onRequestAssistantRole = chatAppLaunchers.requestAssistantRole,
         onOpenBatteryOptimizationSettings = chatAppLaunchers.openBatteryOptimizationSettings,
         onOpenAppSettings = chatAppLaunchers.openAppSettings,
@@ -553,7 +635,17 @@ fun PocketAgentApp(
             appViewModel.setPendingRoutingModeSwitch(null)
             loadModelVersionAction(modelId, version, false)
         },
-        onDismissMeteredDownloadWarning = { appViewModel.setPendingMeteredWarningVersion(null) },
+        onDismissMeteredDownloadWarning = {
+            val dismissedVersion = pendingMeteredWarningVersion
+            if (
+                dismissedVersion != null &&
+                pendingGetReadyActivation == (dismissedVersion.modelId to dismissedVersion.version)
+            ) {
+                appViewModel.setPendingGetReadyActivation(null)
+                appViewModel.setGetReadySetupFailure(null)
+            }
+            appViewModel.setPendingMeteredWarningVersion(null)
+        },
         onConfirmMeteredDownloadWarning = { version ->
             scope.launch {
                 provisioningViewModel.acknowledgeLargeDownloadCellularWarningAsync()
@@ -565,7 +657,13 @@ fun PocketAgentApp(
         onNextOnboardingPage = viewModel::nextOnboardingPage,
         onSkipOnboarding = viewModel::skipOnboarding,
         onFinishOnboarding = viewModel::completeOnboarding,
-        onStartOnboardingDownload = runGetReadyFlow,
+        onStartOnboardingDownload = startOnboardingDownload,
+        onChooseAnotherOnboardingModel = {
+            appViewModel.setPendingGetReadyActivation(null)
+            appViewModel.setGetReadySetupFailure(null)
+            viewModel.completeOnboarding()
+            viewModel.showSurface(ModalSurface.ModelLibrary)
+        },
     )
 }
 
@@ -579,10 +677,17 @@ private fun ChatComposerDock(
     autoFocusEnabled: Boolean,
     onAttachImage: () -> Unit,
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
+    dictationController: VoiceDictationController,
+    onToggleDictation: () -> Unit,
+    onDictationIssue: (VoiceDictationIssue) -> Unit,
 ) {
     val composer by viewModel.composerFlow.collectAsState()
     val activeSessionId by viewModel.activeSessionIdFlow.collectAsState()
     val thinkingEnabled by viewModel.currentThinkingEnabledFlow.collectAsState()
+    val dictationState by dictationController.observe().collectAsState()
+    LaunchedEffect(dictationState.errorEventId) {
+        dictationState.issue?.let(onDictationIssue)
+    }
     ComposerBar(
         text = composer.text,
         isSending = composer.isSending,
@@ -607,6 +712,8 @@ private fun ChatComposerDock(
         onBlockedAction = onBlockedAction,
         consumeImeInsets = consumeImeInsets,
         autoFocusEnabled = autoFocusEnabled,
+        dictationState = dictationState,
+        onToggleDictation = onToggleDictation,
     )
 }
 
@@ -648,10 +755,20 @@ private fun ChatScreenHost(
     onEditMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
     onCopiedToClipboard: () -> Unit,
+    playbackController: VoicePlaybackController,
+    onReadAloud: (String, String) -> Unit,
+    onPlaybackIssue: (VoicePlaybackIssue) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val activeSession by viewModel.activeSessionFlow.collectAsState()
     val streaming by viewModel.streamingFlow.collectAsState()
+    val playbackState by playbackController.observe().collectAsState()
+    LaunchedEffect(playbackState.errorEventId) {
+        playbackState.issue?.let(onPlaybackIssue)
+    }
+    LaunchedEffect(activeSession?.id) {
+        playbackController.stop()
+    }
     ChatScreenBody(
         runtime = runtime,
         activeSession = activeSession,
@@ -669,6 +786,10 @@ private fun ChatScreenHost(
         onEditMessage = onEditMessage,
         onRegenerateMessage = onRegenerateMessage,
         onCopiedToClipboard = onCopiedToClipboard,
+        speakingMessageId = playbackState.messageId.takeIf {
+            playbackState.phase == VoicePlaybackPhase.SPEAKING
+        },
+        onReadAloud = onReadAloud,
         modifier = modifier,
     )
 }
@@ -682,6 +803,11 @@ private fun ModalOrchestratorHost(
     voiceState: VoiceActivationUiState,
     provisioningViewModel: ModelProvisioningViewModel,
     defaultGetReadyModelId: String?,
+    pendingGetReadyActivation: Pair<String, String>?,
+    getReadySetupFailure: String?,
+    getReadySetupRequestInFlight: Boolean,
+    modelLoadingState: ModelLoadingState,
+    onboardingSendReady: Boolean,
     presetBackingStore: PresetBackingStore,
     pendingRoutingModeSwitch: Pair<String, String>?,
     pendingMeteredWarningVersion: ModelDistributionVersion?,
@@ -711,6 +837,7 @@ private fun ModalOrchestratorHost(
     onSkipOnboarding: () -> Unit,
     onFinishOnboarding: () -> Unit,
     onStartOnboardingDownload: () -> Unit,
+    onChooseAnotherOnboardingModel: () -> Unit,
 ) {
     if (
         activeSurface == ModalSurface.None &&
@@ -782,11 +909,18 @@ private fun ModalOrchestratorHost(
         activeSurface = activeSurface,
         viewModel = viewModel,
         provisioningViewModel = provisioningViewModel,
+        defaultGetReadyModelId = defaultGetReadyModelId,
+        pendingGetReadyActivation = pendingGetReadyActivation,
+        setupFailureMessage = getReadySetupFailure,
+        setupRequestInFlight = getReadySetupRequestInFlight,
+        modelLoadingState = modelLoadingState,
+        sendReady = onboardingSendReady,
         onOnboardingPageChanged = onOnboardingPageChanged,
         onNextOnboardingPage = onNextOnboardingPage,
         onSkipOnboarding = onSkipOnboarding,
         onFinishOnboarding = onFinishOnboarding,
         onStartOnboardingDownload = onStartOnboardingDownload,
+        onChooseAnotherModel = onChooseAnotherOnboardingModel,
     )
 }
 
@@ -912,31 +1046,65 @@ private fun ModalSurface.isSettingsDestination(): Boolean = when (this) {
 }
 
 @Composable
+@Suppress("LongParameterList")
 private fun OnboardingModalHost(
     activeSurface: ModalSurface,
     viewModel: ChatViewModel,
     provisioningViewModel: ModelProvisioningViewModel,
+    defaultGetReadyModelId: String?,
+    pendingGetReadyActivation: Pair<String, String>?,
+    setupFailureMessage: String?,
+    setupRequestInFlight: Boolean,
+    modelLoadingState: ModelLoadingState,
+    sendReady: Boolean,
     onOnboardingPageChanged: (Int) -> Unit,
     onNextOnboardingPage: () -> Unit,
     onSkipOnboarding: () -> Unit,
     onFinishOnboarding: () -> Unit,
     onStartOnboardingDownload: () -> Unit,
+    onChooseAnotherModel: () -> Unit,
 ) {
     if (activeSurface !is ModalSurface.Onboarding) {
         return
     }
 
     val onboardingPage by viewModel.onboardingPageFlow.collectAsState()
-    val downloads by provisioningViewModel.downloadsFlow.collectAsState()
+    val provisioningState by provisioningViewModel.uiState.collectAsState()
+    val setupState = remember(
+        defaultGetReadyModelId,
+        provisioningState,
+        pendingGetReadyActivation,
+        setupFailureMessage,
+        setupRequestInFlight,
+        modelLoadingState,
+        sendReady,
+    ) {
+        resolveOnboardingSetupUiState(
+            defaultModelId = defaultGetReadyModelId,
+            manifest = provisioningState.manifest,
+            provisioningSnapshot = provisioningState.snapshot,
+            downloads = provisioningState.downloads,
+            pendingActivation = pendingGetReadyActivation,
+            modelLoadingState = modelLoadingState,
+            sendReady = sendReady,
+            setupFailureMessage = setupFailureMessage,
+            setupRequestInFlight = setupRequestInFlight,
+        )
+    }
     OnboardingScreen(
         currentPage = onboardingPage,
         onPageChanged = onOnboardingPageChanged,
         onNextPage = onNextOnboardingPage,
         onSkip = onSkipOnboarding,
         onFinish = onFinishOnboarding,
-        isDownloading = downloads.any { !it.terminal },
-        downloadProgress = downloads.firstOrNull { !it.terminal }?.progressPercent?.div(100f),
+        setupState = setupState,
         onStartDownload = onStartOnboardingDownload,
+        onContinueInBackground = onFinishOnboarding,
+        onReviewSetup = {
+            onFinishOnboarding()
+            viewModel.showSurface(ModalSurface.ModelLibrary)
+        },
+        onChooseAnotherModel = onChooseAnotherModel,
     )
 }
 

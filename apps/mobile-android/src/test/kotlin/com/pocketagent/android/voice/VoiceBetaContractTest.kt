@@ -7,6 +7,21 @@ import kotlin.test.assertTrue
 
 class VoiceBetaContractTest {
     @Test
+    fun `notification permission blocks always on listening before microphone setup`() {
+        val contract = evaluateVoiceBetaContract(
+            notificationPermissionGranted = false,
+            microphonePermissionGranted = false,
+            assistantRoleSupported = true,
+            assistantRoleHeld = false,
+            batteryOptimizationIgnored = false,
+            modelsReady = true,
+        )
+
+        assertEquals(VoiceBetaBlockingIssue.NOTIFICATION_PERMISSION, contract.blockingIssue)
+        assertFalse(contract.canEnableAlwaysOnListening)
+    }
+
+    @Test
     fun `microphone permission blocks always on listening`() {
         val contract = evaluateVoiceBetaContract(
             microphonePermissionGranted = false,
@@ -27,14 +42,14 @@ class VoiceBetaContractTest {
         val contract = evaluateVoiceBetaContract(
             microphonePermissionGranted = true,
             assistantRoleSupported = true,
-            assistantRoleHeld = false,
+            assistantRoleHeld = true,
             batteryOptimizationIgnored = true,
             modelsReady = false,
         )
 
         assertEquals(VoiceBetaBlockingIssue.MODELS_MISSING, contract.blockingIssue)
         assertFalse(contract.canEnableAlwaysOnListening)
-        assertTrue(contract.needsAssistantRole)
+        assertFalse(contract.needsAssistantRole)
         assertFalse(contract.needsBatteryGuidance)
     }
 
@@ -53,7 +68,37 @@ class VoiceBetaContractTest {
     }
 
     @Test
-    fun `ready beta keeps assistant and battery follow up advisory only`() {
+    fun `dedicated wake model is a hard always on requirement`() {
+        val contract = evaluateVoiceBetaContract(
+            microphonePermissionGranted = true,
+            assistantRoleSupported = true,
+            assistantRoleHeld = true,
+            batteryOptimizationIgnored = true,
+            modelsReady = true,
+            dedicatedWakeWordReady = false,
+        )
+
+        assertEquals(VoiceBetaBlockingIssue.WAKE_WORD_MODEL_MISSING, contract.blockingIssue)
+        assertFalse(contract.canEnableAlwaysOnListening)
+    }
+
+    @Test
+    fun `release contract allows every runtime capable device`() {
+        val contract = evaluateVoiceBetaContract(
+            microphonePermissionGranted = true,
+            assistantRoleSupported = true,
+            assistantRoleHeld = true,
+            batteryOptimizationIgnored = true,
+            modelsReady = true,
+            dedicatedWakeWordReady = true,
+        )
+
+        assertEquals(null, contract.blockingIssue)
+        assertTrue(contract.canEnableAlwaysOnListening)
+    }
+
+    @Test
+    fun `selected Android assistant is required for durable hands free lifecycle`() {
         val contract = evaluateVoiceBetaContract(
             microphonePermissionGranted = true,
             assistantRoleSupported = true,
@@ -62,8 +107,8 @@ class VoiceBetaContractTest {
             modelsReady = true,
         )
 
-        assertEquals(null, contract.blockingIssue)
-        assertTrue(contract.canEnableAlwaysOnListening)
+        assertEquals(VoiceBetaBlockingIssue.ASSISTANT_NOT_SELECTED, contract.blockingIssue)
+        assertFalse(contract.canEnableAlwaysOnListening)
         assertTrue(contract.needsAssistantRole)
         assertTrue(contract.needsBatteryGuidance)
     }

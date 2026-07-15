@@ -79,32 +79,34 @@ class AndroidLocalToolRuntimeTest {
     fun `legacy custom execution returns invalid json for malformed payload`() {
         val runtime = AndroidLocalToolRuntime(context = TestToolRuntimeContext())
 
-        assertEquals(
-            ToolResult(false, "Invalid tool JSON."),
-            runtime.executeToolCall(
-                ToolCall(
-                    name = AndroidLocalToolRuntime.TOOL_TIMER_SET,
-                    jsonArgs = """{"duration_seconds":""",
-                ),
+        val result = runtime.executeToolCall(
+            ToolCall(
+                name = AndroidLocalToolRuntime.TOOL_TIMER_SET,
+                jsonArgs = """{"duration_seconds":""",
             ),
         )
+
+        assertFalse(result.success)
+        assertEquals("invalid_voice_action", result.validationErrorCode)
+        assertEquals("The action arguments were not valid JSON.", result.content)
     }
 
     @Test
     fun `typed custom execution returns invalid json for nested payload`() {
         val runtime = AndroidLocalToolRuntime(context = TestToolRuntimeContext())
 
-        assertEquals(
-            ToolResult(false, "Invalid tool JSON."),
-            runtime.executeToolRequest(
-                ToolCallRequest(
-                    name = AndroidLocalToolRuntime.TOOL_TIMER_SET,
-                    arguments = ToolArguments(
-                        mapOf("duration_seconds" to JsonObject(mapOf("value" to JsonPrimitive("30")))),
-                    ),
+        val result = runtime.executeToolRequest(
+            ToolCallRequest(
+                name = AndroidLocalToolRuntime.TOOL_TIMER_SET,
+                arguments = ToolArguments(
+                    mapOf("duration_seconds" to JsonObject(mapOf("value" to JsonPrimitive("30")))),
                 ),
             ),
         )
+
+        assertFalse(result.success)
+        assertEquals("invalid_voice_action", result.validationErrorCode)
+        assertEquals("Phone actions only accept simple values.", result.content)
     }
 
     @Test
@@ -125,6 +127,48 @@ class AndroidLocalToolRuntimeTest {
         assertEquals(request, base.lastExecutedRequest)
         assertNull(base.lastValidatedCall)
         assertNull(base.lastExecutedCall)
+    }
+
+    @Test
+    fun `raw valid phone action execution is blocked without an authorized plan`() {
+        val deviceActions = RecordingDeviceActions()
+        val runtime = AndroidLocalToolRuntime(
+            deviceActions = deviceActions,
+            testBoundary = Unit,
+        )
+
+        val result = runtime.executeToolCall(
+            ToolCall(
+                name = AndroidLocalToolRuntime.TOOL_TIMER_SET,
+                jsonArgs = """{"duration_seconds":"30"}""",
+            ),
+        )
+
+        assertFalse(result.success)
+        assertEquals("voice_action_not_authorized", result.validationErrorCode)
+        assertNull(deviceActions.executedTool)
+    }
+
+    @Test
+    fun `authorized validated phone action executes once through device boundary`() {
+        val deviceActions = RecordingDeviceActions()
+        val runtime = AndroidLocalToolRuntime(
+            deviceActions = deviceActions,
+            testBoundary = Unit,
+        )
+        val call = ToolCall(
+            name = AndroidLocalToolRuntime.TOOL_TIMER_SET,
+            jsonArgs = """{"duration_seconds":"30"}""",
+        )
+
+        val result = VoiceActionExecutionAuthorization.runAuthorized(call.name, call.jsonArgs) {
+            runtime.executeToolCall(call)
+        }
+
+        assertTrue(result.success)
+        assertEquals(AndroidLocalToolRuntime.TOOL_TIMER_SET, deviceActions.executedTool)
+        assertEquals("30", deviceActions.executedArguments?.get("duration_seconds"))
+        assertEquals("PocketAgent timer", deviceActions.executedArguments?.get("label"))
     }
 }
 
@@ -158,5 +202,16 @@ private class RecordingToolModule : ToolModule {
     override fun executeToolRequest(request: ToolCallRequest): ToolResult {
         lastExecutedRequest = request
         return ToolResult(true, "base-typed")
+    }
+}
+
+private class RecordingDeviceActions : AndroidDeviceActions {
+    var executedTool: String? = null
+    var executedArguments: Map<String, String>? = null
+
+    override fun execute(toolName: String, arguments: Map<String, String>): ToolResult {
+        executedTool = toolName
+        executedArguments = arguments
+        return ToolResult(true, "executed")
     }
 }

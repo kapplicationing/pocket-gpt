@@ -5,10 +5,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.longClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.pocketagent.android.ui.state.MessageKind
@@ -68,6 +71,51 @@ class MessageBubbleComposeContractTest {
             .performTouchInput { longClick(center) }
 
         assertTrue(composeRule.onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun completeAssistantBubbleExposesReadAloudAction() {
+        var readMessageId: String? = null
+        composeRule.setContent {
+            val clipboard = LocalClipboardManager.current
+            MaterialTheme {
+                MessageBubble(
+                    message = message(role = MessageRole.ASSISTANT, content = "hello assistant"),
+                    runtimeStatusDetail = null,
+                    onEditMessage = {},
+                    onRegenerateMessage = {},
+                    onCopiedToClipboard = {},
+                    clipboardManager = clipboard,
+                    onReadAloud = { id, _ -> readMessageId = id },
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Read response aloud").performClick()
+        composeRule.runOnIdle {
+            assertTrue(readMessageId?.startsWith(MessageRole.ASSISTANT.name) == true)
+        }
+    }
+
+    @Test
+    fun userBubbleDoesNotExposeReadAloud() {
+        composeRule.setContent {
+            val clipboard = LocalClipboardManager.current
+            MaterialTheme {
+                MessageBubble(
+                    message = message(role = MessageRole.USER, content = "hello user"),
+                    runtimeStatusDetail = null,
+                    onEditMessage = {},
+                    onRegenerateMessage = {},
+                    onCopiedToClipboard = {},
+                    clipboardManager = clipboard,
+                )
+            }
+        }
+
+        assertTrue(
+            composeRule.onAllNodesWithContentDescription("Read response aloud").fetchSemanticsNodes().isEmpty(),
+        )
     }
 
     private fun message(

@@ -1,3 +1,10 @@
+@file:Suppress(
+    "CyclomaticComplexMethod",
+    "LongMethod",
+    "MaxLineLength",
+    "UnusedPrivateMember",
+)
+
 package com.pocketagent.android.runtime
 
 import android.content.Context
@@ -613,7 +620,10 @@ class AndroidRuntimeTuningStore(
             nThreadsBatch = recommendation.nThreadsBatch ?: baseConfig.nThreadsBatch,
             nBatch = recommendation.nBatch ?: baseConfig.nBatch,
             nUbatch = recommendation.nUbatch ?: baseConfig.nUbatch,
-            nCtx = recommendation.nCtx ?: baseConfig.nCtx,
+            nCtx = cappedRecommendedContextTokens(
+                recommended = recommendation.nCtx,
+                base = baseConfig.nCtx,
+            ),
         )
     }
 
@@ -1140,6 +1150,9 @@ class AndroidRuntimeTuningStore(
         }
     }
 }
+
+internal fun cappedRecommendedContextTokens(recommended: Int?, base: Int): Int =
+    (recommended ?: base).coerceIn(1, base.coerceAtLeast(1))
 
 internal fun runtimeTuningKvPreset(preset: String?): String {
     return preset

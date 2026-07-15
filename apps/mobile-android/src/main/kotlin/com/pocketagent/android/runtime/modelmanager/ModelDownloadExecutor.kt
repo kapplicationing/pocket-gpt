@@ -65,6 +65,16 @@ internal data class VerifiedBundleArtifact(
     val sha256: String,
 )
 
+@Suppress(
+    "CyclomaticComplexMethod",
+    "LongMethod",
+    "LongParameterList",
+    "MaxLineLength",
+    "NestedBlockDepth",
+    "SwallowedException",
+    "ThrowsCount",
+    "TooGenericExceptionCaught",
+)
 internal class ModelDownloadExecutor(
     context: Context,
 ) {
@@ -93,6 +103,7 @@ internal class ModelDownloadExecutor(
                 message = "No network connection available.",
                 artifactStates = artifactStates,
                 activeArtifactId = artifactStates.firstOrNull()?.artifactId,
+                retryScheduled = retryAllowed,
             )
             return@withContext if (retryAllowed) {
                 DownloadExecutionOutcome.RETRY
@@ -517,6 +528,7 @@ internal class ModelDownloadExecutor(
                 message = "Download timed out.",
                 artifactStates = artifactStates,
                 activeArtifactId = currentActiveArtifactId(artifactStates),
+                retryScheduled = retryAllowed,
             )
             if (retryAllowed) {
                 DownloadExecutionOutcome.RETRY
@@ -593,6 +605,7 @@ internal class ModelDownloadExecutor(
                 message = error.message ?: "Download failed.",
                 artifactStates = artifactStates,
                 activeArtifactId = currentActiveArtifactId(artifactStates),
+                retryScheduled = retryAllowed,
             )
             if (retryAllowed) {
                 DownloadExecutionOutcome.RETRY
@@ -610,6 +623,7 @@ internal class ModelDownloadExecutor(
                 message = error.message ?: "Download failed unexpectedly.",
                 artifactStates = artifactStates,
                 activeArtifactId = currentActiveArtifactId(artifactStates),
+                retryScheduled = retryAllowed,
             )
             if (retryAllowed) {
                 DownloadExecutionOutcome.RETRY
@@ -945,6 +959,7 @@ internal class ModelDownloadExecutor(
         totalBytes: Long? = null,
         artifactStates: List<DownloadArtifactTaskState>? = null,
         activeArtifactId: String? = null,
+        retryScheduled: Boolean = false,
     ) {
         val previous = ModelDownloadTaskStateStore.get(appContext, taskId)
         val resolvedProgress = progressBytes
@@ -959,14 +974,14 @@ internal class ModelDownloadExecutor(
             taskId = taskId,
             modelId = modelId,
             version = version,
-            status = DownloadTaskStatus.FAILED,
+            status = downloadFailureStatus(retryScheduled),
             progressBytes = resolvedProgress,
             totalBytes = resolvedTotal,
             processingStage = processingStage,
             verificationPolicy = previous?.verificationPolicy
                 ?: DownloadVerificationPolicy.INTEGRITY_ONLY,
-            message = message,
-            reason = reason,
+            message = if (retryScheduled) "Retrying automatically: $message" else message,
+            reason = if (retryScheduled) null else reason,
             clearTransferMetrics = true,
             artifactStates = artifactStates,
             activeArtifactId = activeArtifactId,
@@ -1056,6 +1071,10 @@ internal class ModelDownloadExecutor(
         private const val SLOW_DRIP_MIN_PROGRESS_BYTES = 512L * 1024L
         private const val STORAGE_SAFETY_HEADROOM_BYTES = 32L * 1024L * 1024L
     }
+}
+
+internal fun downloadFailureStatus(retryScheduled: Boolean): DownloadTaskStatus {
+    return if (retryScheduled) DownloadTaskStatus.QUEUED else DownloadTaskStatus.FAILED
 }
 
 internal fun resolveResumeTransferBaseline(

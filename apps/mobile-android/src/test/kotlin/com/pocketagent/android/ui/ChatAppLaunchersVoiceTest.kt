@@ -8,7 +8,41 @@ import kotlin.test.assertNull
 
 class ChatAppLaunchersVoiceTest {
     @Test
+    fun `android 13 requests notifications before microphone for always on voice`() {
+        assertEquals(
+            VoiceActivationPermissionStep.REQUEST_NOTIFICATIONS,
+            nextVoiceActivationPermissionStep(
+                sdkInt = 33,
+                notificationPermissionGranted = false,
+                microphonePermissionGranted = false,
+            ),
+        )
+        assertEquals(
+            VoiceActivationPermissionStep.REQUEST_MICROPHONE,
+            nextVoiceActivationPermissionStep(
+                sdkInt = 33,
+                notificationPermissionGranted = true,
+                microphonePermissionGranted = false,
+            ),
+        )
+        assertEquals(
+            VoiceActivationPermissionStep.ENABLE,
+            nextVoiceActivationPermissionStep(
+                sdkInt = 32,
+                notificationPermissionGranted = false,
+                microphonePermissionGranted = true,
+            ),
+        )
+    }
+
+    @Test
     fun `maps blocked voice activation results to support copy`() {
+        assertEquals(
+            R.string.ui_voice_activation_notifications_required,
+            voiceActivationFeedback(
+                result = VoiceActivationEnableResult.BLOCKED_NOTIFICATION_PERMISSION,
+            )?.messageResId,
+        )
         assertEquals(
             R.string.ui_voice_activation_microphone_required,
             voiceActivationFeedback(
@@ -21,15 +55,27 @@ class ChatAppLaunchersVoiceTest {
                 result = VoiceActivationEnableResult.BLOCKED_MODELS_MISSING,
             )?.messageResId,
         )
+        assertEquals(
+            R.string.ui_voice_activation_assistant_required,
+            voiceActivationFeedback(
+                result = VoiceActivationEnableResult.BLOCKED_ASSISTANT_NOT_SELECTED,
+            )?.messageResId,
+        )
+        assertEquals(
+            R.string.ui_voice_activation_setup_started,
+            voiceActivationFeedback(
+                result = VoiceActivationEnableResult.SETUP_STARTED,
+            )?.messageResId,
+        )
     }
 
     @Test
     fun `uses stored start failure text for immediate support feedback`() {
         assertEquals(
-            "Voice beta could not start: foreground service blocked",
+            "Hands-free voice could not start: foreground service blocked",
             voiceActivationFeedback(
                 result = VoiceActivationEnableResult.START_FAILED,
-                lastError = "Voice beta could not start: foreground service blocked",
+                lastError = "Hands-free voice could not start: foreground service blocked",
             )?.messageText,
         )
     }

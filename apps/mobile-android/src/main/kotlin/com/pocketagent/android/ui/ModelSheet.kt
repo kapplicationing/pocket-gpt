@@ -43,6 +43,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -104,8 +106,12 @@ internal fun ModelSheet(
     modelLoadingState: ModelLoadingState,
     routingMode: RoutingMode,
     presetBackingStore: PresetBackingStore,
+    selectedSection: ModelLibrarySection = ModelLibrarySection.MY_MODELS,
+    advancedSourcesExpanded: Boolean = false,
     modelImportRequestActive: Boolean = false,
     hiddenVersionKeys: Set<String> = emptySet(),
+    onSectionSelected: (ModelLibrarySection) -> Unit = {},
+    onAdvancedSourcesExpandedChanged: (Boolean) -> Unit = {},
     onEvent: (ModelSheetEvent) -> Unit,
 ) {
     var searchQueryValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -113,24 +119,18 @@ internal fun ModelSheet(
     var huggingFaceInput by remember { mutableStateOf("") }
     var huggingFaceSearchQuery by remember { mutableStateOf("") }
     var selectedHuggingFaceTargetId by remember { mutableStateOf("") }
-    val activeModel = modelLoadingState.activeOrRequestedModel()
+    val activeModel = modelLoadingState.switchingRequestedModel()
     val busy = modelLoadingState is ModelLoadingState.Loading || modelLoadingState is ModelLoadingState.Offloading
     val modelImportBusy = runtimeState.isImporting || modelImportRequestActive
     val resolvedHuggingFaceTargetId = selectedHuggingFaceTargetId
         .takeIf { selected -> libraryState.huggingFaceTargets.any { it.modelId == selected } }
         ?: libraryState.huggingFaceTargets.firstOrNull()?.modelId.orEmpty()
-    val installedVersions by remember(libraryState.snapshot, searchQuery, hiddenVersionKeys) {
+    val installedVersions by remember(libraryState.snapshot, hiddenVersionKeys) {
         derivedStateOf {
             libraryState.snapshot.models.flatMap { model ->
                 model.installedVersions.map { version -> model to version }
             }.filter { (model, version) ->
-                versionIdentityKey(model.modelId, version.version) !in hiddenVersionKeys &&
-                    matchesModelSearch(
-                        searchQuery = searchQuery,
-                        modelId = model.modelId,
-                        displayName = model.displayName,
-                        version = version.version,
-                    )
+                versionIdentityKey(model.modelId, version.version) !in hiddenVersionKeys
             }
         }
     }
@@ -163,24 +163,8 @@ internal fun ModelSheet(
             }
         }
     }
-    val availableVersionKeys by remember(availableVersions) {
-        derivedStateOf {
-            availableVersions.mapTo(linkedSetOf()) { entry ->
-                versionIdentityKey(entry.version.modelId, entry.version.version)
-            }
-        }
-    }
-    val downloadQueueTasks by remember(libraryState.downloads, availableVersionKeys) {
-        derivedStateOf {
-            libraryState.downloads
-                .filter { task ->
-                    versionIdentityKey(task.modelId, task.version) !in availableVersionKeys &&
-                        (!task.terminal ||
-                            task.status == DownloadTaskStatus.FAILED ||
-                            task.status == DownloadTaskStatus.CANCELLED)
-                }
-                .sortedByDescending { task -> task.updatedAtEpochMs }
-        }
+    val downloadQueueTasks by remember(libraryState.downloads) {
+        derivedStateOf { managementDownloadTasks(libraryState.downloads) }
     }
     val downloadTasksByKey by remember(libraryState.downloads) {
         derivedStateOf {
@@ -189,9 +173,13 @@ internal fun ModelSheet(
             }
         }
     }
-    val listState = rememberLazyListState()
+    val myModelsListState = rememberLazyListState()
+    val exploreListState = rememberLazyListState()
+    val listState = when (selectedSection) {
+        ModelLibrarySection.MY_MODELS -> myModelsListState
+        ModelLibrarySection.EXPLORE -> exploreListState
+    }
     val scope = rememberCoroutineScope()
-    val huggingFaceSectionIndex = 2 + if (libraryState.statusMessage?.isNotBlank() == true) 1 else 0
 
     LazyColumn(
         state = listState,
@@ -214,14 +202,9 @@ internal fun ModelSheet(
             }
         }
         item {
-            OutlinedTextField(
-                value = searchQueryValue,
-                onValueChange = { searchQueryValue = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("model_search_input"),
-                singleLine = true,
-                placeholder = { Text(stringResource(id = R.string.ui_search_models)) },
+            ModelLibrarySectionTabs(
+                selectedSection = selectedSection,
+                onSectionSelected = onSectionSelected,
             )
         }
         libraryState.statusMessage?.takeIf { message -> message.isNotBlank() }?.let { message ->
@@ -229,189 +212,224 @@ internal fun ModelSheet(
                 StatusMessageCard(message = message)
             }
         }
-        item(key = HUGGING_FACE_SECTION_KEY) {
-            HuggingFaceAcquisitionSection(
-                input = huggingFaceInput,
-                selectedTargetId = resolvedHuggingFaceTargetId,
-                targets = libraryState.huggingFaceTargets,
-                state = libraryState.huggingFaceAcquisitionState,
-                downloads = libraryState.downloads,
-                enqueuingModelIds = libraryState.enqueuingModelIds,
-                searchQuery = huggingFaceSearchQuery,
-                searchState = libraryState.huggingFaceSearchState,
-                recentModels = libraryState.recentHuggingFaceModels,
-                availableStorageBytes = libraryState.snapshot.storageSummary.freeBytes,
-                onInputChange = { value ->
-                    if (value != huggingFaceInput) {
-                        huggingFaceInput = value
-                        onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
-                    }
-                },
-                onSearchQueryChange = { value -> huggingFaceSearchQuery = value },
-                onSelectTarget = { targetId ->
-                    if (targetId != resolvedHuggingFaceTargetId) {
-                        selectedHuggingFaceTargetId = targetId
-                        onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
-                    }
-                },
-                onCheck = {
-                    onEvent(
-                        ModelSheetEvent.ResolveHuggingFaceCandidate(
-                            input = huggingFaceInput,
-                            targetModelId = resolvedHuggingFaceTargetId,
-                        ),
-                    )
-                },
-                onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
-                onSearch = {
-                    onEvent(ModelSheetEvent.SearchHuggingFaceFiles(huggingFaceSearchQuery))
-                },
-                onClearSearch = { onEvent(ModelSheetEvent.ClearHuggingFaceSearch) },
-                onUseSearchResult = { result ->
-                    huggingFaceInput = result.canonicalUrl
-                    onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
-                    scope.launch {
-                        listState.animateScrollToItem(huggingFaceSectionIndex)
-                    }
-                },
-                onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
-                onOpenExternalUrl = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
-                onRemoveRecent = { recent -> onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id)) },
-                onClearRecent = { onEvent(ModelSheetEvent.ClearRecentHuggingFaceModels) },
-                onRecheckRecent = { recent ->
-                    huggingFaceInput = recent.originUrl
-                    selectedHuggingFaceTargetId = recent.targetModelId
-                    onEvent(
-                        ModelSheetEvent.ResolveHuggingFaceCandidate(
-                            input = recent.originUrl,
-                            targetModelId = recent.targetModelId,
-                        ),
-                    )
-                    scope.launch {
-                        listState.animateScrollToItem(huggingFaceSectionIndex)
-                    }
-                },
-            )
-        }
-        item {
-            ActiveModelSection(
-                modelLoadingState = modelLoadingState,
-                routingMode = routingMode,
-                presetBackingStore = presetBackingStore,
-                onRetryLoad = { model -> onEvent(ModelSheetEvent.RetryLoad(model.modelId, model.modelVersion)) },
-                onLoadLastUsedModel = { onEvent(ModelSheetEvent.LoadLastUsedModel) },
-                onOffloadModel = { onEvent(ModelSheetEvent.OffloadModel) },
-                onChooseAnother = {
-                    scope.launch {
-                        val visibleMatch = listState.layoutInfo.visibleItemsInfo
-                            .firstOrNull { it.key == DOWNLOADED_SECTION_KEY }
-                        if (visibleMatch != null) {
-                            listState.animateScrollToItem(visibleMatch.index)
-                        } else {
-                            // Item not yet visible — scroll toward the end where
-                            // the downloaded-section header lives, then refine.
-                            listState.animateScrollToItem(
-                                listState.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1,
-                            )
-                            val match = listState.layoutInfo.visibleItemsInfo
-                                .firstOrNull { it.key == DOWNLOADED_SECTION_KEY }
-                            if (match != null) {
-                                listState.animateScrollToItem(match.index)
+        when (selectedSection) {
+            ModelLibrarySection.MY_MODELS -> {
+                item {
+                    ActiveModelSection(
+                        modelLoadingState = modelLoadingState,
+                        routingMode = routingMode,
+                        presetBackingStore = presetBackingStore,
+                        onRetryLoad = { model ->
+                            onEvent(ModelSheetEvent.RetryLoad(model.modelId, model.modelVersion))
+                        },
+                        onLoadLastUsedModel = { onEvent(ModelSheetEvent.LoadLastUsedModel) },
+                        onOffloadModel = { onEvent(ModelSheetEvent.OffloadModel) },
+                        onChooseAnother = {
+                            scope.launch {
+                                val visibleMatch = listState.layoutInfo.visibleItemsInfo
+                                    .firstOrNull { it.key == DOWNLOADED_SECTION_KEY }
+                                if (visibleMatch != null) {
+                                    listState.animateScrollToItem(visibleMatch.index)
+                                } else {
+                                    listState.animateScrollToItem(
+                                        listState.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1,
+                                    )
+                                    listState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.key == DOWNLOADED_SECTION_KEY }
+                                        ?.let { match -> listState.animateScrollToItem(match.index) }
+                                }
                             }
-                        }
+                        },
+                    )
+                }
+                item { HorizontalDivider() }
+                if (downloadQueueTasks.isNotEmpty()) {
+                    item {
+                        SectionHeader(
+                            title = stringResource(id = R.string.ui_model_download_queue),
+                            subtitle = stringResource(id = R.string.ui_model_download_queue_subtitle),
+                        )
                     }
-                },
-            )
-        }
-        item { HorizontalDivider() }
-        if (downloadQueueTasks.isNotEmpty()) {
-            item {
-                SectionHeader(
-                    title = stringResource(id = R.string.ui_model_download_queue),
-                    subtitle = stringResource(id = R.string.ui_model_download_queue_subtitle),
-                )
+                    items(
+                        downloadQueueTasks,
+                        key = { task -> "download_queue:${task.taskId}" },
+                    ) { task ->
+                        DownloadQueueTaskCard(
+                            task = task,
+                            onPauseDownload = { taskId -> onEvent(ModelSheetEvent.PauseDownload(taskId)) },
+                            onResumeDownload = { taskId -> onEvent(ModelSheetEvent.ResumeDownload(taskId)) },
+                            onRetryDownload = { taskId -> onEvent(ModelSheetEvent.RetryDownload(taskId)) },
+                            onCancelDownload = { taskId -> onEvent(ModelSheetEvent.CancelDownload(taskId)) },
+                        )
+                    }
+                    item { HorizontalDivider() }
+                }
+                item(key = DOWNLOADED_SECTION_KEY) {
+                    SectionHeader(
+                        title = stringResource(id = R.string.ui_model_library_ready_models),
+                        subtitle = stringResource(id = R.string.ui_model_library_ready_models_subtitle),
+                    )
+                }
+                if (installedVersions.isEmpty()) {
+                    item {
+                        EmptyStateCard(
+                            title = stringResource(id = R.string.ui_no_downloaded_models_title),
+                            body = stringResource(id = R.string.ui_no_downloaded_models_body),
+                        )
+                    }
+                } else {
+                    items(
+                        installedVersions,
+                        key = { (model, version) -> installedVersionItemKey(model.modelId, version.version) },
+                    ) { (model, version) ->
+                        DownloadedModelCard(
+                            model = model,
+                            version = version,
+                            eligibility = libraryState.eligibility.eligibilityFor(model.modelId, version.version),
+                            activeModel = activeModel,
+                            loadedModel = modelLoadingState.loadedModel,
+                            busy = busy,
+                            isImporting = modelImportBusy,
+                            onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
+                            onLoadVersion = { modelId, ver -> onEvent(ModelSheetEvent.LoadVersion(modelId, ver)) },
+                            onRemoveVersion = { modelId, ver -> onEvent(ModelSheetEvent.RequestRemove(modelId, ver)) },
+                        )
+                    }
+                }
+                item {
+                    ModelLibraryBrowseModelsCard(
+                        onBrowseModels = { onSectionSelected(ModelLibrarySection.EXPLORE) },
+                    )
+                }
             }
-            items(
-                downloadQueueTasks,
-                key = { task -> "download_queue:${task.taskId}" },
-            ) { task ->
-                DownloadQueueTaskCard(
-                    task = task,
-                    onPauseDownload = { taskId -> onEvent(ModelSheetEvent.PauseDownload(taskId)) },
-                    onResumeDownload = { taskId -> onEvent(ModelSheetEvent.ResumeDownload(taskId)) },
-                    onRetryDownload = { taskId -> onEvent(ModelSheetEvent.RetryDownload(taskId)) },
-                    onCancelDownload = { taskId -> onEvent(ModelSheetEvent.CancelDownload(taskId)) },
-                )
-            }
-            item { HorizontalDivider() }
-        }
-        item(key = DOWNLOADED_SECTION_KEY) {
-            SectionHeader(
-                title = stringResource(id = R.string.ui_downloaded_models),
-                subtitle = stringResource(id = R.string.ui_downloaded_models_subtitle),
-            )
-        }
-        if (installedVersions.isEmpty()) {
-            item {
-                EmptyStateCard(
-                    title = stringResource(id = R.string.ui_no_downloaded_models_title),
-                    body = stringResource(id = R.string.ui_no_downloaded_models_body),
-                )
-            }
-        } else {
-            items(
-                installedVersions,
-                key = { (model, version) -> installedVersionItemKey(model.modelId, version.version) },
-            ) { (model, version) ->
-                DownloadedModelCard(
-                    model = model,
-                    version = version,
-                    eligibility = libraryState.eligibility.eligibilityFor(model.modelId, version.version),
-                    activeModel = activeModel,
-                    loadedModel = modelLoadingState.loadedModel,
-                    busy = busy,
-                    isImporting = modelImportBusy,
-                    onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
-                    onLoadVersion = { modelId, ver -> onEvent(ModelSheetEvent.LoadVersion(modelId, ver)) },
-                    onRemoveVersion = { modelId, ver -> onEvent(ModelSheetEvent.RequestRemove(modelId, ver)) },
-                )
-            }
-        }
-        item { HorizontalDivider() }
-        item {
-            SectionHeader(
-                title = stringResource(id = R.string.ui_available_models),
-                subtitle = stringResource(id = R.string.ui_available_models_subtitle),
-            )
-        }
-        if (!libraryState.isManifestLoaded) {
-            items(3) { ShimmerModelCard() }
-        } else if (availableVersions.isEmpty()) {
-            item {
-                EmptyStateCard(
-                    title = stringResource(id = R.string.ui_catalog_up_to_date_title),
-                    body = stringResource(id = R.string.ui_catalog_up_to_date_body),
-                )
-            }
-        } else {
-            items(
-                availableVersions,
-                key = { entry -> downloadVersionItemKey(entry.version.modelId, entry.version.version) },
-            ) { entry ->
-                AvailableModelCard(
-                    displayName = entry.displayName,
-                    version = entry.version,
-                    eligibility = entry.eligibility,
-                    task = downloadTasksByKey[versionIdentityKey(entry.version.modelId, entry.version.version)],
-                    isImporting = modelImportBusy,
-                    isEnqueuing = versionIdentityKey(entry.version.modelId, entry.version.version) in libraryState.enqueuingModelIds,
-                    onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
-                    onDownloadVersion = { ver -> onEvent(ModelSheetEvent.DownloadVersion(ver)) },
-                    onPauseDownload = { taskId -> onEvent(ModelSheetEvent.PauseDownload(taskId)) },
-                    onResumeDownload = { taskId -> onEvent(ModelSheetEvent.ResumeDownload(taskId)) },
-                    onRetryDownload = { taskId -> onEvent(ModelSheetEvent.RetryDownload(taskId)) },
-                    onCancelDownload = { taskId -> onEvent(ModelSheetEvent.CancelDownload(taskId)) },
-                )
+
+            ModelLibrarySection.EXPLORE -> {
+                item {
+                    OutlinedTextField(
+                        value = searchQueryValue,
+                        onValueChange = { searchQueryValue = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("model_search_input"),
+                        singleLine = true,
+                        placeholder = { Text(stringResource(id = R.string.ui_search_models)) },
+                    )
+                }
+                item {
+                    SectionHeader(
+                        title = stringResource(id = R.string.ui_available_models),
+                        subtitle = stringResource(id = R.string.ui_available_models_subtitle),
+                    )
+                }
+                if (!libraryState.isManifestLoaded) {
+                    items(3) { ShimmerModelCard() }
+                } else if (availableVersions.isEmpty()) {
+                    item {
+                        EmptyStateCard(
+                            title = stringResource(id = R.string.ui_catalog_up_to_date_title),
+                            body = stringResource(id = R.string.ui_catalog_up_to_date_body),
+                        )
+                    }
+                } else {
+                    items(
+                        availableVersions,
+                        key = { entry -> downloadVersionItemKey(entry.version.modelId, entry.version.version) },
+                    ) { entry ->
+                        AvailableModelCard(
+                            displayName = entry.displayName,
+                            version = entry.version,
+                            eligibility = entry.eligibility,
+                            task = downloadTasksByKey[versionIdentityKey(entry.version.modelId, entry.version.version)],
+                            isImporting = modelImportBusy,
+                            isEnqueuing = versionIdentityKey(entry.version.modelId, entry.version.version) in libraryState.enqueuingModelIds,
+                            onImportModel = { modelId -> onEvent(ModelSheetEvent.ImportModel(modelId)) },
+                            onDownloadVersion = { ver -> onEvent(ModelSheetEvent.DownloadVersion(ver)) },
+                            onPauseDownload = { taskId -> onEvent(ModelSheetEvent.PauseDownload(taskId)) },
+                            onResumeDownload = { taskId -> onEvent(ModelSheetEvent.ResumeDownload(taskId)) },
+                            onRetryDownload = { taskId -> onEvent(ModelSheetEvent.RetryDownload(taskId)) },
+                            onCancelDownload = { taskId -> onEvent(ModelSheetEvent.CancelDownload(taskId)) },
+                        )
+                    }
+                }
+                item { HorizontalDivider() }
+                item {
+                    ModelLibraryAdvancedSourcesCard(
+                        expanded = advancedSourcesExpanded,
+                        onExpandedChange = onAdvancedSourcesExpandedChanged,
+                    )
+                }
+                if (advancedSourcesExpanded) {
+                    item(key = HUGGING_FACE_SECTION_KEY) {
+                        HuggingFaceAcquisitionSection(
+                            input = huggingFaceInput,
+                            selectedTargetId = resolvedHuggingFaceTargetId,
+                            targets = libraryState.huggingFaceTargets,
+                            state = libraryState.huggingFaceAcquisitionState,
+                            downloads = libraryState.downloads,
+                            enqueuingModelIds = libraryState.enqueuingModelIds,
+                            searchQuery = huggingFaceSearchQuery,
+                            searchState = libraryState.huggingFaceSearchState,
+                            recentModels = libraryState.recentHuggingFaceModels,
+                            availableStorageBytes = libraryState.snapshot.storageSummary.freeBytes,
+                            onInputChange = { value ->
+                                if (value != huggingFaceInput) {
+                                    huggingFaceInput = value
+                                    onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
+                                }
+                            },
+                            onSearchQueryChange = { value -> huggingFaceSearchQuery = value },
+                            onSelectTarget = { targetId ->
+                                if (targetId != resolvedHuggingFaceTargetId) {
+                                    selectedHuggingFaceTargetId = targetId
+                                    onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
+                                }
+                            },
+                            onCheck = {
+                                onEvent(
+                                    ModelSheetEvent.ResolveHuggingFaceCandidate(
+                                        input = huggingFaceInput,
+                                        targetModelId = resolvedHuggingFaceTargetId,
+                                    ),
+                                )
+                            },
+                            onClear = { onEvent(ModelSheetEvent.ClearHuggingFaceCandidate) },
+                            onSearch = {
+                                onEvent(ModelSheetEvent.SearchHuggingFaceFiles(huggingFaceSearchQuery))
+                            },
+                            onClearSearch = { onEvent(ModelSheetEvent.ClearHuggingFaceSearch) },
+                            onUseSearchResult = { result ->
+                                huggingFaceInput = result.canonicalUrl
+                                onEvent(ModelSheetEvent.ClearHuggingFaceCandidate)
+                                scope.launch {
+                                    listState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.key == HUGGING_FACE_SECTION_KEY }
+                                        ?.let { item -> listState.animateScrollToItem(item.index) }
+                                }
+                            },
+                            onDownloadVersion = { version -> onEvent(ModelSheetEvent.DownloadVersion(version)) },
+                            onOpenExternalUrl = { url -> onEvent(ModelSheetEvent.OpenExternalUrl(url)) },
+                            onRemoveRecent = { recent ->
+                                onEvent(ModelSheetEvent.RemoveRecentHuggingFaceModel(recent.id))
+                            },
+                            onClearRecent = { onEvent(ModelSheetEvent.ClearRecentHuggingFaceModels) },
+                            onRecheckRecent = { recent ->
+                                huggingFaceInput = recent.originUrl
+                                selectedHuggingFaceTargetId = recent.targetModelId
+                                onEvent(
+                                    ModelSheetEvent.ResolveHuggingFaceCandidate(
+                                        input = recent.originUrl,
+                                        targetModelId = recent.targetModelId,
+                                    ),
+                                )
+                                scope.launch {
+                                    listState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.key == HUGGING_FACE_SECTION_KEY }
+                                        ?.let { item -> listState.animateScrollToItem(item.index) }
+                                }
+                            },
+                        )
+                    }
+                }
             }
         }
         item {
@@ -422,6 +440,109 @@ internal fun ModelSheet(
                 Button(onClick = { onEvent(ModelSheetEvent.Close) }) {
                     Text(stringResource(id = R.string.ui_close))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelLibrarySectionTabs(
+    selectedSection: ModelLibrarySection,
+    onSectionSelected: (ModelLibrarySection) -> Unit,
+) {
+    TabRow(selectedTabIndex = selectedSection.ordinal) {
+        Tab(
+            selected = selectedSection == ModelLibrarySection.MY_MODELS,
+            onClick = { onSectionSelected(ModelLibrarySection.MY_MODELS) },
+            modifier = Modifier.testTag("model_library_tab_my_models"),
+            text = { Text(stringResource(id = R.string.ui_model_library_tab_my_models)) },
+        )
+        Tab(
+            selected = selectedSection == ModelLibrarySection.EXPLORE,
+            onClick = { onSectionSelected(ModelLibrarySection.EXPLORE) },
+            modifier = Modifier.testTag("model_library_tab_explore"),
+            text = { Text(stringResource(id = R.string.ui_model_library_tab_explore)) },
+        )
+    }
+}
+
+@Composable
+private fun ModelLibraryBrowseModelsCard(onBrowseModels: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_browse_models_card"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(PocketAgentDimensions.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        ) {
+            Text(
+                text = stringResource(id = R.string.ui_model_library_browse_title),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_model_library_browse_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onBrowseModels,
+                modifier = Modifier.testTag("model_library_browse_models"),
+            ) {
+                Text(stringResource(id = R.string.ui_model_library_browse_action))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelLibraryAdvancedSourcesCard(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+) {
+    val expansionState = stringResource(
+        id = if (expanded) R.string.a11y_expanded else R.string.a11y_collapsed,
+    )
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("model_library_advanced_sources"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(PocketAgentDimensions.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(PocketAgentDimensions.sectionSpacing),
+        ) {
+            Text(
+                text = stringResource(id = R.string.ui_model_library_advanced_sources),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(id = R.string.ui_model_library_advanced_sources_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = { onExpandedChange(!expanded) },
+                modifier = Modifier
+                    .testTag("model_library_advanced_sources_toggle")
+                    .semantics { stateDescription = expansionState },
+            ) {
+                Text(
+                    stringResource(
+                        id = if (expanded) {
+                            R.string.ui_model_library_hide_advanced_sources
+                        } else {
+                            R.string.ui_model_library_show_advanced_sources
+                        },
+                    ),
+                )
             }
         }
     }
@@ -1585,9 +1706,9 @@ private fun DownloadedModelCard(
                 StatusRow(
                     color = statusColor,
                     label = when (badge) {
-                        DownloadedModelBadge.LOADED -> stringResource(id = R.string.ui_loaded)
-                        DownloadedModelBadge.SWITCHING -> stringResource(id = R.string.ui_switching)
-                        DownloadedModelBadge.READY -> stringResource(id = R.string.ui_ready)
+                        DownloadedModelBadge.LOADED -> stringResource(id = R.string.ui_model_library_in_use)
+                        DownloadedModelBadge.SWITCHING -> stringResource(id = R.string.ui_model_library_starting)
+                        DownloadedModelBadge.READY -> stringResource(id = R.string.ui_model_library_ready_to_use)
                     },
                     pulsing = badge == DownloadedModelBadge.SWITCHING,
                 )
@@ -1620,7 +1741,15 @@ private fun DownloadedModelCard(
                             },
                         ),
                 ) {
-                    Text(stringResource(id = if (isLoaded) R.string.ui_loaded else R.string.ui_load))
+                    Text(
+                        stringResource(
+                            id = when (badge) {
+                                DownloadedModelBadge.LOADED -> R.string.ui_model_library_in_use
+                                DownloadedModelBadge.SWITCHING -> R.string.ui_model_library_starting
+                                DownloadedModelBadge.READY -> R.string.ui_model_library_use_now
+                            },
+                        ),
+                    )
                 }
                 OutlinedButton(
                     onClick = { haptic(); onImportModel(model.modelId) },
@@ -1889,7 +2018,7 @@ private fun DownloadQueueTaskCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("model_library_download_queue"),
+            .testTag(modelLibraryDownloadQueueTaskTag(task.taskId)),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(PocketAgentDimensions.cardPadding),
@@ -1969,13 +2098,13 @@ private fun DownloadQueueTaskCard(
                     -> {
                         OutlinedButton(
                             onClick = { haptic(); onPauseDownload(task.taskId) },
-                            modifier = Modifier.testTag("model_library_download_queue_pause"),
+                            modifier = Modifier.testTag(modelLibraryDownloadQueuePauseButtonTag(task.taskId)),
                         ) {
                             Text(stringResource(id = R.string.ui_pause))
                         }
                         OutlinedButton(
                             onClick = { hapticConfirm(); onCancelDownload(task.taskId) },
-                            modifier = Modifier.testTag("model_library_download_queue_cancel"),
+                            modifier = Modifier.testTag(modelLibraryDownloadQueueCancelButtonTag(task.taskId)),
                         ) {
                             Text(stringResource(id = R.string.ui_cancel_button))
                         }
@@ -1983,13 +2112,13 @@ private fun DownloadQueueTaskCard(
                     DownloadTaskStatus.PAUSED -> {
                         Button(
                             onClick = { haptic(); onResumeDownload(task.taskId) },
-                            modifier = Modifier.testTag("model_library_download_queue_resume"),
+                            modifier = Modifier.testTag(modelLibraryDownloadQueueResumeButtonTag(task.taskId)),
                         ) {
                             Text(stringResource(id = R.string.ui_resume))
                         }
                         OutlinedButton(
                             onClick = { hapticConfirm(); onCancelDownload(task.taskId) },
-                            modifier = Modifier.testTag("model_library_download_queue_cancel"),
+                            modifier = Modifier.testTag(modelLibraryDownloadQueueCancelButtonTag(task.taskId)),
                         ) {
                             Text(stringResource(id = R.string.ui_cancel_button))
                         }
@@ -1999,7 +2128,7 @@ private fun DownloadQueueTaskCard(
                     -> {
                         Button(
                             onClick = { haptic(); onRetryDownload(task.taskId) },
-                            modifier = Modifier.testTag("model_library_download_queue_retry"),
+                            modifier = Modifier.testTag(modelLibraryDownloadQueueRetryButtonTag(task.taskId)),
                         ) {
                             Text(stringResource(id = R.string.ui_retry))
                         }
@@ -2114,6 +2243,21 @@ private fun versionIdentityKey(modelId: String, version: String): String = "$mod
 
 internal fun modelLibraryLoadButtonTag(modelId: String, version: String): String =
     "model_library_load_${modelId}_${version}"
+
+internal fun modelLibraryDownloadQueueTaskTag(taskId: String): String =
+    "model_library_download_queue_$taskId"
+
+internal fun modelLibraryDownloadQueuePauseButtonTag(taskId: String): String =
+    "${modelLibraryDownloadQueueTaskTag(taskId)}_pause"
+
+internal fun modelLibraryDownloadQueueResumeButtonTag(taskId: String): String =
+    "${modelLibraryDownloadQueueTaskTag(taskId)}_resume"
+
+internal fun modelLibraryDownloadQueueRetryButtonTag(taskId: String): String =
+    "${modelLibraryDownloadQueueTaskTag(taskId)}_retry"
+
+internal fun modelLibraryDownloadQueueCancelButtonTag(taskId: String): String =
+    "${modelLibraryDownloadQueueTaskTag(taskId)}_cancel"
 
 internal fun modelLibraryDownloadButtonTag(modelId: String, version: String): String =
     "model_library_download_${modelId}_${version}"

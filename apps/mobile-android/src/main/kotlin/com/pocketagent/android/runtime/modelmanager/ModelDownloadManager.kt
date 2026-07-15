@@ -17,8 +17,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+@Suppress("MaxLineLength")
 class ModelDownloadManager(
     private val context: Context,
     private val provisioningStore: AndroidRuntimeProvisioningStore,
@@ -33,6 +36,7 @@ class ModelDownloadManager(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _downloads = MutableStateFlow(ModelDownloadTaskStateStore.list(appContext))
     private val _downloadPreferences = MutableStateFlow(downloadPreferencesStore.state())
+    private val enqueueMutex = Mutex()
 
     init {
         scope.launch {
@@ -80,66 +84,68 @@ class ModelDownloadManager(
         version: ModelDistributionVersion,
         options: DownloadRequestOptions = defaultRequestOptions(version),
     ): String = withContext(Dispatchers.IO) {
-        val duplicate = _downloads.value.firstOrNull {
-            it.modelId == version.modelId && it.version == version.version && !it.terminal
-        }
-        if (duplicate != null) {
-            return@withContext duplicate.taskId
-        }
+        enqueueMutex.withLock {
+            val duplicate = _downloads.value.firstOrNull {
+                it.modelId == version.modelId && it.version == version.version && !it.terminal
+            }
+            if (duplicate != null) {
+                return@withLock duplicate.taskId
+            }
 
-        val storage = provisioningStore.storageSummary()
-        val bundleTotalBytes = version.bundleTotalBytes()
-        if (bundleTotalBytes > 0L && storage.freeBytes < bundleTotalBytes) {
-            throw IllegalStateException("INSUFFICIENT_STORAGE: Not enough free storage for model download.")
-        }
+            val storage = provisioningStore.storageSummary()
+            val bundleTotalBytes = version.bundleTotalBytes()
+            check(bundleTotalBytes <= 0L || storage.freeBytes >= bundleTotalBytes) {
+                "INSUFFICIENT_STORAGE: Not enough free storage for model download."
+            }
 
-        val taskId = "dl-${UUID.randomUUID()}"
-        val now = System.currentTimeMillis()
-        val artifactStates = version.artifacts.map { artifact ->
-            DownloadArtifactTaskState(
-                artifactId = artifact.artifactId,
-                role = artifact.role,
-                fileName = artifact.fileName,
-                downloadUrl = artifact.downloadUrl,
-                expectedSha256 = artifact.expectedSha256,
-                provenanceIssuer = artifact.provenanceIssuer,
-                provenanceSignature = artifact.provenanceSignature,
-                verificationPolicy = artifact.verificationPolicy,
-                runtimeCompatibility = artifact.runtimeCompatibility,
-                fileSizeBytes = artifact.fileSizeBytes,
-                required = artifact.required,
-                totalBytes = artifact.fileSizeBytes.coerceAtLeast(0L),
+            val taskId = "dl-${UUID.randomUUID()}"
+            val now = System.currentTimeMillis()
+            val artifactStates = version.artifacts.map { artifact ->
+                DownloadArtifactTaskState(
+                    artifactId = artifact.artifactId,
+                    role = artifact.role,
+                    fileName = artifact.fileName,
+                    downloadUrl = artifact.downloadUrl,
+                    expectedSha256 = artifact.expectedSha256,
+                    provenanceIssuer = artifact.provenanceIssuer,
+                    provenanceSignature = artifact.provenanceSignature,
+                    verificationPolicy = artifact.verificationPolicy,
+                    runtimeCompatibility = artifact.runtimeCompatibility,
+                    fileSizeBytes = artifact.fileSizeBytes,
+                    required = artifact.required,
+                    totalBytes = artifact.fileSizeBytes.coerceAtLeast(0L),
+                )
+            }
+            val state = DownloadTaskState(
+                taskId = taskId,
+                modelId = version.modelId,
+                version = version.version,
+                sourceKind = version.sourceKind,
+                displayName = version.displayName,
+                sourceRef = version.sourceRef,
+                downloadUrl = version.downloadUrl,
+                expectedSha256 = version.expectedSha256,
+                provenanceIssuer = version.provenanceIssuer,
+                provenanceSignature = version.provenanceSignature,
+                verificationPolicy = version.verificationPolicy,
+                runtimeCompatibility = version.runtimeCompatibility,
+                promptProfileId = version.promptProfileId,
+                processingStage = DownloadProcessingStage.DOWNLOADING,
+                status = DownloadTaskStatus.QUEUED,
+                progressBytes = 0L,
+                totalBytes = bundleTotalBytes,
+                queueOrder = now,
+                networkPreference = options.networkPreference,
+                updatedAtEpochMs = now,
+                message = "Queued",
+                artifactStates = artifactStates,
+                activeArtifactId = artifactStates.firstOrNull()?.artifactId,
             )
+            ModelDownloadTaskStateStore.upsert(appContext, state)
+            refresh()
+            pumpQueue()
+            taskId
         }
-        val state = DownloadTaskState(
-            taskId = taskId,
-            modelId = version.modelId,
-            version = version.version,
-            sourceKind = version.sourceKind,
-            displayName = version.displayName,
-            sourceRef = version.sourceRef,
-            downloadUrl = version.downloadUrl,
-            expectedSha256 = version.expectedSha256,
-            provenanceIssuer = version.provenanceIssuer,
-            provenanceSignature = version.provenanceSignature,
-            verificationPolicy = version.verificationPolicy,
-            runtimeCompatibility = version.runtimeCompatibility,
-            promptProfileId = version.promptProfileId,
-            processingStage = DownloadProcessingStage.DOWNLOADING,
-            status = DownloadTaskStatus.QUEUED,
-            progressBytes = 0L,
-            totalBytes = bundleTotalBytes,
-            queueOrder = now,
-            networkPreference = options.networkPreference,
-            updatedAtEpochMs = now,
-            message = "Queued",
-            artifactStates = artifactStates,
-            activeArtifactId = artifactStates.firstOrNull()?.artifactId,
-        )
-        ModelDownloadTaskStateStore.upsert(appContext, state)
-        refresh()
-        pumpQueue()
-        taskId
     }
 
     fun pauseDownload(taskId: String) {

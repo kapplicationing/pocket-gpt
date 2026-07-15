@@ -34,6 +34,7 @@ import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SendMessageUseCaseTest {
@@ -617,6 +618,35 @@ class SendMessageUseCaseTest {
     }
 
     @Test
+    fun `ephemeral voice request neither reads nor writes global memory`() {
+        val templateRenderer = RecordingTemplateRenderer()
+        val memoryModule = RecordingMemoryModule().apply {
+            saveMemoryChunk(MemoryChunk("private", "private remembered detail", 1L))
+        }
+        val fixture = createFixture(
+            runtimeConfig = sendRuntimeConfig(streamContractV2Enabled = true),
+            policyModule = permissivePolicy(),
+            inferenceModule = SendRecordingInferenceModule(),
+            memoryModule = memoryModule,
+            interactionPlanner = InteractionPlanner(
+                interactionRegistry = ModelInteractionRegistry(),
+                templateRenderer = templateRenderer,
+            ),
+        )
+
+        val request = fixture.request().copy(
+            userText = "private voice question",
+            executionContext = fixture.request().executionContext.copy(
+                memoryRetention = RuntimeMemoryRetention.EPHEMERAL,
+            ),
+        )
+        fixture.useCase.execute(request)
+
+        assertEquals(listOf("private remembered detail"), memoryModule.savedContents())
+        assertFalse(templateRenderer.lastSystemText().contains("memory: private remembered detail"))
+    }
+
+    @Test
     fun `follow up prompts retain session memory snippets`() {
         val templateRenderer = RecordingTemplateRenderer()
         val memoryModule = RecordingMemoryModule().apply {
@@ -938,6 +968,8 @@ private class RecordingMemoryModule : MemoryModule {
     }
 
     override fun pruneMemory(maxChunks: Int): Int = 0
+
+    fun savedContents(): List<String> = chunks.map(MemoryChunk::content)
 }
 
 private class RecordingTemplateRenderer : ChatTemplateRenderer {

@@ -101,6 +101,17 @@ class ChatStreamRequestPlannerTest {
     }
 
     @Test
+    fun `prepare preserves ephemeral memory retention`() {
+        val planner = ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L)
+
+        val prepared = planner.prepare(
+            command(memoryRetention = RuntimeMemoryRetention.EPHEMERAL),
+        )
+
+        assertEquals(RuntimeMemoryRetention.EPHEMERAL, prepared.runtimeRequest.memoryRetention)
+    }
+
+    @Test
     fun `sampling overrides replace profile defaults in effective config`() {
         val planner = ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L)
         val overrides = SamplingOverrides(
@@ -192,6 +203,7 @@ class ChatStreamRequestPlannerTest {
         keepAlivePreference: ChatKeepAlivePreference = ChatKeepAlivePreference.AUTO,
         samplingOverrides: SamplingOverrides? = null,
         messages: List<InteractionMessage> = emptyList(),
+        memoryRetention: RuntimeMemoryRetention = RuntimeMemoryRetention.RETAIN,
     ): ChatStreamCommand {
         return ChatStreamCommand(
             sessionId = SessionId("session-1"),
@@ -204,6 +216,7 @@ class ChatStreamRequestPlannerTest {
             gpuQualifiedLayers = 0,
             keepAlivePreference = keepAlivePreference,
             samplingOverrides = samplingOverrides,
+            memoryRetention = memoryRetention,
         )
     }
 }

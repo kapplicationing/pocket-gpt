@@ -69,7 +69,7 @@ class PerformanceProfilesTest {
         assertEquals(true, fastGpu.useMmap)
         assertEquals(false, fastGpu.useMlock)
         assertEquals(256, fastGpu.nKeep)
-        assertEquals(8192, fastGpu.nCtx)
+        assertEquals(MAX_APP_CONTEXT_TOKENS, fastGpu.nCtx)
         assertEquals(12, fastGpu.nThreadsBatch)
         assertEquals(FlashAttnMode.AUTO, fastGpu.flashAttnMode)
         assertEquals(512, balancedCpu.nBatch)
@@ -129,14 +129,22 @@ class PerformanceProfilesTest {
     }
 
     @Test
-    fun `fast profile context window is 8192`() {
+    fun `all profile context windows stay within the app limit`() {
         val fast = PerformanceRuntimeConfig.forProfile(
             profile = RuntimePerformanceProfile.FAST,
             availableCpuThreads = 8,
             gpuEnabled = true,
         )
 
-        assertEquals(8192, fast.nCtx)
+        assertEquals(MAX_APP_CONTEXT_TOKENS, fast.nCtx)
+        RuntimePerformanceProfile.entries.forEach { profile ->
+            val config = PerformanceRuntimeConfig.forProfile(
+                profile = profile,
+                availableCpuThreads = 8,
+                gpuEnabled = true,
+            )
+            assertTrue(config.nCtx <= MAX_APP_CONTEXT_TOKENS)
+        }
     }
 
     @Test

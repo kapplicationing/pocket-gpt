@@ -10,7 +10,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.pocketagent.android.R
 import com.pocketagent.android.runtime.modelmanager.ModelDistributionVersion
@@ -24,7 +29,7 @@ import kotlinx.coroutines.withContext
 internal data class ChatAppLaunchers(
     val launchImageAttachmentPicker: () -> Unit,
     val launchModelImportPicker: () -> Unit,
-    val launchDownloadFlow: (ModelDistributionVersion) -> Unit,
+    val launchDownloadFlow: suspend (ModelDistributionVersion) -> Unit,
     val toggleVoiceActivation: (Boolean) -> Unit,
     val requestAssistantRole: () -> Unit,
     val openBatteryOptimizationSettings: () -> Unit,
@@ -56,35 +61,42 @@ internal fun rememberChatAppLaunchers(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        val version = appViewModel.pendingNotificationPermissionVersion.value
         appViewModel.setPendingNotificationPermissionVersion(null)
-        if (version == null) {
-            return@rememberLauncherForActivityResult
-        }
         if (!granted) {
             provisioningViewModel.setStatusMessage(
                 context.getString(R.string.ui_model_download_notifications_disabled),
             )
         }
-        scope.launch {
-            beginDownload(
-                context = context,
-                provisioningViewModel = provisioningViewModel,
-                version = version,
-            )
+    }
+    var pendingVoiceEnable by remember { mutableStateOf(false) }
+    lateinit var continueVoiceSetup: () -> Unit
+    val assistantRoleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        voiceController.refresh()
+        if (pendingVoiceEnable) {
+            if (!voiceController.observe().value.betaContract.needsAssistantRole) {
+                handleVoiceActivationResult(
+                    result = voiceController.setEnabled(true),
+                    voiceController = voiceController,
+                    context = context,
+                    scope = scope,
+                    snackbarHostState = snackbarHostState,
+                )
+            } else {
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        context.getString(R.string.ui_voice_activation_assistant_required),
+                    )
+                }
+            }
         }
     }
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            handleVoiceActivationResult(
-                result = voiceController.setEnabled(true),
-                voiceController = voiceController,
-                context = context,
-                scope = scope,
-                snackbarHostState = snackbarHostState,
-            )
+            continueVoiceSetup()
         } else {
             voiceController.refresh()
             scope.launch {
@@ -92,50 +104,119 @@ internal fun rememberChatAppLaunchers(
             }
         }
     }
-    val assistantRoleLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) {
-        voiceController.refresh()
-    }
-    val launchDownloadFlow: (ModelDistributionVersion) -> Unit = { version ->
-        scope.launch {
-            when {
-                provisioningViewModel.shouldWarnForMeteredLargeDownloadAsync(version) -> {
-                    appViewModel.setPendingMeteredWarningVersion(version)
-                }
-
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    ContextCompat.checkSelfPermission(
+    val voiceNotificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            when (
+                nextVoiceActivationPermissionStep(
+                    sdkInt = Build.VERSION.SDK_INT,
+                    notificationPermissionGranted = true,
+                    microphonePermissionGranted = ContextCompat.checkSelfPermission(
                         context,
-                        Manifest.permission.POST_NOTIFICATIONS,
-                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
-                    appViewModel.setPendingNotificationPermissionVersion(version)
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-
-                else -> beginDownload(
-                    context = context,
-                    provisioningViewModel = provisioningViewModel,
-                    version = version,
+                        Manifest.permission.RECORD_AUDIO,
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
                 )
+            ) {
+                VoiceActivationPermissionStep.REQUEST_NOTIFICATIONS -> voiceController.refresh()
+                VoiceActivationPermissionStep.REQUEST_MICROPHONE ->
+                    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                VoiceActivationPermissionStep.ENABLE -> continueVoiceSetup()
+            }
+        } else {
+            voiceController.refresh()
+            scope.launch {
+                val result = snackbarHostState.showSnackbar(
+                    message = context.getString(R.string.ui_voice_activation_notifications_required),
+                    actionLabel = context.getString(R.string.ui_voice_activation_open_app_settings),
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    context.startActivity(voiceController.openAppSettingsIntent())
+                }
             }
         }
     }
-    val toggleVoiceActivation: (Boolean) -> Unit = { enabled ->
+    val launchDownloadFlow: suspend (ModelDistributionVersion) -> Unit = { version ->
         when {
-            !enabled -> voiceController.setEnabled(false)
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO,
-            ) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
-                microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            else -> handleVoiceActivationResult(
+            provisioningViewModel.shouldWarnForMeteredLargeDownloadAsync(version) -> {
+                appViewModel.setPendingMeteredWarningVersion(version)
+            }
+
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED -> {
+                val started = beginDownload(
+                    context = context,
+                    provisioningViewModel = provisioningViewModel,
+                    appViewModel = appViewModel,
+                    version = version,
+                )
+                if (started) {
+                    appViewModel.setPendingNotificationPermissionVersion(version)
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+
+            else -> beginDownload(
+                context = context,
+                provisioningViewModel = provisioningViewModel,
+                appViewModel = appViewModel,
+                version = version,
+            )
+        }
+    }
+    continueVoiceSetup = {
+        voiceController.refresh()
+        if (voiceController.observe().value.betaContract.needsAssistantRole) {
+            val roleIntent = voiceController.requestAssistantRoleIntent()
+            if (roleIntent != null) {
+                assistantRoleLauncher.launch(roleIntent)
+            } else {
+                handleVoiceActivationResult(
+                    result = VoiceActivationEnableResult.BLOCKED_ASSISTANT_NOT_SELECTED,
+                    voiceController = voiceController,
+                    context = context,
+                    scope = scope,
+                    snackbarHostState = snackbarHostState,
+                )
+            }
+        } else {
+            handleVoiceActivationResult(
                 result = voiceController.setEnabled(true),
                 voiceController = voiceController,
                 context = context,
                 scope = scope,
                 snackbarHostState = snackbarHostState,
             )
+        }
+    }
+    val toggleVoiceActivation: (Boolean) -> Unit = { enabled ->
+        if (!enabled) {
+            pendingVoiceEnable = false
+            voiceController.setEnabled(false)
+        } else {
+            pendingVoiceEnable = true
+            when (
+                nextVoiceActivationPermissionStep(
+                    sdkInt = Build.VERSION.SDK_INT,
+                    notificationPermissionGranted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+                    microphonePermissionGranted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO,
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+                )
+            ) {
+                VoiceActivationPermissionStep.REQUEST_NOTIFICATIONS ->
+                    voiceNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                VoiceActivationPermissionStep.REQUEST_MICROPHONE ->
+                    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                VoiceActivationPermissionStep.ENABLE -> continueVoiceSetup()
+            }
         }
     }
     val requestAssistantRole: () -> Unit = {
@@ -187,15 +268,40 @@ internal data class VoiceActivationFeedback(
     val messageText: String? = null,
 )
 
+internal enum class VoiceActivationPermissionStep {
+    REQUEST_NOTIFICATIONS,
+    REQUEST_MICROPHONE,
+    ENABLE,
+}
+
+internal fun nextVoiceActivationPermissionStep(
+    sdkInt: Int,
+    notificationPermissionGranted: Boolean,
+    microphonePermissionGranted: Boolean,
+): VoiceActivationPermissionStep {
+    return when {
+        sdkInt >= Build.VERSION_CODES.TIRAMISU && !notificationPermissionGranted ->
+            VoiceActivationPermissionStep.REQUEST_NOTIFICATIONS
+        !microphonePermissionGranted -> VoiceActivationPermissionStep.REQUEST_MICROPHONE
+        else -> VoiceActivationPermissionStep.ENABLE
+    }
+}
+
 internal fun voiceActivationFeedback(
     result: VoiceActivationEnableResult,
     lastError: String? = null,
 ): VoiceActivationFeedback? {
     return when (result) {
+        VoiceActivationEnableResult.BLOCKED_NOTIFICATION_PERMISSION ->
+            VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_notifications_required)
         VoiceActivationEnableResult.BLOCKED_MODELS_MISSING ->
             VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_models_missing)
         VoiceActivationEnableResult.BLOCKED_MICROPHONE_PERMISSION ->
             VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_microphone_required)
+        VoiceActivationEnableResult.BLOCKED_ASSISTANT_NOT_SELECTED ->
+            VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_assistant_required)
+        VoiceActivationEnableResult.SETUP_STARTED ->
+            VoiceActivationFeedback(messageResId = R.string.ui_voice_activation_setup_started)
         VoiceActivationEnableResult.START_FAILED ->
             lastError?.takeIf { it.isNotBlank() }?.let { VoiceActivationFeedback(messageText = it) }
         else -> null
@@ -205,10 +311,14 @@ internal fun voiceActivationFeedback(
 private suspend fun beginDownload(
     context: Context,
     provisioningViewModel: ModelProvisioningViewModel,
+    appViewModel: ChatAppViewModel,
     version: ModelDistributionVersion,
-) {
-    runCatching { provisioningViewModel.enqueueDownload(version) }
+): Boolean {
+    return runCatching { provisioningViewModel.enqueueDownload(version) }
         .onSuccess { taskId ->
+            if (appViewModel.pendingGetReadyActivation.value == (version.modelId to version.version)) {
+                appViewModel.setGetReadySetupFailure(null)
+            }
             provisioningViewModel.setStatusMessage(
                 context.getString(
                     R.string.ui_model_download_enqueued,
@@ -219,15 +329,19 @@ private suspend fun beginDownload(
             )
         }
         .onFailure { error ->
-            provisioningViewModel.setStatusMessage(
-                context.getString(
-                    R.string.ui_model_download_start_failed,
-                    version.modelId,
-                    version.version,
-                    error.message ?: "unknown error",
-                ),
+            val message = context.getString(
+                R.string.ui_model_download_start_failed,
+                version.modelId,
+                version.version,
+                error.message ?: "unknown error",
             )
+            provisioningViewModel.setStatusMessage(message)
+            if (appViewModel.pendingGetReadyActivation.value == (version.modelId to version.version)) {
+                appViewModel.setPendingGetReadyActivation(null)
+                appViewModel.setGetReadySetupFailure(message)
+            }
         }
+        .isSuccess
 }
 
 @Composable

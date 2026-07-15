@@ -13,11 +13,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.pocketagent.android.ui.state.ChatGatePrimaryAction
 import com.pocketagent.android.ui.state.ChatGateState
@@ -32,6 +35,9 @@ import com.pocketagent.android.ui.state.ModelRuntimeStatus
 import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.StartupProbeState
 import com.pocketagent.android.ui.state.activeSession
+import com.pocketagent.android.voice.VoiceDictationPhase
+import com.pocketagent.android.voice.VoiceDictationState
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -136,6 +142,44 @@ class ChatScreenComposeContractTest {
             currentState = nonBlankStreamingState
         }
         composeRule.onAllNodesWithText("Preparing response…").assertCountEquals(0)
+    }
+
+    @Test
+    fun dictationShowsEditablePartialAndBlocksSendUntilCaptureFinishes() {
+        var toggled = false
+        composeRule.setContent {
+            MaterialTheme {
+                ComposerBar(
+                    text = "existing draft",
+                    isSending = false,
+                    chatGateState = ChatGateState(
+                        status = ChatGateStatus.READY,
+                        primaryAction = ChatGatePrimaryAction.NONE,
+                    ),
+                    onTextChanged = {},
+                    onSend = {},
+                    onCancelSend = {},
+                    onSubmitEdit = {},
+                    onCancelEdit = {},
+                    onAttachImage = {},
+                    onRemoveImage = {},
+                    onOpenToolDialog = {},
+                    onToggleThinking = {},
+                    onOpenCompletionSettings = {},
+                    onBlockedAction = {},
+                    dictationState = VoiceDictationState(
+                        phase = VoiceDictationPhase.LISTENING,
+                        partialTranscript = "spoken words",
+                    ),
+                    onToggleDictation = { toggled = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Listening in English: spoken words").assertIsDisplayed()
+        composeRule.onNodeWithTag("send_button").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Stop dictation").performClick()
+        composeRule.runOnIdle { assertTrue(toggled) }
     }
 
     private fun testUiState(

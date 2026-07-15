@@ -1,3 +1,5 @@
+@file:Suppress("CyclomaticComplexMethod", "LongMethod", "LongParameterList", "MaxLineLength")
+
 package com.pocketagent.android.ui
 
 import androidx.compose.foundation.clickable
@@ -18,6 +20,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -52,6 +55,7 @@ import com.pocketagent.android.ui.state.RuntimeUiState
 import com.pocketagent.android.ui.state.RuntimeKeepAlivePreference
 import com.pocketagent.android.voice.VoiceBetaBlockingIssue
 import com.pocketagent.android.voice.VoiceActivationUiState
+import com.pocketagent.android.voice.VoiceModelSetupPhase
 import com.pocketagent.android.runtime.PresetBackingStore
 import com.pocketagent.core.ModelPreset
 import com.pocketagent.inference.ModelDisplayNames
@@ -362,11 +366,17 @@ private fun VoiceSettingsSection(
                 voiceState.settings.wakePhrase,
             ),
         )
+        val voiceSetupBusy = voiceState.modelSetup.phase in setOf(
+            VoiceModelSetupPhase.QUEUED,
+            VoiceModelSetupPhase.DOWNLOADING,
+            VoiceModelSetupPhase.INSTALLING,
+        )
+        val voiceToggleChecked = voiceState.settings.enabled || voiceSetupBusy
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .toggleable(
-                    value = voiceState.settings.enabled,
+                    value = voiceToggleChecked,
                     role = Role.Switch,
                     onValueChange = { checked ->
                         haptic.tickLight()
@@ -376,7 +386,7 @@ private fun VoiceSettingsSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             androidx.compose.material3.Switch(
-                checked = voiceState.settings.enabled,
+                checked = voiceToggleChecked,
                 onCheckedChange = null,
             )
             Spacer(modifier = Modifier.width(PocketAgentDimensions.sectionSpacing))
@@ -417,16 +427,6 @@ private fun VoiceSettingsStatus(voiceState: VoiceActivationUiState) {
                 text = error,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-            )
-        }
-        if (!voiceState.modelsReady) {
-            Text(
-                text = stringResource(
-                    id = R.string.ui_voice_activation_models_root,
-                    voiceState.modelsRootPath,
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

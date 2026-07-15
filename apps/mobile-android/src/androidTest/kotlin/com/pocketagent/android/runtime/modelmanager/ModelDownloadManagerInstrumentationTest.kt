@@ -8,6 +8,10 @@ import com.pocketagent.core.model.ModelSourceRef
 import com.pocketagent.core.model.SourceTrustPolicy
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -78,6 +82,31 @@ class ModelDownloadManagerInstrumentationTest {
         assertEquals(DownloadProcessingStage.DOWNLOADING, retried?.processingStage)
         assertEquals(null, retried?.failureReason)
         assertEquals("Retrying", retried?.message)
+    }
+
+    @Test
+    fun concurrentEnqueueOfTheSameVersionReusesOneTask() = runBlocking {
+        val manager = ModelDownloadManager(
+            context = appContext,
+            provisioningStore = AndroidRuntimeProvisioningStore(appContext),
+            scheduler = RecordingScheduler(),
+        )
+        val version = sampleHuggingFaceVersion()
+
+        val taskIds = coroutineScope {
+            List(2) {
+                async(Dispatchers.Default) {
+                    manager.enqueueDownload(version)
+                }
+            }.awaitAll()
+        }
+
+        assertEquals(1, taskIds.toSet().size)
+        assertEquals(
+            1,
+            ModelDownloadTaskStateStore.list(appContext)
+                .count { task -> task.modelId == version.modelId && task.version == version.version },
+        )
     }
 
     @Test

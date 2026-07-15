@@ -1,10 +1,93 @@
 package com.pocketagent.android.voice
 
+import android.app.ApplicationExitInfo
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class VoiceActivationSettingsStoreTest {
+    @Test
+    fun `task manager stop after enablement remains stopped`() {
+        val settings = VoiceActivationSettings(
+            enabled = true,
+            enabledAtEpochMs = 1_000L,
+        )
+
+        assertEquals(
+            true,
+            shouldRespectUserRequestedStop(
+                settings,
+                VoiceProcessExit(
+                    reason = ApplicationExitInfo.REASON_USER_REQUESTED,
+                    timestampEpochMs = 2_000L,
+                ),
+            ),
+        )
+        assertEquals(
+            false,
+            shouldRespectUserRequestedStop(
+                settings,
+                VoiceProcessExit(
+                    reason = ApplicationExitInfo.REASON_LOW_MEMORY,
+                    timestampEpochMs = 2_000L,
+                ),
+            ),
+        )
+        assertEquals(
+            false,
+            shouldRespectUserRequestedStop(
+                settings,
+                VoiceProcessExit(
+                    reason = ApplicationExitInfo.REASON_USER_REQUESTED,
+                    timestampEpochMs = 900L,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `package replacement is not mistaken for task manager stop`() {
+        val settings = VoiceActivationSettings(
+            enabled = true,
+            enabledAtEpochMs = 1_000L,
+        )
+
+        assertEquals(
+            false,
+            shouldRespectUserRequestedStop(
+                settings = settings,
+                exit = VoiceProcessExit(
+                    reason = ApplicationExitInfo.REASON_USER_REQUESTED,
+                    timestampEpochMs = 2_000L,
+                    description = "stop com.pocketagent.android due to installPackageLI",
+                ),
+                packageLastUpdateEpochMs = 2_000L,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldRespectUserRequestedStop(
+                settings = settings,
+                exit = VoiceProcessExit(
+                    reason = ApplicationExitInfo.REASON_USER_REQUESTED,
+                    timestampEpochMs = 2_000L,
+                ),
+                packageLastUpdateEpochMs = 2_500L,
+            ),
+        )
+        assertEquals(
+            true,
+            shouldRespectUserRequestedStop(
+                settings = settings,
+                exit = VoiceProcessExit(
+                    reason = ApplicationExitInfo.REASON_USER_REQUESTED,
+                    timestampEpochMs = 5_000L,
+                ),
+                packageLastUpdateEpochMs = 2_000L,
+            ),
+        )
+    }
+
     @Test
     fun `reads defaults when storage is empty`() {
         val store = VoiceActivationSettingsStore(FakeVoiceActivationSettingsStorage())
@@ -60,6 +143,7 @@ class VoiceActivationSettingsStoreTest {
         store.updateServiceState(VoiceServiceState.ERROR, error = "models missing")
         assertEquals(VoiceServiceState.ERROR, store.state().voiceServiceState)
         assertEquals("models missing", store.state().lastError)
+        assertEquals(store.state(), store.observe().value)
     }
 
     @Test
@@ -119,6 +203,7 @@ private class FakeVoiceActivationSettingsStorage(
     val booleanValues: MutableMap<String, Boolean> = mutableMapOf(),
     val stringValues: MutableMap<String, String?> = mutableMapOf(),
     val intValues: MutableMap<String, Int> = mutableMapOf(),
+    val longValues: MutableMap<String, Long> = mutableMapOf(),
 ) : VoiceActivationSettingsStorage {
     override fun getBoolean(key: String, defaultValue: Boolean): Boolean = booleanValues[key] ?: defaultValue
 
@@ -126,11 +211,14 @@ private class FakeVoiceActivationSettingsStorage(
 
     override fun getInt(key: String, defaultValue: Int): Int = intValues[key] ?: defaultValue
 
+    override fun getLong(key: String, defaultValue: Long): Long = longValues[key] ?: defaultValue
+
     override fun save(settings: VoiceActivationSettings) {
         booleanValues["enabled"] = settings.enabled
         stringValues["wake_phrase"] = settings.wakePhrase
         intValues["silence_timeout_seconds"] = settings.silenceTimeoutSeconds
         stringValues["service_state"] = settings.voiceServiceState.name
         stringValues["last_error"] = settings.lastError
+        longValues["enabled_at_epoch_ms"] = settings.enabledAtEpochMs
     }
 }

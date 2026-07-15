@@ -98,6 +98,8 @@ class ModelManagementSheetComposeContractTest {
     @Test
     fun productionModelSheetRendersAndDispatchesRefreshEvent() {
         val events = mutableListOf<ModelSheetEvent>()
+        val selectedSection = mutableStateOf(ModelLibrarySection.MY_MODELS)
+        val advancedSourcesExpanded = mutableStateOf(false)
 
         composeRule.setContent {
             MaterialTheme {
@@ -107,6 +109,10 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = selectedSection.value,
+                    advancedSourcesExpanded = advancedSourcesExpanded.value,
+                    onSectionSelected = { section -> selectedSection.value = section },
+                    onAdvancedSourcesExpandedChanged = { expanded -> advancedSourcesExpanded.value = expanded },
                     onEvent = { events += it },
                 )
             }
@@ -114,12 +120,20 @@ class ModelManagementSheetComposeContractTest {
 
         composeRule.onNodeWithTag("unified_model_sheet").assertIsDisplayed()
         composeRule.onNodeWithText("Refresh").performClick()
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasText("Downloaded models"))
-        composeRule.onNodeWithText("Downloaded models").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_library_tab_my_models").assertIsDisplayed()
+        scrollToText("Ready on this device")
+        composeRule.onNodeWithText("Ready on this device").assertIsDisplayed()
+        scrollToTag("model_library_browse_models")
+        composeRule.onNodeWithTag("model_library_browse_models").performClick()
+        composeRule.onNodeWithTag("model_library_tab_explore").assertIsDisplayed()
+        composeRule.onNodeWithText("Search models").assertIsDisplayed()
         composeRule.onNodeWithTag("unified_model_sheet")
             .performScrollToNode(hasText("Available models"))
         composeRule.onNodeWithText("Available models").assertIsDisplayed()
+        scrollToTag("model_library_advanced_sources_toggle")
+        composeRule.onNodeWithTag("model_library_advanced_sources_toggle").performClick()
+        scrollToTag("model_library_add_hugging_face")
+        composeRule.onNodeWithTag("model_library_add_hugging_face").assertIsDisplayed()
         composeRule.runOnIdle {
             assertTrue(events.contains(ModelSheetEvent.RefreshAll))
         }
@@ -213,6 +227,7 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = ModelLoadingState.Idle(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
                     onEvent = {},
                 )
             }
@@ -220,9 +235,6 @@ class ModelManagementSheetComposeContractTest {
 
         composeRule.onNodeWithTag("model_sheet_status_message").assertIsDisplayed()
         composeRule.onNodeWithText(removedMessage).assertIsDisplayed()
-        composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasText("No downloaded models yet"))
-        composeRule.onNodeWithText("No downloaded models yet").assertIsDisplayed()
         composeRule.onNodeWithTag("unified_model_sheet").performScrollToNode(hasText("Download"))
         composeRule.onNodeWithText("Download").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Load").fetchSemanticsNodes().isEmpty())
@@ -382,6 +394,7 @@ class ModelManagementSheetComposeContractTest {
             .performScrollToNode(hasTestTag(rowTag))
         composeRule.onNodeWithTag(rowTag).assertIsDisplayed()
         composeRule.onNodeWithTag(loadTag).assertIsDisplayed()
+        composeRule.onNodeWithText("Use now").assertIsDisplayed()
         composeRule.onNodeWithTag(loadTag).performClick()
         composeRule.runOnIdle {
             assertTrue(
@@ -435,6 +448,7 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
                     onEvent = { events += it },
                 )
             }
@@ -474,6 +488,7 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
                     onEvent = { events += it },
                 )
             }
@@ -497,6 +512,7 @@ class ModelManagementSheetComposeContractTest {
             manifest = sampleManifestWithDownloadableVersion(),
             downloads = emptyList(),
         )
+        val selectedSection = mutableStateOf(ModelLibrarySection.MY_MODELS)
 
         composeRule.setContent {
             MaterialTheme {
@@ -506,7 +522,9 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = selectedSection.value,
                     modelImportRequestActive = true,
+                    onSectionSelected = { section -> selectedSection.value = section },
                     onEvent = {},
                 )
             }
@@ -525,6 +543,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNode(hasTestTag(replaceTag).and(stateDescriptionMatcher))
             .assertIsNotEnabled()
 
+        composeRule.runOnIdle { selectedSection.value = ModelLibrarySection.EXPLORE }
         val importTag = modelLibraryImportButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
         composeRule.onNodeWithTag("unified_model_sheet")
             .performScrollToNode(hasTestTag(importTag))
@@ -538,6 +557,7 @@ class ModelManagementSheetComposeContractTest {
             manifest = sampleManifestWithDownloadableVersion(),
             downloads = emptyList(),
         )
+        val selectedSection = mutableStateOf(ModelLibrarySection.MY_MODELS)
 
         composeRule.setContent {
             MaterialTheme {
@@ -547,7 +567,9 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = selectedSection.value,
                     modelImportRequestActive = false,
+                    onSectionSelected = { section -> selectedSection.value = section },
                     onEvent = {},
                 )
             }
@@ -565,6 +587,7 @@ class ModelManagementSheetComposeContractTest {
             .performScrollToNode(hasTestTag(replaceTag))
         composeRule.onNode(hasTestTag(replaceTag).and(busyMatcher)).assertIsNotEnabled()
 
+        composeRule.runOnIdle { selectedSection.value = ModelLibrarySection.EXPLORE }
         val importTag = modelLibraryImportButtonTag("qwen3-0.6b-q4_k_m", "q4_k_m")
         composeRule.onNodeWithTag("unified_model_sheet")
             .performScrollToNode(hasTestTag(importTag))
@@ -590,6 +613,8 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
+                    advancedSourcesExpanded = true,
                     onEvent = { events += it },
                 )
             }
@@ -600,7 +625,7 @@ class ModelManagementSheetComposeContractTest {
         composeRule.onNodeWithText("Advanced: Add GGUF from Hugging Face").assertIsDisplayed()
         composeRule.onNodeWithText("Runs as").assertIsDisplayed()
         composeRule.onNodeWithText(
-            "Choose the PocketGPT model family this file is compatible with. This does not load the model.",
+            "Choose the PocketAgent model family this file is compatible with. This does not load the model.",
         ).assertIsDisplayed()
         scrollToTag("model_library_hf_url_input")
         composeRule.onNodeWithTag("model_library_hf_url_input")
@@ -673,6 +698,8 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
+                    advancedSourcesExpanded = true,
                     onEvent = { events += it },
                 )
             }
@@ -758,6 +785,8 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
+                    advancedSourcesExpanded = true,
                     onEvent = {},
                 )
             }
@@ -772,6 +801,7 @@ class ModelManagementSheetComposeContractTest {
 
     @Test
     fun downloadQueueRendersDynamicDownloadsBeforeInstalledRows() {
+        val taskId = "hf-task-1"
         val state = sampleLibraryState(
             downloads = listOf(sampleHuggingFaceDownload()),
         )
@@ -790,9 +820,9 @@ class ModelManagementSheetComposeContractTest {
         }
 
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue"))
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueTaskTag(taskId)))
         composeRule.onNodeWithText("Download queue").assertIsDisplayed()
-        composeRule.onNodeWithTag("model_library_download_queue").assertIsDisplayed()
+        composeRule.onNodeWithTag(modelLibraryDownloadQueueTaskTag(taskId)).assertIsDisplayed()
         composeRule.onNodeWithText("owner/repo / model.gguf").assertIsDisplayed()
     }
 
@@ -816,6 +846,8 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
+                    advancedSourcesExpanded = true,
                     onEvent = {},
                 )
             }
@@ -851,6 +883,8 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
+                    advancedSourcesExpanded = true,
                     onEvent = {},
                 )
             }
@@ -879,6 +913,8 @@ class ModelManagementSheetComposeContractTest {
                     modelLoadingState = sampleRuntimeLoadingState(),
                     routingMode = RoutingMode.AUTO,
                     presetBackingStore = presetBackingStore,
+                    selectedSection = ModelLibrarySection.EXPLORE,
+                    advancedSourcesExpanded = true,
                     onEvent = { events += it },
                 )
             }
@@ -895,6 +931,7 @@ class ModelManagementSheetComposeContractTest {
     fun downloadQueueDispatchesPauseResumeCancelAndRetryEvents() {
         val events = mutableListOf<ModelSheetEvent>()
         val downloadStatus = mutableStateOf(DownloadTaskStatus.DOWNLOADING)
+        val taskId = "hf-task-1"
 
         composeRule.setContent {
             MaterialTheme {
@@ -912,32 +949,33 @@ class ModelManagementSheetComposeContractTest {
         }
 
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue"))
-        composeRule.onNodeWithTag("model_library_download_queue_pause").performClick()
-        composeRule.onNodeWithTag("model_library_download_queue_cancel").performClick()
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueTaskTag(taskId)))
+        composeRule.onNodeWithTag(modelLibraryDownloadQueuePauseButtonTag(taskId)).performClick()
+        composeRule.onNodeWithTag(modelLibraryDownloadQueueCancelButtonTag(taskId)).performClick()
 
         composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.PAUSED }
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue"))
-        composeRule.onNodeWithTag("model_library_download_queue_resume").performClick()
-        composeRule.onNodeWithTag("model_library_download_queue_cancel").performClick()
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueTaskTag(taskId)))
+        composeRule.onNodeWithTag(modelLibraryDownloadQueueResumeButtonTag(taskId)).performClick()
+        composeRule.onNodeWithTag(modelLibraryDownloadQueueCancelButtonTag(taskId)).performClick()
 
         composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.CANCELLED }
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue"))
-        composeRule.onNodeWithTag("model_library_download_queue_retry").performClick()
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueTaskTag(taskId)))
+        composeRule.onNodeWithTag(modelLibraryDownloadQueueRetryButtonTag(taskId)).performClick()
 
         composeRule.runOnIdle {
-            assertTrue(events.contains(ModelSheetEvent.PauseDownload("hf-task-1")))
-            assertTrue(events.contains(ModelSheetEvent.CancelDownload("hf-task-1")))
-            assertTrue(events.contains(ModelSheetEvent.ResumeDownload("hf-task-1")))
-            assertTrue(events.contains(ModelSheetEvent.RetryDownload("hf-task-1")))
+            assertTrue(events.contains(ModelSheetEvent.PauseDownload(taskId)))
+            assertTrue(events.contains(ModelSheetEvent.CancelDownload(taskId)))
+            assertTrue(events.contains(ModelSheetEvent.ResumeDownload(taskId)))
+            assertTrue(events.contains(ModelSheetEvent.RetryDownload(taskId)))
         }
     }
 
     @Test
     fun downloadQueueControlsExportResourceIdsForMaestro() {
         val downloadStatus = mutableStateOf(DownloadTaskStatus.DOWNLOADING)
+        val taskId = "hf-task-1"
 
         composeRule.setContent {
             MaterialTheme {
@@ -955,21 +993,21 @@ class ModelManagementSheetComposeContractTest {
         }
 
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue"))
-        assertResourceIdVisible("model_library_download_queue")
-        assertResourceIdVisible("model_library_download_queue_pause")
-        assertResourceIdVisible("model_library_download_queue_cancel")
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueTaskTag(taskId)))
+        assertResourceIdVisible(modelLibraryDownloadQueueTaskTag(taskId))
+        assertResourceIdVisible(modelLibraryDownloadQueuePauseButtonTag(taskId))
+        assertResourceIdVisible(modelLibraryDownloadQueueCancelButtonTag(taskId))
 
         composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.PAUSED }
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue_resume"))
-        assertResourceIdVisible("model_library_download_queue_resume")
-        assertResourceIdVisible("model_library_download_queue_cancel")
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueResumeButtonTag(taskId)))
+        assertResourceIdVisible(modelLibraryDownloadQueueResumeButtonTag(taskId))
+        assertResourceIdVisible(modelLibraryDownloadQueueCancelButtonTag(taskId))
 
         composeRule.runOnIdle { downloadStatus.value = DownloadTaskStatus.CANCELLED }
         composeRule.onNodeWithTag("unified_model_sheet")
-            .performScrollToNode(hasTestTag("model_library_download_queue_retry"))
-        composeRule.onNodeWithTag("model_library_download_queue_retry").assertIsDisplayed()
+            .performScrollToNode(hasTestTag(modelLibraryDownloadQueueRetryButtonTag(taskId)))
+        composeRule.onNodeWithTag(modelLibraryDownloadQueueRetryButtonTag(taskId)).assertIsDisplayed()
     }
 
     @Test

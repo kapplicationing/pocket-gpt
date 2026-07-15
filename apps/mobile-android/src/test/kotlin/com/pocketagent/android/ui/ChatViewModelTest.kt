@@ -2414,6 +2414,12 @@ private class RecordingRuntimeFacade(
         return ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L).prepare(command)
     }
 
+    override fun prepareChatStream(command: ChatStreamCommand): PreparedChatStream {
+        prepareCalls += 1
+        prepareFailure?.let { throw it }
+        return ChatStreamRequestPlanner(runtimeGenerationTimeoutMs = 0L).prepare(command)
+    }
+
     override fun streamPreparedChat(prepared: PreparedChatStream): Flow<ChatStreamEvent> = flow {
         streamCalls += 1
         val streamCall = streamCalls

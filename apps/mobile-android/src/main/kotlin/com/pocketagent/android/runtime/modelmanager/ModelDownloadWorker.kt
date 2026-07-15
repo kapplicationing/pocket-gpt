@@ -30,7 +30,7 @@ class ModelDownloadWorker(
 
                 override fun isStopped(): Boolean = this@ModelDownloadWorker.isStopped
 
-                override fun stopDisposition(): DownloadStopDisposition = DownloadStopDisposition.MARK_CANCELLED
+                override fun stopDisposition(): DownloadStopDisposition = modelDownloadWorkerStopDisposition()
             },
             retryAllowed = runAttemptCount < MAX_RETRY_ATTEMPTS,
         )) {
@@ -71,3 +71,6 @@ class ModelDownloadWorker(
         private const val MAX_RETRY_ATTEMPTS = 3
     }
 }
+
+internal fun modelDownloadWorkerStopDisposition(): DownloadStopDisposition =
+    DownloadStopDisposition.RESCHEDULE

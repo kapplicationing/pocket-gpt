@@ -1,8 +1,21 @@
 package com.pocketagent.android.ui
 
 import com.pocketagent.android.runtime.ProvisionedModelState
+import com.pocketagent.android.runtime.modelmanager.DownloadTaskState
+import com.pocketagent.android.runtime.modelmanager.DownloadTaskStatus
 import com.pocketagent.android.runtime.modelmanager.ModelVersionDescriptor
+import com.pocketagent.android.ui.state.ModelLoadingState
 import com.pocketagent.runtime.RuntimeLoadedModel
+
+internal enum class ModelLibrarySection {
+    MY_MODELS,
+    EXPLORE,
+}
+
+internal data class ModelLibraryNavigationState(
+    val selectedSection: ModelLibrarySection = ModelLibrarySection.MY_MODELS,
+    val advancedSourcesExpanded: Boolean = false,
+)
 
 internal enum class DownloadedModelBadge {
     LOADED,
@@ -34,6 +47,29 @@ internal fun resolveDownloadedModelBadge(
     }
     return DownloadedModelBadge.READY
 }
+
+internal fun ModelLoadingState.switchingRequestedModel(): RuntimeLoadedModel? {
+    return (this as? ModelLoadingState.Loading)?.requestedModel
+}
+
+internal fun managementDownloadTasks(downloads: List<DownloadTaskState>): List<DownloadTaskState> =
+    downloads
+        .filter { task ->
+            !task.terminal ||
+                task.status == DownloadTaskStatus.FAILED ||
+                task.status == DownloadTaskStatus.CANCELLED
+        }
+        .sortedByDescending { task -> task.updatedAtEpochMs }
+
+internal fun resolveModelLibraryBackNavigation(
+    state: ModelLibraryNavigationState,
+): ModelLibraryNavigationState? =
+    when {
+        state.advancedSourcesExpanded -> state.copy(advancedSourcesExpanded = false)
+        state.selectedSection != ModelLibrarySection.MY_MODELS ->
+            state.copy(selectedSection = ModelLibrarySection.MY_MODELS)
+        else -> null
+    }
 
 internal fun resolveRemoveVersionPlan(
     model: ProvisionedModelState,

@@ -26,6 +26,7 @@ data class ChatStreamCommand(
     val keepAlivePreference: ChatKeepAlivePreference = ChatKeepAlivePreference.AUTO,
     val requestTimeoutOverrideMs: Long? = null,
     val samplingOverrides: SamplingOverrides? = null,
+    val memoryRetention: RuntimeMemoryRetention = RuntimeMemoryRetention.RETAIN,
 )
 
 data class ChatStreamPlan(
@@ -120,6 +121,7 @@ class ChatStreamRequestPlanner(
             performanceConfig = effectiveConfig,
             residencyPolicy = resolveResidencyPolicy(command.keepAlivePreference),
             samplingOverrides = command.samplingOverrides,
+            memoryRetention = command.memoryRetention,
         )
         return PreparedChatStream(
             plan = ChatStreamPlan(

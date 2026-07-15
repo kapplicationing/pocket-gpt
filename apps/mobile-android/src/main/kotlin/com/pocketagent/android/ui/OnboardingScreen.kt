@@ -1,5 +1,6 @@
 package com.pocketagent.android.ui
 
+import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +40,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -47,6 +50,7 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -62,6 +66,20 @@ private data class OnboardingPageData(
     val icon: ImageVector,
 )
 
+private data class OnboardingPrimaryButton(
+    @StringRes val labelRes: Int,
+    val testTag: String,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+)
+
+private enum class OnboardingSecondaryAction {
+    NONE,
+    SET_UP_LATER,
+    CONTINUE_IN_BACKGROUND,
+    CHOOSE_ANOTHER_MODEL,
+}
+
 private val onboardingPages = listOf(
     OnboardingPageData(
         headlineRes = R.string.ui_onboarding_welcome_headline,
@@ -75,7 +93,7 @@ private val onboardingPages = listOf(
     ),
     OnboardingPageData(
         headlineRes = R.string.ui_onboarding_download_headline,
-        bodyRes = R.string.ui_onboarding_download_body,
+        bodyRes = R.string.ui_onboarding_setup_intro_body,
         icon = Icons.Filled.CloudDownload,
     ),
 )
@@ -91,15 +109,17 @@ private const val PAGE_COUNT = 3
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun OnboardingScreen(
+internal fun OnboardingScreen(
     currentPage: Int,
     onPageChanged: (Int) -> Unit,
     onNextPage: () -> Unit,
     onSkip: () -> Unit,
     onFinish: () -> Unit,
-    isDownloading: Boolean = false,
-    downloadProgress: Float? = null,
+    setupState: OnboardingSetupUiState = OnboardingSetupUiState(),
     onStartDownload: () -> Unit,
+    onContinueInBackground: () -> Unit = {},
+    onReviewSetup: () -> Unit = {},
+    onChooseAnotherModel: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
     val pagerState = rememberPagerState(
@@ -166,9 +186,7 @@ fun OnboardingScreen(
                 OnboardingPage(
                     data = onboardingPages[pageIndex],
                     isDownloadPage = pageIndex == PAGE_COUNT - 1,
-                    isDownloading = isDownloading,
-                    downloadProgress = downloadProgress,
-                    onStartDownload = onStartDownload,
+                    setupState = setupState,
                 )
             }
 
@@ -182,9 +200,13 @@ fun OnboardingScreen(
             // Bottom navigation button
             BottomNavigation(
                 isLastPage = pagerState.currentPage == PAGE_COUNT - 1,
-                isDownloading = isDownloading,
+                setupState = setupState,
                 onNext = onNextPage,
                 onFinish = onFinish,
+                onStartDownload = onStartDownload,
+                onContinueInBackground = onContinueInBackground,
+                onReviewSetup = onReviewSetup,
+                onChooseAnotherModel = onChooseAnotherModel,
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
@@ -203,9 +225,7 @@ fun OnboardingScreen(
 private fun OnboardingPage(
     data: OnboardingPageData,
     isDownloadPage: Boolean,
-    isDownloading: Boolean,
-    downloadProgress: Float?,
-    onStartDownload: () -> Unit,
+    setupState: OnboardingSetupUiState,
 ) {
     Column(
         modifier = Modifier
@@ -241,36 +261,154 @@ private fun OnboardingPage(
 
         if (isDownloadPage) {
             Spacer(modifier = Modifier.height(PocketTheme.spacing.xl))
+            OnboardingSetupCard(setupState = setupState)
+        }
+    }
+}
 
-            if (isDownloading) {
-                if (downloadProgress != null) {
-                    LinearProgressIndicator(
-                        progress = { downloadProgress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = PocketTheme.spacing.xl)
-                            .then(onboardingDownloadProgressSemantics(downloadProgress)),
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = PocketTheme.spacing.xl)
-                            .then(onboardingDownloadProgressSemantics(progress = null)),
-                    )
-                }
+@Composable
+private fun OnboardingSetupCard(setupState: OnboardingSetupUiState) {
+    val context = LocalContext.current
+    val modelName = setupState.modelName
+        ?: stringResource(id = R.string.ui_onboarding_recommended_model_fallback)
+    val sizeLabel = setupState.totalBytes
+        .takeIf { bytes -> bytes > 0L }
+        ?.let { bytes -> Formatter.formatShortFileSize(context, bytes) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("onboarding_setup_card"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(PocketAgentDimensions.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(PocketTheme.spacing.sm),
+        ) {
+            Text(
+                text = stringResource(id = setupState.phase.statusLabelRes()),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = setupState.phase.statusLabelColor(),
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Text(
+                text = modelName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = setupState.summaryText(sizeLabel),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OnboardingSetupProgress(setupState = setupState)
+        }
+    }
+}
+
+@StringRes
+private fun OnboardingSetupPhase.statusLabelRes(): Int {
+    return when (this) {
+        OnboardingSetupPhase.NOT_STARTED -> R.string.ui_onboarding_recommended_starter
+        OnboardingSetupPhase.PREPARING -> R.string.ui_onboarding_setup_preparing
+        OnboardingSetupPhase.DOWNLOADING -> R.string.ui_onboarding_setup_downloading
+        OnboardingSetupPhase.PAUSED -> R.string.ui_onboarding_setup_paused
+        OnboardingSetupPhase.CHECKING -> R.string.ui_onboarding_setup_checking
+        OnboardingSetupPhase.FINISHING -> R.string.ui_onboarding_setup_finishing
+        OnboardingSetupPhase.STARTING -> R.string.ui_onboarding_setup_starting
+        OnboardingSetupPhase.READY -> R.string.ui_onboarding_setup_ready
+        OnboardingSetupPhase.NEEDS_ATTENTION -> R.string.ui_onboarding_setup_attention
+    }
+}
+
+@Composable
+private fun OnboardingSetupPhase.statusLabelColor() = when (this) {
+    OnboardingSetupPhase.NEEDS_ATTENTION -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.primary
+}
+
+@Composable
+private fun OnboardingSetupUiState.summaryText(sizeLabel: String?): String {
+    return when {
+        alreadyInstalled && phase == OnboardingSetupPhase.NOT_STARTED ->
+            stringResource(id = R.string.ui_onboarding_model_already_installed)
+        sizeLabel != null -> stringResource(id = R.string.ui_onboarding_model_summary, sizeLabel)
+        else -> stringResource(id = R.string.ui_onboarding_model_summary_no_size)
+    }
+}
+
+@Composable
+private fun OnboardingSetupProgress(setupState: OnboardingSetupUiState) {
+    val context = LocalContext.current
+    when (setupState.phase) {
+        OnboardingSetupPhase.DOWNLOADING -> {
+            val progress = setupState.progress
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(onboardingDownloadProgressSemantics(progress)),
+                )
             } else {
-                val downloadHaptic = LocalHapticFeedback.current
-                Button(onClick = {
-                    downloadHaptic.tickLight()
-                    onStartDownload()
-                }) {
-                    Text(
-                        text = stringResource(id = R.string.ui_onboarding_download_model),
-                    )
-                }
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(onboardingDownloadProgressSemantics(progress = null)),
+                )
+            }
+            val progressParts = listOfNotNull(
+                setupState.downloadedBytes.takeIf { it > 0L }?.let { downloaded ->
+                    val downloadedLabel = Formatter.formatShortFileSize(context, downloaded)
+                    val totalLabel = Formatter.formatShortFileSize(context, setupState.totalBytes)
+                    stringResource(id = R.string.ui_onboarding_download_bytes, downloadedLabel, totalLabel)
+                },
+                setupState.etaSeconds?.takeIf { it >= 0L }?.let { eta ->
+                    val minutes = ((eta + 59L) / 60L).coerceAtLeast(1L)
+                    stringResource(id = R.string.ui_onboarding_download_eta_minutes, minutes)
+                },
+            )
+            if (progressParts.isNotEmpty()) {
+                Text(
+                    text = progressParts.joinToString(separator = " • "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
+
+        OnboardingSetupPhase.PREPARING,
+        OnboardingSetupPhase.CHECKING,
+        OnboardingSetupPhase.FINISHING,
+        OnboardingSetupPhase.STARTING,
+        -> LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(onboardingDownloadProgressSemantics(progress = null)),
+        )
+
+        OnboardingSetupPhase.PAUSED,
+        OnboardingSetupPhase.NEEDS_ATTENTION,
+        -> setupState.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (setupState.phase == OnboardingSetupPhase.NEEDS_ATTENTION) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+
+        OnboardingSetupPhase.READY -> Text(
+            text = stringResource(id = R.string.ui_onboarding_ready_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        OnboardingSetupPhase.NOT_STARTED -> Unit
     }
 }
 
@@ -315,32 +453,208 @@ private fun PageIndicator(
 @Composable
 private fun BottomNavigation(
     isLastPage: Boolean,
-    isDownloading: Boolean,
+    setupState: OnboardingSetupUiState,
     onNext: () -> Unit,
     onFinish: () -> Unit,
+    onStartDownload: () -> Unit,
+    onContinueInBackground: () -> Unit,
+    onReviewSetup: () -> Unit,
+    onChooseAnotherModel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
-    val buttonModifier = if (isLastPage) {
-        modifier.testTag("onboarding_get_started")
-    } else {
-        modifier.testTag("onboarding_next")
-    }
-    Button(
-        onClick = {
-            haptic.tickLight()
-            if (isLastPage) onFinish() else onNext()
-        },
-        modifier = buttonModifier,
-        enabled = !isDownloading || !isLastPage,
+    val primaryButton = resolveOnboardingPrimaryButton(
+        isLastPage = isLastPage,
+        setupState = setupState,
+        onNext = onNext,
+        onFinish = onFinish,
+        onStartDownload = onStartDownload,
+        onReviewSetup = onReviewSetup,
+    )
+    val secondaryAction = setupState.secondaryAction(isLastPage)
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(PocketTheme.spacing.sm),
     ) {
-        Text(
-            text = when {
-                isLastPage && isDownloading -> stringResource(id = R.string.ui_onboarding_downloading)
-                isLastPage -> stringResource(id = R.string.ui_onboarding_get_started)
-                else -> stringResource(id = R.string.ui_onboarding_next)
+        Button(
+            onClick = {
+                haptic.tickLight()
+                primaryButton.onClick()
             },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(primaryButton.testTag),
+            enabled = primaryButton.enabled,
+        ) {
+            Text(text = stringResource(id = primaryButton.labelRes))
+        }
+        OnboardingSecondaryButton(
+            action = secondaryAction,
+            haptic = haptic,
+            onFinish = onFinish,
+            onContinueInBackground = onContinueInBackground,
+            onChooseAnotherModel = onChooseAnotherModel,
         )
+    }
+}
+
+@Suppress("CyclomaticComplexMethod")
+private fun resolveOnboardingPrimaryButton(
+    isLastPage: Boolean,
+    setupState: OnboardingSetupUiState,
+    onNext: () -> Unit,
+    onFinish: () -> Unit,
+    onStartDownload: () -> Unit,
+    onReviewSetup: () -> Unit,
+): OnboardingPrimaryButton {
+    if (!isLastPage) {
+        return OnboardingPrimaryButton(
+            labelRes = R.string.ui_onboarding_next,
+            testTag = "onboarding_next",
+            enabled = true,
+            onClick = onNext,
+        )
+    }
+    return when (setupState.phase) {
+        OnboardingSetupPhase.READY -> OnboardingPrimaryButton(
+            labelRes = R.string.ui_onboarding_start_chatting,
+            testTag = "onboarding_setup_start_chat",
+            enabled = true,
+            onClick = onFinish,
+        )
+
+        OnboardingSetupPhase.PAUSED -> OnboardingPrimaryButton(
+            labelRes = R.string.ui_onboarding_review_setup,
+            testTag = "onboarding_setup_review",
+            enabled = true,
+            onClick = onReviewSetup,
+        )
+
+        OnboardingSetupPhase.NEEDS_ATTENTION -> OnboardingPrimaryButton(
+            labelRes = R.string.ui_onboarding_retry_setup,
+            testTag = "onboarding_setup_retry",
+            enabled = true,
+            onClick = onStartDownload,
+        )
+
+        OnboardingSetupPhase.PREPARING -> OnboardingPrimaryButton(
+            labelRes = if (setupState.hasDownloadTask || setupState.setupRequestInFlight) {
+                R.string.ui_onboarding_setup_preparing
+            } else {
+                R.string.ui_onboarding_continue_setup
+            },
+            testTag = if (setupState.hasDownloadTask || setupState.setupRequestInFlight) {
+                "onboarding_setup_in_progress"
+            } else {
+                "onboarding_setup_download_start"
+            },
+            enabled = !setupState.hasDownloadTask && !setupState.setupRequestInFlight,
+            onClick = onStartDownload,
+        )
+
+        OnboardingSetupPhase.DOWNLOADING -> busyOnboardingPrimaryButton(
+            R.string.ui_onboarding_setup_downloading,
+        )
+
+        OnboardingSetupPhase.CHECKING -> busyOnboardingPrimaryButton(
+            R.string.ui_onboarding_setup_checking,
+        )
+
+        OnboardingSetupPhase.FINISHING -> busyOnboardingPrimaryButton(
+            R.string.ui_onboarding_setup_finishing,
+        )
+
+        OnboardingSetupPhase.STARTING -> busyOnboardingPrimaryButton(
+            R.string.ui_onboarding_setup_starting,
+        )
+
+        OnboardingSetupPhase.NOT_STARTED -> OnboardingPrimaryButton(
+            labelRes = if (setupState.alreadyInstalled) {
+                R.string.ui_onboarding_use_and_start
+            } else {
+                R.string.ui_onboarding_download_and_start
+            },
+            testTag = "onboarding_setup_download_start",
+            enabled = true,
+            onClick = onStartDownload,
+        )
+    }
+}
+
+private fun busyOnboardingPrimaryButton(@StringRes labelRes: Int): OnboardingPrimaryButton {
+    return OnboardingPrimaryButton(
+        labelRes = labelRes,
+        testTag = "onboarding_setup_in_progress",
+        enabled = false,
+        onClick = {},
+    )
+}
+
+private fun OnboardingSetupUiState.secondaryAction(isLastPage: Boolean): OnboardingSecondaryAction {
+    if (!isLastPage) {
+        return OnboardingSecondaryAction.NONE
+    }
+    return when {
+        phase == OnboardingSetupPhase.NEEDS_ATTENTION -> OnboardingSecondaryAction.CHOOSE_ANOTHER_MODEL
+        isBusy() -> OnboardingSecondaryAction.CONTINUE_IN_BACKGROUND
+        phase == OnboardingSetupPhase.NOT_STARTED -> OnboardingSecondaryAction.SET_UP_LATER
+        else -> OnboardingSecondaryAction.NONE
+    }
+}
+
+private fun OnboardingSetupUiState.isBusy(): Boolean {
+    return when (phase) {
+        OnboardingSetupPhase.DOWNLOADING,
+        OnboardingSetupPhase.CHECKING,
+        OnboardingSetupPhase.FINISHING,
+        OnboardingSetupPhase.STARTING,
+        -> true
+
+        OnboardingSetupPhase.PREPARING -> hasDownloadTask || setupRequestInFlight
+        else -> false
+    }
+}
+
+@Composable
+private fun OnboardingSecondaryButton(
+    action: OnboardingSecondaryAction,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onFinish: () -> Unit,
+    onContinueInBackground: () -> Unit,
+    onChooseAnotherModel: () -> Unit,
+) {
+    when (action) {
+        OnboardingSecondaryAction.NONE -> Unit
+        OnboardingSecondaryAction.SET_UP_LATER -> TextButton(
+            onClick = {
+                haptic.tickLight()
+                onFinish()
+            },
+            modifier = Modifier.testTag("onboarding_get_started"),
+        ) {
+            Text(stringResource(id = R.string.ui_onboarding_set_up_later))
+        }
+
+        OnboardingSecondaryAction.CONTINUE_IN_BACKGROUND -> TextButton(
+            onClick = {
+                haptic.tickLight()
+                onContinueInBackground()
+            },
+            modifier = Modifier.testTag("onboarding_continue_in_background"),
+        ) {
+            Text(stringResource(id = R.string.ui_onboarding_continue_in_background))
+        }
+
+        OnboardingSecondaryAction.CHOOSE_ANOTHER_MODEL -> TextButton(
+            onClick = {
+                haptic.tickLight()
+                onChooseAnotherModel()
+            },
+            modifier = Modifier.testTag("onboarding_setup_choose_model"),
+        ) {
+            Text(stringResource(id = R.string.ui_onboarding_choose_another_model))
+        }
     }
 }
 
@@ -348,7 +662,6 @@ private fun BottomNavigation(
 private fun onboardingDownloadProgressSemantics(progress: Float?): Modifier {
     val progressLabel = stringResource(id = R.string.a11y_onboarding_download_progress)
     return Modifier.semantics {
-        liveRegion = LiveRegionMode.Polite
         contentDescription = if (progress != null) {
             "$progressLabel ${(progress * 100).toInt()}%"
         } else {
@@ -367,6 +680,7 @@ private fun onboardingDownloadProgressSemantics(progress: Float?): Modifier {
 
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
+@Suppress("UnusedPrivateMember")
 private fun OnboardingScreenPreview() {
     PocketAgentTheme {
         OnboardingScreen(
@@ -382,6 +696,7 @@ private fun OnboardingScreenPreview() {
 
 @Preview(showBackground = true, showSystemUi = true, name = "Download Page")
 @Composable
+@Suppress("UnusedPrivateMember")
 private fun OnboardingScreenDownloadPreview() {
     PocketAgentTheme {
         OnboardingScreen(
@@ -390,8 +705,14 @@ private fun OnboardingScreenDownloadPreview() {
             onNextPage = {},
             onSkip = {},
             onFinish = {},
-            isDownloading = true,
-            downloadProgress = 0.45f,
+            setupState = OnboardingSetupUiState(
+                phase = OnboardingSetupPhase.DOWNLOADING,
+                modelName = "Qwen 3 0.6B",
+                totalBytes = 396_705_472L,
+                downloadedBytes = 178_517_462L,
+                progress = 0.45f,
+                etaSeconds = 120L,
+            ),
             onStartDownload = {},
         )
     }

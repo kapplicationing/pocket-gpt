@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -57,12 +59,15 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -72,6 +77,8 @@ import com.pocketagent.android.ui.state.ChatGateState
 import com.pocketagent.android.ui.state.ChatGateStatus
 import com.pocketagent.android.ui.theme.PocketAgentDimensions
 import com.pocketagent.android.ui.theme.tickLight
+import com.pocketagent.android.voice.VoiceDictationPhase
+import com.pocketagent.android.voice.VoiceDictationState
 import java.io.File
 
 @Composable
@@ -100,6 +107,8 @@ internal fun ComposerBar(
     onBlockedAction: (ChatGatePrimaryAction) -> Unit,
     consumeImeInsets: Boolean = true,
     autoFocusEnabled: Boolean = true,
+    dictationState: VoiceDictationState = VoiceDictationState(),
+    onToggleDictation: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
     val isEditing = editingMessageId != null
@@ -124,7 +133,9 @@ internal fun ComposerBar(
         }
     }
     val canTriggerBlockedAction = hasChatGatePrimaryAction(chatGateState)
+    val dictationActive = dictationState.isCaptureActive
     val sendButtonEnabled = when {
+        dictationActive -> false
         isSending -> !isCancelling
         isEditing -> text.isNotBlank()
         chatGateState.isReady -> text.isNotBlank()
@@ -132,6 +143,7 @@ internal fun ComposerBar(
     }
     val sendButtonDescription = stringResource(id = R.string.a11y_send_button)
     val sendStateDescription = when {
+        dictationActive -> stringResource(id = R.string.a11y_send_state_dictating)
         isSending && isCancelling -> stringResource(id = R.string.a11y_send_state_cancelling)
         isSending -> stringResource(id = R.string.a11y_send_state_sending)
         !chatGateState.isReady -> stringResource(id = R.string.a11y_send_state_runtime_not_ready)
@@ -140,6 +152,7 @@ internal fun ComposerBar(
     }
     val handlePrimaryComposerAction: () -> Unit = {
         when {
+            dictationActive -> Unit
             isSending && !isCancelling -> onCancelSend()
             isEditing -> onSubmitEdit()
             chatGateState.isReady && text.isNotBlank() -> onSend()
@@ -258,7 +271,10 @@ internal fun ComposerBar(
                 onOpenToolDialog = onOpenToolDialog,
                 onToggleThinking = onToggleThinking,
                 onOpenCompletionSettings = onOpenCompletionSettings,
+                dictationState = dictationState,
+                onToggleDictation = onToggleDictation,
             )
+            VoiceDictationStatus(dictationState)
             ComposerInputRow(
                 text = text,
                 isSending = isSending,
@@ -288,6 +304,8 @@ private fun ComposerActionStrip(
     onOpenToolDialog: () -> Unit,
     onToggleThinking: () -> Unit,
     onOpenCompletionSettings: () -> Unit,
+    dictationState: VoiceDictationState,
+    onToggleDictation: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val attachImageStateDescription = if (canAttachImages) {
@@ -322,6 +340,11 @@ private fun ComposerActionStrip(
                 modifier = Modifier.size(20.dp),
             )
         }
+        DictationActionButton(
+            isSending = isSending,
+            state = dictationState,
+            onToggle = onToggleDictation,
+        )
         if (showThinkingToggle) {
             IconButton(onClick = { haptic.tickLight(); onToggleThinking() }) {
                 Icon(
@@ -350,6 +373,89 @@ private fun ComposerActionStrip(
             )
         }
     }
+}
+
+@Composable
+private fun DictationActionButton(
+    isSending: Boolean,
+    state: VoiceDictationState,
+    onToggle: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val description = when (state.phase) {
+        VoiceDictationPhase.CHECKING -> stringResource(id = R.string.a11y_prepare_dictation)
+        VoiceDictationPhase.FINALIZING -> stringResource(id = R.string.a11y_finish_dictation)
+        VoiceDictationPhase.LISTENING -> stringResource(id = R.string.a11y_stop_dictation)
+        VoiceDictationPhase.IDLE,
+        VoiceDictationPhase.ERROR,
+        -> stringResource(id = R.string.a11y_start_dictation)
+    }
+    IconButton(
+        onClick = { haptic.tickLight(); onToggle() },
+        enabled = !isSending && state.phase != VoiceDictationPhase.FINALIZING,
+        modifier = Modifier
+            .testTag("voice_dictation_button")
+            .semantics {
+                contentDescription = description
+            },
+    ) {
+        when (state.phase) {
+            VoiceDictationPhase.CHECKING,
+            VoiceDictationPhase.FINALIZING,
+            -> CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+            )
+            VoiceDictationPhase.LISTENING -> Icon(
+                imageVector = Icons.Default.StopCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp),
+            )
+            VoiceDictationPhase.IDLE,
+            VoiceDictationPhase.ERROR,
+            -> Icon(
+                imageVector = Icons.Default.Mic,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceDictationStatus(state: VoiceDictationState) {
+    val statusText = when (state.phase) {
+        VoiceDictationPhase.CHECKING -> stringResource(id = R.string.ui_dictation_checking)
+        VoiceDictationPhase.FINALIZING -> stringResource(id = R.string.ui_dictation_finalizing)
+        VoiceDictationPhase.LISTENING -> if (state.partialTranscript.isBlank()) {
+            stringResource(id = R.string.ui_dictation_listening)
+        } else {
+            stringResource(id = R.string.ui_dictation_partial, state.partialTranscript)
+        }
+        VoiceDictationPhase.IDLE,
+        VoiceDictationPhase.ERROR,
+        -> null
+    } ?: return
+
+    Text(
+        text = statusText,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (state.phase == VoiceDictationPhase.LISTENING) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = PocketAgentDimensions.sectionSpacing / 2)
+            .testTag("voice_dictation_status")
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+            },
+    )
 }
 
 @Composable

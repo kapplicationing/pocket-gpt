@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -61,6 +63,7 @@ import com.pocketagent.android.ui.theme.tickLight
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod")
 internal fun MessageBubble(
     message: MessageUiModel,
     runtimeStatusDetail: String?,
@@ -70,6 +73,8 @@ internal fun MessageBubble(
     clipboardManager: ClipboardManager,
     isFirstInGroup: Boolean = true,
     isLastInGroup: Boolean = true,
+    speakingMessageId: String? = null,
+    onReadAloud: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -167,7 +172,10 @@ internal fun MessageBubble(
                         message.toolName != null -> {
                             val statusSuffix = message.interaction?.toolCalls?.firstOrNull()?.status.toReadableSuffix()
                             Text(
-                                text = stringResource(id = R.string.ui_tool_message_label, message.toolName) + statusSuffix,
+                                text = stringResource(
+                                    id = R.string.ui_tool_message_label,
+                                    message.toolName,
+                                ) + statusSuffix,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -211,6 +219,8 @@ internal fun MessageBubble(
                         message = message,
                         onCopiedToClipboard = onCopiedToClipboard,
                         clipboardManager = clipboardManager,
+                        isSpeaking = speakingMessageId == message.id,
+                        onReadAloud = onReadAloud,
                     )
                 }
 
@@ -263,9 +273,15 @@ private fun MessageMetrics(message: MessageUiModel) {
         ) {
             val style = MaterialTheme.typography.labelSmall
             val color = MaterialTheme.colorScheme.onSurfaceVariant
-            message.tokensPerSec?.let { Text(stringResource(id = R.string.ui_metric_tokens_per_sec, it), style = style, color = color) }
-            message.firstTokenMs?.let { Text(stringResource(id = R.string.ui_metric_ttft, it), style = style, color = color) }
-            message.totalLatencyMs?.let { Text(stringResource(id = R.string.ui_metric_total_latency, it), style = style, color = color) }
+            message.tokensPerSec?.let {
+                Text(stringResource(id = R.string.ui_metric_tokens_per_sec, it), style = style, color = color)
+            }
+            message.firstTokenMs?.let {
+                Text(stringResource(id = R.string.ui_metric_ttft, it), style = style, color = color)
+            }
+            message.totalLatencyMs?.let {
+                Text(stringResource(id = R.string.ui_metric_total_latency, it), style = style, color = color)
+            }
         }
     } else {
         message.tokensPerSec?.let { tps ->
@@ -337,6 +353,8 @@ private fun MessageActions(
     message: MessageUiModel,
     onCopiedToClipboard: () -> Unit,
     clipboardManager: ClipboardManager,
+    isSpeaking: Boolean,
+    onReadAloud: (String, String) -> Unit,
 ) {
     if (message.content.isBlank() || message.isStreaming) return
     val haptic = LocalHapticFeedback.current
@@ -346,6 +364,28 @@ private fun MessageActions(
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (message.role == MessageRole.ASSISTANT) {
+            IconButton(
+                onClick = {
+                    haptic.tickLight()
+                    onReadAloud(message.id, message.content)
+                },
+                modifier = Modifier.testTag("read_aloud_button"),
+            ) {
+                Icon(
+                    imageVector = if (isSpeaking) Icons.Default.StopCircle else Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = stringResource(
+                        id = if (isSpeaking) R.string.a11y_stop_read_aloud else R.string.a11y_read_aloud,
+                    ),
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isSpeaking) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                    },
+                )
+            }
+        }
         IconButton(
             onClick = {
                 haptic.tickLight()

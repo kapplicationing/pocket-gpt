@@ -12,6 +12,7 @@ enum class RuntimePerformanceProfile {
 }
 
 internal const val GPU_SAFE_BATCH_CAP: Int = 256
+const val MAX_APP_CONTEXT_TOKENS: Int = 4096
 
 data class PerformanceRuntimeConfig(
     val profile: RuntimePerformanceProfile = RuntimePerformanceProfile.BALANCED,
@@ -99,7 +100,7 @@ data class PerformanceRuntimeConfig(
                     threads = cpu.coerceAtMost(8),
                     batch = 768,
                     ubatch = 768,
-                    nCtx = 8192,
+                    nCtx = MAX_APP_CONTEXT_TOKENS,
                 )
             }
 

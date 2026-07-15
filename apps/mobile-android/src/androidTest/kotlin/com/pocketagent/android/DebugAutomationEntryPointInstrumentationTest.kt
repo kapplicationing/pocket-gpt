@@ -38,8 +38,8 @@ class DebugAutomationEntryPointInstrumentationTest {
             device.wait(Until.hasObject(By.res("debug_model_library_ready")), 10_000),
         )
         assertTrue(
-            "Expected Hugging Face section to be visible after debug launch.",
-            device.wait(Until.hasObject(By.res("model_library_add_hugging_face")), 10_000),
+            "Expected My models to be the default Model library section after debug launch.",
+            device.wait(Until.hasObject(By.res("model_library_tab_my_models")), 10_000),
         )
         assertFalse("Onboarding next button should not be visible.", device.hasObject(By.res("onboarding_next")))
         assertFalse(

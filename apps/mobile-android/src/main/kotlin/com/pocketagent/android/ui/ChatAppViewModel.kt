@@ -18,6 +18,7 @@ class ChatAppViewModel(
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val modelImportRequestLock = Any()
+    private val getReadySetupRequestLock = Any()
     private var lastModelImportOperationId = savedStateHandle[MODEL_IMPORT_SEQUENCE_KEY] ?: 0L
     private val _modelImportRequest = MutableStateFlow(restorePendingModelImportRequest())
     internal val modelImportRequest = _modelImportRequest.asStateFlow()
@@ -69,11 +70,62 @@ class ChatAppViewModel(
         savedStateHandle.remove<Long>(MODEL_IMPORT_OPERATION_ID_KEY)
     }
 
-    private val _pendingGetReadyActivation = MutableStateFlow<Pair<String, String>?>(null)
+    private val _pendingGetReadyActivation = MutableStateFlow(restorePendingGetReadyActivation())
     val pendingGetReadyActivation = _pendingGetReadyActivation.asStateFlow()
 
+    private val _getReadySetupFailure = MutableStateFlow<String?>(null)
+    val getReadySetupFailure = _getReadySetupFailure.asStateFlow()
+
+    private val _getReadySetupRequestInFlight = MutableStateFlow(false)
+    val getReadySetupRequestInFlight = _getReadySetupRequestInFlight.asStateFlow()
+
     fun setPendingGetReadyActivation(value: Pair<String, String>?) {
+        if (value == null) {
+            clearPersistedPendingGetReadyActivation()
+        } else {
+            savedStateHandle[PENDING_GET_READY_MODEL_ID_KEY] = value.first
+            savedStateHandle[PENDING_GET_READY_VERSION_KEY] = value.second
+        }
         _pendingGetReadyActivation.value = value
+        if (value != null) {
+            _getReadySetupFailure.value = null
+        }
+    }
+
+    fun setGetReadySetupFailure(message: String?) {
+        _getReadySetupFailure.value = message?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    fun tryBeginGetReadySetupRequest(): Boolean {
+        return synchronized(getReadySetupRequestLock) {
+            if (_getReadySetupRequestInFlight.value) {
+                false
+            } else {
+                _getReadySetupRequestInFlight.value = true
+                true
+            }
+        }
+    }
+
+    fun finishGetReadySetupRequest() {
+        synchronized(getReadySetupRequestLock) {
+            _getReadySetupRequestInFlight.value = false
+        }
+    }
+
+    private fun restorePendingGetReadyActivation(): Pair<String, String>? {
+        val modelId = savedStateHandle.get<String>(PENDING_GET_READY_MODEL_ID_KEY)
+        val version = savedStateHandle.get<String>(PENDING_GET_READY_VERSION_KEY)
+        if (modelId.isNullOrBlank() || version.isNullOrBlank()) {
+            clearPersistedPendingGetReadyActivation()
+            return null
+        }
+        return modelId to version
+    }
+
+    private fun clearPersistedPendingGetReadyActivation() {
+        savedStateHandle.remove<String>(PENDING_GET_READY_MODEL_ID_KEY)
+        savedStateHandle.remove<String>(PENDING_GET_READY_VERSION_KEY)
     }
 
     private val _pendingMeteredWarningVersion = MutableStateFlow<ModelDistributionVersion?>(null)
@@ -116,5 +168,7 @@ class ChatAppViewModel(
         const val MODEL_IMPORT_MODEL_ID_KEY = "model_import_model_id"
         const val MODEL_IMPORT_OPERATION_ID_KEY = "model_import_operation_id"
         const val MODEL_IMPORT_SEQUENCE_KEY = "model_import_sequence"
+        const val PENDING_GET_READY_MODEL_ID_KEY = "pending_get_ready_model_id"
+        const val PENDING_GET_READY_VERSION_KEY = "pending_get_ready_version"
     }
 }

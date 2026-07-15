@@ -131,6 +131,7 @@ class DefaultMvpRuntimeFacadeTest {
             performanceConfig = performanceConfig,
             residencyPolicy = residencyPolicy,
             samplingOverrides = samplingOverrides,
+            memoryRetention = RuntimeMemoryRetention.EPHEMERAL,
         )
 
         facade.streamChat(request).toList()
@@ -146,6 +147,7 @@ class DefaultMvpRuntimeFacadeTest {
                 performanceConfig = performanceConfig,
                 residencyPolicy = residencyPolicy,
                 samplingOverrides = samplingOverrides,
+                memoryRetention = RuntimeMemoryRetention.EPHEMERAL,
             ),
             container.lastContext,
         )

@@ -75,4 +75,56 @@ class ChatAppViewModelTest {
         val restoredAfterImportStarted = ChatAppViewModel(savedStateHandle)
         assertNull(restoredAfterImportStarted.modelImportRequest.value)
     }
+
+    @Test
+    fun `pending get ready activation survives recreation and clear is durable`() {
+        val savedStateHandle = SavedStateHandle()
+        val original = ChatAppViewModel(savedStateHandle)
+
+        original.setPendingGetReadyActivation("demo-model" to "v1")
+
+        val restoredWhilePending = ChatAppViewModel(savedStateHandle)
+        assertEquals(
+            "demo-model" to "v1",
+            restoredWhilePending.pendingGetReadyActivation.value,
+        )
+
+        restoredWhilePending.setPendingGetReadyActivation(null)
+
+        val restoredAfterClear = ChatAppViewModel(savedStateHandle)
+        assertNull(restoredAfterClear.pendingGetReadyActivation.value)
+    }
+
+    @Test
+    fun `starting a new get ready attempt clears the previous setup failure`() {
+        val viewModel = ChatAppViewModel(SavedStateHandle())
+        viewModel.setGetReadySetupFailure("Not enough storage")
+
+        viewModel.setPendingGetReadyActivation("demo-model" to "v1")
+
+        assertNull(viewModel.getReadySetupFailure.value)
+    }
+
+    @Test
+    fun `get ready setup request admits only one immediate start`() {
+        val viewModel = ChatAppViewModel(SavedStateHandle())
+
+        assertTrue(viewModel.tryBeginGetReadySetupRequest())
+        assertFalse(viewModel.tryBeginGetReadySetupRequest())
+
+        viewModel.finishGetReadySetupRequest()
+
+        assertTrue(viewModel.tryBeginGetReadySetupRequest())
+    }
+
+    @Test
+    fun `incomplete restored get ready target is discarded`() {
+        val savedStateHandle = SavedStateHandle(
+            mapOf("pending_get_ready_model_id" to "demo-model"),
+        )
+
+        val viewModel = ChatAppViewModel(savedStateHandle)
+
+        assertNull(viewModel.pendingGetReadyActivation.value)
+    }
 }

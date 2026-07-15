@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_onboarding_setup_intro_body">PocketAgent needs one private AI model to answer. Start with the lightweight model selected for first chat.</string>
+    <string name="ui_onboarding_recommended_starter">Recommended starter model</string>
+    <string name="ui_onboarding_recommended_model_fallback">Recommended model</string>
+    <string name="ui_onboarding_model_summary">Private text chat • %1$s download</string>
+    <string name="ui_onboarding_model_summary_no_size">Private text chat • Runs on this device</string>
+    <string name="ui_onboarding_model_already_installed">Already on this device • Ready to start</string>
+    <string name="ui_onboarding_setup_preparing">Preparing download…</string>
+    <string name="ui_onboarding_setup_downloading">Downloading your AI</string>
+    <string name="ui_onboarding_setup_paused">Download paused</string>
+    <string name="ui_onboarding_setup_checking">Checking the download…</string>
+    <string name="ui_onboarding_setup_finishing">Finishing setup…</string>
+    <string name="ui_onboarding_setup_starting">Starting your AI…</string>
+    <string name="ui_onboarding_setup_ready">Your private AI is ready</string>
+    <string name="ui_onboarding_setup_attention">Setup needs attention</string>
+    <string name="ui_onboarding_download_bytes">%1$s of %2$s</string>
+    <string name="ui_onboarding_download_eta_minutes">About %1$d min left</string>
+    <string name="ui_onboarding_ready_body">Chats can now run privately on this device.</string>
+    <string name="ui_onboarding_download_and_start">Download &amp; start chatting</string>
+    <string name="ui_onboarding_use_and_start">Use model &amp; start chatting</string>
+    <string name="ui_onboarding_start_chatting">Start chatting</string>
+    <string name="ui_onboarding_review_setup">Review setup</string>
+    <string name="ui_onboarding_retry_setup">Try again</string>
+    <string name="ui_onboarding_continue_setup">Continue setup</string>
+    <string name="ui_onboarding_choose_another_model">Choose another model</string>
+    <string name="ui_onboarding_continue_in_background">Continue in background</string>
+    <string name="ui_onboarding_set_up_later">Set up later</string>
+</resources>

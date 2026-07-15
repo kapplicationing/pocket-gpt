@@ -1,3 +1,5 @@
+@file:Suppress("MaxLineLength")
+
 package com.pocketagent.android
 
 import android.content.Context
@@ -45,6 +47,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppRuntimeLifecycleCoordinatorTest {
@@ -86,6 +89,10 @@ class AppRuntimeLifecycleCoordinatorTest {
             assertEquals(requested, result.loadedModel)
             assertEquals(ModelLifecycleState.LOADED, lifecycle.value.state)
             assertEquals(requested, lifecycle.value.loadedModel)
+            assertTrue(
+                graph.provisioningStore.listInstalledVersions(modelId).single().isActive,
+                "Using an installed model must persist it as the active version before runtime load.",
+            )
         } finally {
             scope.cancel()
             MainThreadGuard.resetForTests()

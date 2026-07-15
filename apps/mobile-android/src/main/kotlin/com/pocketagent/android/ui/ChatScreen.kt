@@ -58,6 +58,7 @@ import com.pocketagent.android.ui.state.StreamingState
 import kotlinx.coroutines.launch
 
 @Composable
+@Suppress("LongParameterList")
 internal fun ChatScreenBody(
     runtime: RuntimeUiState,
     activeSession: ChatSessionUiModel?,
@@ -75,6 +76,8 @@ internal fun ChatScreenBody(
     onEditMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
     onCopiedToClipboard: () -> Unit,
+    speakingMessageId: String? = null,
+    onReadAloud: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -103,6 +106,8 @@ internal fun ChatScreenBody(
             onEditMessage = onEditMessage,
             onRegenerateMessage = onRegenerateMessage,
             onCopiedToClipboard = onCopiedToClipboard,
+            speakingMessageId = speakingMessageId,
+            onReadAloud = onReadAloud,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -112,6 +117,7 @@ internal fun ChatScreenBody(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod")
 private fun MessageList(
     activeSession: ChatSessionUiModel?,
     streaming: StreamingState,
@@ -121,6 +127,8 @@ private fun MessageList(
     onEditMessage: (String) -> Unit,
     onRegenerateMessage: (String) -> Unit,
     onCopiedToClipboard: () -> Unit,
+    speakingMessageId: String?,
+    onReadAloud: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val compactSpacing = PocketAgentDimensions.sectionSpacing / 2
@@ -257,6 +265,8 @@ private fun MessageList(
                         clipboardManager = clipboardManager,
                         isFirstInGroup = isFirstInGroup,
                         isLastInGroup = isLastInGroup,
+                        speakingMessageId = speakingMessageId,
+                        onReadAloud = onReadAloud,
                         modifier = bubbleModifier,
                     )
                 } else {
@@ -277,6 +287,8 @@ private fun MessageList(
                             clipboardManager = clipboardManager,
                             isFirstInGroup = isFirstInGroup,
                             isLastInGroup = isLastInGroup,
+                            speakingMessageId = speakingMessageId,
+                            onReadAloud = onReadAloud,
                             modifier = bubbleModifier,
                         )
                     }

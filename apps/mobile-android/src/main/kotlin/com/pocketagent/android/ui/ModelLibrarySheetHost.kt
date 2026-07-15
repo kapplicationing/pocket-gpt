@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
@@ -56,8 +57,12 @@ internal fun ModelLibrarySheetHost(
     } ?: return
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
-    val runtimeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var pendingRemoveVersion by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var selectedSection by rememberSaveable { mutableStateOf(ModelLibrarySection.MY_MODELS) }
+    var advancedSourcesExpanded by rememberSaveable { mutableStateOf(false) }
+    val runtimeSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+    )
 
     val sheetModifier = if (debugModelLibraryReadyTagEnabled) {
         Modifier.testTag("debug_model_library_ready")
@@ -69,6 +74,14 @@ internal fun ModelLibrarySheetHost(
         title = stringResource(id = R.string.ui_model_library_title),
         sheetState = runtimeSheetState,
         onDismiss = actions::dismissSheet,
+        onBack = {
+            resolveModelLibraryBackNavigation(
+                ModelLibraryNavigationState(selectedSection, advancedSourcesExpanded),
+            )?.let { nextState ->
+                selectedSection = nextState.selectedSection
+                advancedSourcesExpanded = nextState.advancedSourcesExpanded
+            } ?: actions.dismissSheet()
+        },
         modifier = sheetModifier,
     ) {
         if (debugModelLibraryReadyTagEnabled && !debugModelLibraryStatus.isNullOrBlank()) {
@@ -96,8 +109,19 @@ internal fun ModelLibrarySheetHost(
             modelLoadingState = modelLoadingState,
             routingMode = routingMode,
             presetBackingStore = presetBackingStore,
+            selectedSection = selectedSection,
+            advancedSourcesExpanded = advancedSourcesExpanded,
             modelImportRequestActive = modelImportRequestActive,
             hiddenVersionKeys = modelRemoveUndoState.hiddenVersionKeys,
+            onSectionSelected = { section ->
+                selectedSection = section
+                if (section != ModelLibrarySection.EXPLORE) {
+                    advancedSourcesExpanded = false
+                }
+            },
+            onAdvancedSourcesExpandedChanged = { expanded ->
+                advancedSourcesExpanded = expanded
+            },
             onEvent = { event ->
                 when (event) {
                     is ModelSheetEvent.ImportModel -> {
@@ -124,7 +148,9 @@ internal fun ModelLibrarySheetHost(
                     is ModelSheetEvent.OpenExternalUrl -> {
                         uriHandler.openUri(event.url)
                     }
-                    is ModelSheetEvent.DownloadVersion -> actions.downloadVersion(event.version)
+                    is ModelSheetEvent.DownloadVersion -> scope.launch {
+                        actions.downloadVersion(event.version)
+                    }
                     is ModelSheetEvent.PauseDownload -> scope.launch {
                         actions.pauseDownload(event.taskId)
                     }

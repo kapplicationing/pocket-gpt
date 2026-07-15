@@ -78,7 +78,7 @@ internal class ModelLibraryActions(
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_hf_recent_cleared))
     }
 
-    fun downloadVersion(version: ModelDistributionVersion) {
+    suspend fun downloadVersion(version: ModelDistributionVersion) {
         chatAppLaunchers.launchDownloadFlow(version)
     }
 
@@ -133,7 +133,12 @@ internal class ModelLibraryActions(
         modelId: String,
         version: String,
         closeOnSuccess: Boolean,
+        userInitiated: Boolean = true,
     ): RuntimeModelLifecycleCommandResult? {
+        if (userInitiated) {
+            appViewModel.setPendingGetReadyActivation(null)
+            appViewModel.setGetReadySetupFailure(null)
+        }
         val result = provisioningViewModel.loadModel(modelId = modelId, version = version)
         if (result == null) {
             showBusyModelOperationFeedback()
@@ -154,7 +159,14 @@ internal class ModelLibraryActions(
         return result
     }
 
-    suspend fun loadLastUsedModel(closeOnSuccess: Boolean): RuntimeModelLifecycleCommandResult? {
+    suspend fun loadLastUsedModel(
+        closeOnSuccess: Boolean,
+        userInitiated: Boolean = true,
+    ): RuntimeModelLifecycleCommandResult? {
+        if (userInitiated) {
+            appViewModel.setPendingGetReadyActivation(null)
+            appViewModel.setGetReadySetupFailure(null)
+        }
         val result = provisioningViewModel.loadLastUsedModel()
         if (result == null) {
             showBusyModelOperationFeedback()
@@ -207,7 +219,7 @@ internal class ModelLibraryActions(
         )
     }
 
-    suspend fun runGetReadyFlow() {
+    suspend fun runGetReadyFlow(openModelLibraryOnDownload: Boolean = true) {
         viewModel.onGetReadyTapped()
         provisioningViewModel.setStatusMessage(context.getString(R.string.ui_get_ready_started_status))
         provisioningViewModel.refreshManifest()
@@ -217,12 +229,16 @@ internal class ModelLibraryActions(
             defaultModelId = defaultGetReadyModelId,
         )
         if (defaultVersion == null) {
-            provisioningViewModel.setStatusMessage(
-                context.getString(R.string.ui_model_downloads_manifest_empty),
-            )
-            viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+            val message = context.getString(R.string.ui_model_downloads_manifest_empty)
+            provisioningViewModel.setStatusMessage(message)
+            appViewModel.setGetReadySetupFailure(message)
+            if (openModelLibraryOnDownload) {
+                viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+            }
             return
         }
+
+        appViewModel.setPendingGetReadyActivation(defaultVersion.modelId to defaultVersion.version)
 
         val existingVersion = provisioningViewModel.listInstalledVersionsAsync(
             modelId = defaultVersion.modelId,
@@ -234,25 +250,50 @@ internal class ModelLibraryActions(
                 version = defaultVersion.version,
             )
             if (!activationResult.changed) {
-                provisioningViewModel.setStatusMessage(
-                    provisioningMutationFailureMessage(
-                        result = activationResult,
-                        fallbackMessage = context.getString(R.string.ui_model_version_activation_failed),
-                    ),
+                val message = provisioningMutationFailureMessage(
+                    result = activationResult,
+                    fallbackMessage = context.getString(R.string.ui_model_version_activation_failed),
                 )
+                provisioningViewModel.setStatusMessage(message)
+                appViewModel.setGetReadySetupFailure(message)
+                if (openModelLibraryOnDownload) {
+                    viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+                }
                 return
             }
-            loadModelVersion(
+            val loadResult = loadModelVersion(
                 modelId = defaultVersion.modelId,
                 version = defaultVersion.version,
                 closeOnSuccess = false,
+                userInitiated = false,
             )
+            if (loadResult == null) {
+                val message = context.getString(R.string.ui_model_operation_already_in_progress)
+                provisioningViewModel.setStatusMessage(message)
+                appViewModel.setGetReadySetupFailure(message)
+                if (openModelLibraryOnDownload) {
+                    viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+                }
+            } else if (!loadResult.success) {
+                appViewModel.setGetReadySetupFailure(
+                    lifecycleStatusMessage(
+                        context = context,
+                        result = loadResult,
+                        fallbackModelId = defaultVersion.modelId,
+                        fallbackVersion = defaultVersion.version,
+                    ),
+                )
+                if (openModelLibraryOnDownload) {
+                    viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+                }
+            }
             return
         }
 
-        appViewModel.setPendingGetReadyActivation(defaultVersion.modelId to defaultVersion.version)
         chatAppLaunchers.launchDownloadFlow(defaultVersion)
-        viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+        if (openModelLibraryOnDownload) {
+            viewModel.showSurface(com.pocketagent.android.ui.state.ModalSurface.ModelLibrary)
+        }
     }
 
     suspend fun removeVersion(modelId: String, version: String) {

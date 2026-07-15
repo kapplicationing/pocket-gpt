@@ -779,6 +779,42 @@ class PerformanceContractAuditTest {
         )
     }
 
+    @Test
+    fun `streaming hot path never copies the full response for each delta`() {
+        val facade = resolveRepoSource(
+            "packages/app-runtime/src/commonMain/kotlin/com/pocketagent/runtime/MvpRuntimeFacade.kt",
+        ).readText()
+        val deltaContract = facade.substringAfter("data class Delta(")
+            .substringBefore(") : ChatStreamEvent")
+        val streamChat = facade.substringAfter("override fun streamChat(")
+            .substringBefore("override fun cancelGeneration(")
+        val executor = resolveRepoSource(
+            "packages/app-runtime/src/commonMain/kotlin/com/pocketagent/runtime/InferenceExecutor.kt",
+        ).readText()
+        val reducer = resolveAppSource(
+            "src/main/kotlin/com/pocketagent/android/ui/state/StreamStateReducer.kt",
+        ).readText()
+        val reduceDelta = reducer.substringAfter("private fun reduceDelta(")
+            .substringBefore("fun onFailure(")
+
+        assertTrue(
+            "accumulatedText" !in deltaContract,
+            "ChatStreamEvent.Delta must carry delta-only text; a full accumulated prefix makes streaming O(n^2).",
+        )
+        assertTrue(
+            "textBuilder.toString()" !in streamChat,
+            "DefaultMvpRuntimeFacade must not materialize the full response for every emitted token.",
+        )
+        assertTrue(
+            "val projected = streamedText.toString()" !in executor,
+            "InferenceExecutor stop matching must inspect a bounded suffix without copying the full response per token.",
+        )
+        assertTrue(
+            "textAccumulator.append(delta.text)" in reduceDelta && "snapshotText()" !in reduceDelta,
+            "StreamStateReducer must append deltas to its amortized buffer without materializing the response per event.",
+        )
+    }
+
     private fun stabilityConfigClasses(): Set<String> {
         val file = listOf(
             File("compose-stability.conf"),

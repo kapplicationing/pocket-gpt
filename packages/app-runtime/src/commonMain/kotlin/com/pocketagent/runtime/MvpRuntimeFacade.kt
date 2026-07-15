@@ -39,6 +39,7 @@ data class StreamChatRequestV2(
     val performanceConfig: PerformanceRuntimeConfig = PerformanceRuntimeConfig.default(),
     val residencyPolicy: ModelResidencyPolicy = ModelResidencyPolicy(),
     val samplingOverrides: SamplingOverrides? = null,
+    val memoryRetention: RuntimeMemoryRetention = RuntimeMemoryRetention.RETAIN,
 )
 
 enum class ChatStreamPhase {
@@ -371,6 +372,7 @@ class DefaultMvpRuntimeFacade(
                         performanceConfig = request.performanceConfig,
                         residencyPolicy = request.residencyPolicy,
                         samplingOverrides = request.samplingOverrides,
+                        memoryRetention = request.memoryRetention,
                     ),
                     onToken = { token ->
                         if (firstTokenMs == null) {

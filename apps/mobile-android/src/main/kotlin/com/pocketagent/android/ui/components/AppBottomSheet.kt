@@ -1,5 +1,8 @@
 package com.pocketagent.android.ui.components
 
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.activity.findViewTreeOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -17,12 +20,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -31,10 +37,12 @@ import com.pocketagent.android.ui.theme.PocketAgentDimensions
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
+@Suppress("FunctionName", "ktlint:standard:function-naming")
 fun AppBottomSheet(
     title: String,
     sheetState: SheetState,
     onDismiss: () -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -42,19 +50,26 @@ fun AppBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         modifier = modifier.semantics { testTagsAsResourceId = true },
+        properties =
+            ModalBottomSheetProperties(
+                shouldDismissOnBackPress = onBack == null,
+            ),
     ) {
+        onBack?.let { appBottomSheetBackHandler(onBack = it) }
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        horizontal = PocketAgentDimensions.sheetHorizontalPadding,
-                        vertical = PocketAgentDimensions.screenPadding,
-                    ),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = PocketAgentDimensions.sheetHorizontalPadding,
+                            vertical = PocketAgentDimensions.screenPadding,
+                        ),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -72,5 +87,19 @@ fun AppBottomSheet(
             HorizontalDivider()
             content()
         }
+    }
+}
+
+@Composable
+private fun appBottomSheetBackHandler(onBack: () -> Unit) {
+    val dialogBackDispatcherOwner = LocalView.current.findViewTreeOnBackPressedDispatcherOwner()
+    if (dialogBackDispatcherOwner == null) {
+        BackHandler(onBack = onBack)
+        return
+    }
+    CompositionLocalProvider(
+        LocalOnBackPressedDispatcherOwner provides dialogBackDispatcherOwner,
+    ) {
+        BackHandler(onBack = onBack)
     }
 }

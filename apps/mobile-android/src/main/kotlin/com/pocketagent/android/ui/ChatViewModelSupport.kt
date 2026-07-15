@@ -31,6 +31,7 @@ internal const val GPU_PROBE_REFRESH_INTERVAL_MS = 700L
 internal const val STREAM_UI_UPDATE_MIN_INTERVAL_MS = 80L
 internal const val TELEMETRY_EVENT_SIMPLE_FIRST_ENTERED = "simple_first_entered"
 internal const val TELEMETRY_EVENT_GET_READY_STARTED = "get_ready_started"
+internal const val TELEMETRY_EVENT_GET_READY_COMPLETED = "get_ready_completed"
 internal const val TELEMETRY_EVENT_FIRST_ANSWER_COMPLETED = "first_answer_completed"
 internal const val TELEMETRY_EVENT_FOLLOW_UP_COMPLETED = "follow_up_completed"
 internal const val TELEMETRY_EVENT_ADVANCED_UNLOCKED = "advanced_unlocked"
